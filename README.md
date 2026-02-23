@@ -1,6 +1,6 @@
-# wa 사용자 가이드
+# WTF 사용자 가이드
 
-`wa`는 macOS용 시나리오/스토리 카드 작성 앱입니다. 카드 트리(부모-자식) 구조로 이야기를 관리하고, 히스토리 스냅샷, AI 보조(Gemini), 음성 받아쓰기(Whisper), PDF/텍스트 내보내기를 제공합니다.
+`WTF`는 macOS용 시나리오/스토리 카드 작성 앱입니다. 카드 트리(부모-자식) 구조로 이야기를 관리하고, 히스토리 스냅샷, AI 보조(Gemini), 음성 받아쓰기(Whisper), PDF/텍스트 내보내기를 제공합니다.
 
 ## 1) 앱이 하는 일
 
@@ -13,26 +13,9 @@
 
 ## 2) 시스템 요구사항
 
-- macOS + Xcode 환경에서 빌드/실행
-- Swift 5.0 (`wa.xcodeproj/project.pbxproj`)
-- 프로젝트 타겟/스킴: `wa`
-- 배포 타겟: `MACOSX_DEPLOYMENT_TARGET = 26.2` (프로젝트 설정값 기준)
-
-## 3) 실행 방법
-
-### Xcode로 실행
-
-1. `wa.xcodeproj`를 Xcode에서 엽니다.
-2. Scheme을 `wa`로 선택합니다.
-3. Run (`Cmd + R`)으로 앱을 실행합니다.
-
-### CLI로 빌드 확인
-
-```bash
-xcodebuild -project "wa.xcodeproj" -scheme "wa" -configuration Debug build
-```
-
-## 4) 첫 실행: 작업 파일(.wtf) 선택
+- macOS
+  
+## 3) 첫 실행: 작업 파일(.wtf) 선택
 
 앱은 시나리오 저장소를 `.wtf` 패키지 파일로 관리합니다.
 
@@ -41,16 +24,16 @@ xcodebuild -project "wa.xcodeproj" -scheme "wa" -configuration Debug build
 
 선택한 경로는 보안 북마크(Security-Scoped Bookmark)로 저장되어 다음 실행 때 자동 복원됩니다.
 
-## 5) 기본 사용 흐름
+## 4) 기본 사용 흐름
 
-### 5-1. 시나리오 만들기
+### 4-1. 시나리오 만들기
 
 - 좌측 사이드바에서 `새 시나리오 추가`
 - 생성 방식
   - `클린 시나리오`
   - `템플릿에서 생성`
 
-### 5-2. 카드 편집
+### 4-2. 카드 편집
 
 - `Return`: 선택 카드 편집 시작
 - `Tab`: 자식 카드 추가
@@ -58,26 +41,26 @@ xcodebuild -project "wa.xcodeproj" -scheme "wa" -configuration Debug build
 - `Cmd + Right`: 자식 카드 추가
 - 드래그 앤 드롭으로 카드 이동
 
-### 5-3. 집중 모드
+### 4-3. 집중 모드
 
 - `Cmd + Shift + F`: 집중 모드 토글
 - 집중 모드에서 카드 간 키보드 이동/편집 가능
 - `Cmd + Shift + T`: 타이프라이터 모드 토글
 
-### 5-4. 히스토리/체크포인트
+### 4-4. 히스토리/체크포인트
 
 - 상단 `깃발` 버튼: 이름 있는 분기점(체크포인트) 생성
 - 상단 `히스토리` 버튼: 타임라인 열기
 - 이전 상태 미리보기 후 해당 시점으로 복구 가능
 
-### 5-5. AI 보조 (Gemini)
+### 4-5. AI 보조 (Gemini)
 
 - 타임라인 패널에서 AI 액션 실행
   - 구체화, 다음 장면, 대안, 요약
 - 후보 카드 생성 후 원하는 후보를 선택해 반영
 - API 키는 설정 창에서 Keychain에 저장/삭제
 
-### 5-6. 받아쓰기 (Whisper)
+### 4-6. 받아쓰기 (Whisper)
 
 - 마이크 버튼으로 받아쓰기 시작/종료
 - 처리 완료 시
@@ -85,7 +68,7 @@ xcodebuild -project "wa.xcodeproj" -scheme "wa" -configuration Debug build
   - `받아쓰기 요약` 카드
   가 부모 카드 아래에 자동 생성
 
-### 5-7. 출력
+### 4-7. 출력
 
 - 타임라인 패널의 `출력` 메뉴
   - 클립보드 복사
@@ -93,7 +76,7 @@ xcodebuild -project "wa.xcodeproj" -scheme "wa" -configuration Debug build
   - 중앙정렬식 PDF 저장
   - 한국식 PDF 저장
 
-## 6) 주요 단축키
+## 5) 주요 단축키
 
 아래는 앱 내 단축키 도움말에 정의된 핵심 조합입니다.
 
