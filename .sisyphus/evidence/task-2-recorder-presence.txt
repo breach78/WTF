@@ -1,5 +1,0 @@
-wa/WriterViews.swift
-wa/waApp.swift
-wa/WriterCardViews.swift
-wa/WriterFocusMode.swift
-wa/FocusMonitor.swift

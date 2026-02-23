@@ -1,2 +1,0 @@
-inactive_inflation_path_removed=PASS
-observed_merge_still_present=PASS

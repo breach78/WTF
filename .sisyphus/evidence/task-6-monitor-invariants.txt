@@ -1,3 +1,0 @@
-has_monitor_smoke_hook=PASS
-has_monitor_ok_token=PASS
-has_layout_smoke_hook=PASS

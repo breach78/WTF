@@ -1,2 +1,0 @@
-scroll_end_path_present=PASS
-caret_ensure_still_present=PASS

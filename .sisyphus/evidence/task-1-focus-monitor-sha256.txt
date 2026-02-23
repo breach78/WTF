@@ -1,5 +1,0 @@
-dfdfe0b976025b3a89f1dd38511175f425e2b70772f39420ae073a048bbda460  .sisyphus/evidence/baseline-focus-monitor/WriterCardViews.swift
-96aa9b6d02da882abec705d9d0309e6a7cc38d6a6e37bf9091f1e56a173f4cbf  .sisyphus/evidence/baseline-focus-monitor/WriterFocusMode.swift
-5ba5e933d924500f58d8d7d162d8467245bd913803fa928fc004a579c4fa6542  .sisyphus/evidence/baseline-focus-monitor/WriterSharedTypes.swift
-c5e33947a0e2c9b341d7582c5fd6882fad64514a18c6d14e45f619f4f129f66a  .sisyphus/evidence/baseline-focus-monitor/WriterViews.swift
-4685254eb22b2186e0fe071ae6125bd69395ac974771d3ba210d65a58b87ca07  .sisyphus/evidence/baseline-focus-monitor/waApp.swift

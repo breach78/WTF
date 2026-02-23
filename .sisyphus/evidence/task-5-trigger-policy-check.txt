@@ -1,3 +1,0 @@
-has_scroll_end_trigger=PASS
-has_caret_ensure_flow=PASS
-has_burst_scheduler=PASS

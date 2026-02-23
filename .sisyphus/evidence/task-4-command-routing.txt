@@ -1,4 +1,0 @@
-has_monitor_command=PASS
-has_undo_command=PASS
-has_redo_command=PASS
-has_focus_toggle_command=PASS
