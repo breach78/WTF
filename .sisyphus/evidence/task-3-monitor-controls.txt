@@ -1,0 +1,3 @@
+has_start_stop=PASS
+has_clear=PASS
+has_copy=PASS

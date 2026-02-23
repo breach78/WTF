@@ -1,0 +1,1170 @@
+import SwiftUI
+
+struct AIChatMessage: Identifiable {
+    let id = UUID()
+    let role: String // "user" or "model"
+    let text: String
+}
+
+extension ScenarioWriterView {
+
+    // MARK: - AI Chat View
+
+    @ViewBuilder
+    var aiChatView: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("AI 시나리오 상담")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundStyle(appearance == "light" ? .black.opacity(0.7) : .white.opacity(0.8))
+                Spacer()
+                Button {
+                    aiChatMessages.removeAll()
+                } label: {
+                    Image(systemName: "trash")
+                        .font(.system(size: 14))
+                        .foregroundColor(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("대화 기록 지우기")
+                
+                Button {
+                    toggleAIChat()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 14))
+                        .foregroundColor(.secondary)
+                }
+                .buttonStyle(.plain)
+                .padding(.leading, 12)
+            }
+            .padding(18)
+            
+            Divider().background(appearance == "light" ? Color.black.opacity(0.1) : Color.white.opacity(0.15))
+            
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(spacing: 20) {
+                        if aiChatMessages.isEmpty {
+                            VStack(spacing: 14) {
+                                Image(systemName: "sparkles.tv")
+                                    .font(.system(size: 40))
+                                    .foregroundColor(.accentColor.opacity(0.6))
+                                Text("AI에게 현재 시나리오에 대해 물어보세요.")
+                                    .font(.system(size: 16))
+                                    .foregroundColor(.secondary)
+                                Text("예: 이 이야기의 결말을 어떻게 내면 좋을까?")
+                                    .font(.system(size: 13))
+                                    .foregroundColor(.secondary.opacity(0.8))
+                            }
+                            .padding(.top, 70)
+                        } else {
+                            ForEach(aiChatMessages) { msg in
+                                HStack {
+                                    if msg.role == "user" {
+                                        Spacer(minLength: 50)
+                                        Text(msg.text)
+                                            .font(.system(size: 15))
+                                            .padding(14)
+                                            .background(Color.accentColor.opacity(0.85))
+                                            .foregroundColor(.white)
+                                            .cornerRadius(14)
+                                            .textSelection(.enabled)
+                                    } else {
+                                        VStack(alignment: .leading, spacing: 5) {
+                                            Text("AI")
+                                                .font(.system(size: 12, weight: .bold))
+                                                .foregroundColor(.secondary)
+                                            Text(msg.text)
+                                                .font(.system(size: 15))
+                                                .lineSpacing(3)
+                                                .padding(14)
+                                                .background(appearance == "light" ? Color.black.opacity(0.05) : Color.white.opacity(0.08))
+                                                .cornerRadius(14)
+                                                .textSelection(.enabled)
+                                        }
+                                        Spacer(minLength: 50)
+                                    }
+                                }
+                                .id(msg.id)
+                            }
+                            
+                            if isAIChatLoading {
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 5) {
+                                        Text("AI")
+                                            .font(.system(size: 12, weight: .bold))
+                                            .foregroundColor(.secondary)
+                                        ProgressView()
+                                            .controlSize(.regular)
+                                            .padding(14)
+                                            .background(appearance == "light" ? Color.black.opacity(0.05) : Color.white.opacity(0.08))
+                                            .cornerRadius(14)
+                                    }
+                                    Spacer()
+                                }
+                                .id("loading")
+                            }
+                        }
+                    }
+                    .padding(18)
+                }
+                .onChange(of: aiChatMessages.count) { _, _ in
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                        withAnimation {
+                            proxy.scrollTo(aiChatMessages.last?.id, anchor: .bottom)
+                        }
+                    }
+                }
+                .onChange(of: isAIChatLoading) { _, isLoading in
+                    if isLoading {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                            withAnimation {
+                                proxy.scrollTo("loading", anchor: .bottom)
+                            }
+                        }
+                    }
+                }
+            }
+            
+            Divider().background(appearance == "light" ? Color.black.opacity(0.1) : Color.white.opacity(0.15))
+            
+            VStack(spacing: 10) {
+                if let message = aiStatusMessage, aiStatusIsError {
+                    Text(message)
+                        .font(.system(size: 13))
+                        .foregroundColor(.red)
+                        .lineLimit(2)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                
+                HStack(alignment: .bottom, spacing: 10) {
+                    if #available(macOS 13.0, *) {
+                        TextField("AI에게 질문하기...", text: $aiChatInput, axis: .vertical)
+                            .textFieldStyle(.plain)
+                            .font(.system(size: 15))
+                            .lineLimit(1...6)
+                            .padding(12)
+                            .background(appearance == "light" ? Color.black.opacity(0.03) : Color.white.opacity(0.05))
+                            .cornerRadius(10)
+                            .focused($isAIChatInputFocused)
+                            .onSubmit {
+                                sendAIChatMessage()
+                            }
+                    } else {
+                        TextField("AI에게 질문하기...", text: $aiChatInput)
+                            .textFieldStyle(.plain)
+                            .font(.system(size: 15))
+                            .padding(12)
+                            .background(appearance == "light" ? Color.black.opacity(0.03) : Color.white.opacity(0.05))
+                            .cornerRadius(10)
+                            .focused($isAIChatInputFocused)
+                            .onSubmit {
+                                sendAIChatMessage()
+                            }
+                    }
+                        
+                    Button(action: {
+                        sendAIChatMessage()
+                    }) {
+                        Image(systemName: "arrow.up.circle.fill")
+                            .font(.system(size: 28))
+                            .foregroundColor(aiChatInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isAIChatLoading ? .secondary.opacity(0.5) : .accentColor)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(aiChatInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isAIChatLoading)
+                    .padding(.bottom, 5)
+                }
+            }
+            .padding(14)
+            .background(appearance == "light" ? Color.white : Color(white: 0.12))
+        }
+        .onAppear {
+            isAIChatInputFocused = true
+        }
+    }
+
+    func sendAIChatMessage() {
+        let text = aiChatInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, !isAIChatLoading else { return }
+        
+        aiChatInput = ""
+        aiChatMessages.append(AIChatMessage(role: "user", text: text))
+        
+        requestAIChatResponse(userText: text)
+    }
+
+    func requestAIChatResponse(userText: String) {
+        let allCards = scenario.cards.filter { !$0.isArchived && !$0.isFloating }.sorted {
+            if $0.orderIndex != $1.orderIndex { return $0.orderIndex < $1.orderIndex }
+            return $0.createdAt < $1.createdAt
+        }
+        
+        var contextStr = ""
+        for card in allCards {
+            contextStr += "[\(card.category ?? "미분류")] \(card.content)\n"
+        }
+        
+        let clampedContext = clampedAIText(contextStr, maxLength: 10000, preserveLineBreak: true)
+        
+        var chatHistory = ""
+        for msg in aiChatMessages {
+            let roleName = msg.role == "user" ? "사용자" : "AI"
+            chatHistory += "\(roleName): \(msg.text)\n\n"
+        }
+        
+        let prompt = """
+        당신은 이 시나리오를 함께 쓰는 전문 보조 작가다. 
+        아래는 현재 메인 작업창에 존재하는 모든 시나리오 카드들(플롯 및 노트 라인)의 내용이다.
+        이 맥락을 완벽하게 숙지하고 사용자의 질문에 답해야 한다.
+        
+        [현재 시나리오 내용 시작]
+        \(clampedContext)
+        [현재 시나리오 내용 끝]
+        
+        [지금까지의 대화 기록]
+        \(chatHistory)
+        
+        위 시나리오 맥락과 지금까지의 대화를 바탕으로, 사용자의 마지막 질문에 한국어로 친절하게 답변하라. 
+        마크다운을 적절히 사용하여 가독성 있게 작성하라. JSON 형식을 사용하지 말고 순수 텍스트(마크다운 포함)로만 출력할 것.
+        """
+        
+        isAIChatLoading = true
+        setAIStatus(nil)
+        
+        Task { @MainActor in
+            do {
+                guard let apiKey = try KeychainStore.loadGeminiAPIKey() else {
+                    throw GeminiServiceError.missingAPIKey
+                }
+                
+                let response = try await GeminiService.generateText(
+                    prompt: prompt,
+                    model: currentGeminiModel(),
+                    apiKey: apiKey
+                )
+                
+                aiChatMessages.append(AIChatMessage(role: "model", text: response))
+            } catch {
+                setAIStatusError(error.localizedDescription)
+                aiChatMessages.append(AIChatMessage(role: "model", text: "오류가 발생했습니다: \(error.localizedDescription)"))
+            }
+            isAIChatLoading = false
+        }
+    }
+
+    // MARK: - Timeline AI Controls
+
+    @ViewBuilder
+    var aiTimelineActionPanel: some View {
+        let noActiveCard = activeCardID == nil
+        let activeCard = activeCardID.flatMap { findCard(by: $0) }
+        let isPlotLineActive = activeCard?.category == "플롯"
+        VStack(alignment: .leading, spacing: 10) {
+            Text("AI 카드 도우미")
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(appearance == "light" ? .black.opacity(0.55) : .white.opacity(0.72))
+
+            HStack(spacing: 8) {
+                aiActionButton(title: AICardAction.elaborate.title, disabled: noActiveCard || !isPlotLineActive) {
+                    openAIOptionsSheet(for: .elaborate)
+                }
+                aiActionButton(title: AICardAction.nextScene.title, disabled: noActiveCard || !isPlotLineActive) {
+                    openAIOptionsSheet(for: .nextScene)
+                }
+                aiActionButton(title: AICardAction.alternative.title, disabled: noActiveCard || !isPlotLineActive) {
+                    openAIOptionsSheet(for: .alternative)
+                }
+                aiActionButton(title: AICardAction.summary.title, disabled: noActiveCard) {
+                    requestAISummaryCandidate()
+                }
+                aiActionButton(
+                    title: "선택",
+                    prominent: true,
+                    disabled: !canApplyAICandidateSelection
+                ) {
+                    applySelectedAICandidateToParent()
+                }
+            }
+
+            if !noActiveCard && !isPlotLineActive {
+                Text("구체화/다음 장면/대안은 플롯 카드에서만 사용할 수 있습니다.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
+
+            if aiIsGenerating {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("AI가 후보를 생성하고 있습니다...")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                }
+            } else if let message = aiStatusMessage {
+                Text(message)
+                    .font(.system(size: 11))
+                    .foregroundStyle(aiStatusIsError ? Color.red : Color.secondary)
+                    .lineLimit(2)
+            }
+        }
+        .padding(12)
+        .background(appearance == "light" ? Color.black.opacity(0.04) : Color.white.opacity(0.06))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(appearance == "light" ? Color.black.opacity(0.10) : Color.white.opacity(0.12), lineWidth: 1)
+        )
+        .cornerRadius(8)
+        .padding([.horizontal, .top], 12)
+    }
+
+    @ViewBuilder
+    func aiActionButton(
+        title: String,
+        prominent: Bool = false,
+        disabled: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
+        if prominent {
+            Button(action: action) {
+                Text(title)
+                    .font(.system(size: 12, weight: .semibold))
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+            .disabled(disabled || aiIsGenerating || dictationIsProcessing || dictationIsRecording)
+        } else {
+            Button(action: action) {
+                Text(title)
+                    .font(.system(size: 12, weight: .semibold))
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .disabled(disabled || aiIsGenerating || dictationIsProcessing || dictationIsRecording)
+        }
+    }
+
+    func aiOptionsSheet(action: AICardAction) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text(action.sheetTitle)
+                .font(.system(size: 18, weight: .bold))
+
+            Text("원하는 방향을 1개 이상 선택하면 해당 성향을 반영한 5개 후보를 만듭니다.")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(AIGenerationOption.allCases) { option in
+                        Toggle(isOn: aiGenerationOptionBinding(for: option)) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(option.title)
+                                    .font(.system(size: 13, weight: .semibold))
+                                Text(option.shortDescription)
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .toggleStyle(.checkbox)
+                    }
+                }
+                .padding(12)
+                .background(Color.secondary.opacity(0.08))
+                .cornerRadius(8)
+            }
+
+            HStack(spacing: 10) {
+                Button("취소", role: .cancel) {
+                    aiOptionsSheetAction = nil
+                }
+                Spacer()
+                Button("생성") {
+                    let selected = aiSelectedGenerationOptions
+                    aiOptionsSheetAction = nil
+                    requestAICandidates(action: action, selectedOptions: selected)
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(aiIsGenerating)
+            }
+        }
+        .padding(20)
+        .frame(width: 520, height: 560)
+    }
+
+    var canApplyAICandidateSelection: Bool {
+        selectedAICandidateCard() != nil
+    }
+
+    func openAIOptionsSheet(for action: AICardAction) {
+        guard activeCardID != nil else {
+            setAIStatusError("먼저 카드 하나를 선택해 주세요.")
+            return
+        }
+        if aiSelectedGenerationOptions.isEmpty {
+            aiSelectedGenerationOptions = [.balanced]
+        }
+        aiOptionsSheetAction = action
+    }
+
+    func aiGenerationOptionBinding(for option: AIGenerationOption) -> Binding<Bool> {
+        Binding(
+            get: { aiSelectedGenerationOptions.contains(option) },
+            set: { isOn in
+                if isOn {
+                    aiSelectedGenerationOptions.insert(option)
+                } else {
+                    aiSelectedGenerationOptions.remove(option)
+                    if aiSelectedGenerationOptions.isEmpty {
+                        aiSelectedGenerationOptions.insert(.balanced)
+                    }
+                }
+            }
+        )
+    }
+
+    // MARK: - AI Generation Actions
+
+    func requestAICandidates(action: AICardAction, selectedOptions: Set<AIGenerationOption>) {
+        finishEditing()
+        pruneAICandidateTracking()
+
+        guard let parentID = activeCardID,
+              let parentCard = findCard(by: parentID) else {
+            setAIStatusError("활성 카드가 없어 AI 제안을 만들 수 없습니다.")
+            return
+        }
+        guard parentCard.category == "플롯" else {
+            setAIStatusError("구체화/다음 장면/대안은 플롯 카드에서만 사용할 수 있습니다.")
+            return
+        }
+
+        let options = selectedOptions.isEmpty ? Set([AIGenerationOption.balanced]) : selectedOptions
+        let prompt = buildAIPrompt(for: parentCard, action: action, options: options)
+        let resolvedModel = currentGeminiModel()
+
+        aiIsGenerating = true
+        setAIStatus("\(action.summaryLabel)을 생성하는 중입니다...")
+
+        Task { @MainActor in
+            do {
+                guard let apiKey = try KeychainStore.loadGeminiAPIKey() else {
+                    throw GeminiServiceError.missingAPIKey
+                }
+                let suggestions = try await GeminiService.generateSuggestions(
+                    prompt: prompt,
+                    model: resolvedModel,
+                    apiKey: apiKey
+                )
+                applyAICandidates(
+                    suggestions: suggestions,
+                    parentID: parentID,
+                    action: action
+                )
+            } catch {
+                setAIStatusError(error.localizedDescription)
+            }
+            aiIsGenerating = false
+        }
+    }
+
+    func requestAISummaryCandidate() {
+        finishEditing()
+        pruneAICandidateTracking()
+
+        guard let parentID = activeCardID,
+              let parentCard = findCard(by: parentID) else {
+            setAIStatusError("활성 카드가 없어 요약을 만들 수 없습니다.")
+            return
+        }
+
+        let prompt = buildAISummaryPrompt(for: parentCard)
+        let resolvedModel = currentGeminiModel()
+
+        aiIsGenerating = true
+        setAIStatus("요약 제안을 생성하는 중입니다...")
+
+        Task { @MainActor in
+            do {
+                guard let apiKey = try KeychainStore.loadGeminiAPIKey() else {
+                    throw GeminiServiceError.missingAPIKey
+                }
+                let summaryText = try await GeminiService.generateText(
+                    prompt: prompt,
+                    model: resolvedModel,
+                    apiKey: apiKey
+                )
+                let normalized = summaryText.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !normalized.isEmpty else {
+                    throw GeminiServiceError.invalidResponse
+                }
+                let suggestion = GeminiSuggestion(title: "", content: normalized, rationale: nil)
+                applyAICandidates(
+                    suggestions: [suggestion],
+                    parentID: parentID,
+                    action: .summary
+                )
+            } catch {
+                setAIStatusError(error.localizedDescription)
+            }
+            aiIsGenerating = false
+        }
+    }
+
+    func applyAICandidates(
+        suggestions: [GeminiSuggestion],
+        parentID: UUID,
+        action: AICardAction
+    ) {
+        guard let parent = findCard(by: parentID) else {
+            setAIStatusError("원본 카드가 사라져 제안을 반영할 수 없습니다.")
+            return
+        }
+
+        if !aiCandidateCardIDs.isEmpty {
+            for candidateID in aiCandidateCardIDs {
+                findCard(by: candidateID)?.isAICandidate = false
+            }
+        }
+        clearStaleAICandidateVisualFlags()
+
+        let prevState = captureScenarioState()
+        var newIDs: [UUID] = []
+        var nextOrderIndex = parent.children.count
+        let maxCount = action == .summary ? 1 : 5
+        for (offset, suggestion) in suggestions.prefix(maxCount).enumerated() {
+            let normalized = normalizedAICandidateContent(from: suggestion)
+            guard !normalized.isEmpty else { continue }
+            let card = SceneCard(
+                content: normalized,
+                orderIndex: nextOrderIndex,
+                parent: parent,
+                scenario: scenario,
+                category: parent.category,
+                colorHex: aiCandidateTintHex(for: offset)
+            )
+            card.isAICandidate = true
+            scenario.cards.append(card)
+            newIDs.append(card.id)
+            nextOrderIndex += 1
+        }
+
+        guard !newIDs.isEmpty else {
+            setAIStatusError("생성된 후보 내용이 비어 있어 카드를 만들지 못했습니다.")
+            return
+        }
+
+        scenario.bumpCardsVersion()
+        store.saveAll()
+        takeSnapshot(force: true)
+        pushUndoState(prevState, actionName: "AI \(action.title)")
+
+        aiCandidateParentID = parent.id
+        aiCandidateCardIDs = newIDs
+        aiCandidateAction = action
+
+        if let firstID = newIDs.first,
+           let firstCard = findCard(by: firstID) {
+            selectedCardIDs = [firstID]
+            changeActiveCard(to: firstCard)
+        }
+
+        let createdCount = newIDs.count
+        if action == .summary {
+            setAIStatus("요약 후보 1개를 만들었습니다. 선택 후 '선택'을 누르면 부모 카드가 대체됩니다.")
+        } else {
+            setAIStatus("\(action.summaryLabel) \(createdCount)개를 만들었습니다. 마음에 드는 카드를 선택하고 '선택'을 누르세요.")
+        }
+    }
+
+    func applySelectedAICandidateToParent() {
+        finishEditing()
+        pruneAICandidateTracking()
+
+        guard let parentID = aiCandidateParentID,
+              let parentCard = findCard(by: parentID) else {
+            setAIStatusError("적용할 AI 후보 그룹이 없습니다.")
+            return
+        }
+        guard let action = aiCandidateAction else {
+            setAIStatusError("AI 후보 작업 타입을 확인할 수 확인 할 수 없습니다. 다시 생성해 주세요.")
+            return
+        }
+        guard let selectedCandidate = selectedAICandidateCard() else {
+            setAIStatusError("AI 후보 카드 중 하나를 먼저 선택해 주세요.")
+            return
+        }
+
+        let prevState = captureScenarioState()
+        let selectedID = selectedCandidate.id
+
+        switch action {
+        case .elaborate, .alternative, .summary:
+            parentCard.content = selectedCandidate.content
+            selectedCandidate.colorHex = nil
+            selectedCandidate.isAICandidate = false
+        case .nextScene:
+            let destinationParent = parentCard.parent
+            let destinationIndex = parentCard.orderIndex + 1
+            let destinationSiblings = destinationParent?.sortedChildren ?? scenario.rootCards
+            for sibling in destinationSiblings where sibling.id != selectedID && sibling.orderIndex >= destinationIndex {
+                sibling.orderIndex += 1
+            }
+            selectedCandidate.parent = destinationParent
+            selectedCandidate.orderIndex = destinationIndex
+            selectedCandidate.category = parentCard.category
+            selectedCandidate.colorHex = nil
+            selectedCandidate.isAICandidate = false
+        }
+
+        for candidateID in aiCandidateCardIDs where candidateID != selectedID {
+            if let candidate = findCard(by: candidateID) {
+                candidate.isAICandidate = false
+                candidate.isArchived = true
+            }
+        }
+
+        switch action {
+        case .elaborate, .alternative, .summary:
+            selectedCardIDs = [parentCard.id]
+            changeActiveCard(to: parentCard)
+        case .nextScene:
+            selectedCardIDs = [selectedCandidate.id]
+            changeActiveCard(to: selectedCandidate)
+        }
+
+        scenario.bumpCardsVersion()
+
+        store.saveAll()
+        takeSnapshot(force: true)
+        pushUndoState(prevState, actionName: "AI \(action.title) 적용")
+
+        aiCandidateParentID = nil
+        aiCandidateCardIDs = []
+        aiCandidateAction = nil
+
+        switch action {
+        case .elaborate, .alternative, .summary:
+            setAIStatus("선택한 후보를 부모 카드에 반영했고, 나머지 후보는 삭제했습니다.")
+        case .nextScene:
+            setAIStatus("선택한 후보를 부모 바로 아래 형제 카드로 배치했고, 나머지 후보는 삭제했습니다.")
+        }
+    }
+
+    func currentGeminiModel() -> String {
+        let modelName = geminiModelID.trimmingCharacters(in: .whitespacesAndNewlines)
+        return normalizeGeminiModelID(modelName.isEmpty ? "gemini-3-pro-preview" : modelName)
+    }
+
+    func normalizeGeminiModelID(_ raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lowered = trimmed.lowercased()
+        switch lowered {
+        case "gemini-3-pro", "gemini-3.0-pro", "gemini-3-pro-latest":
+            return "gemini-3-pro-preview"
+        case "gemini-3-flash-latest":
+            return "gemini-3-flash"
+        default:
+            return trimmed
+        }
+    }
+
+    func selectedAICandidateCard() -> SceneCard? {
+        guard let parentID = aiCandidateParentID else { return nil }
+        let candidates = aiCandidateCardIDs.compactMap { id -> SceneCard? in
+            guard let card = findCard(by: id), !card.isArchived else { return nil }
+            guard card.parent?.id == parentID else { return nil }
+            return card
+        }
+        guard !candidates.isEmpty else { return nil }
+
+        if let activeID = activeCardID,
+           let activeCard = candidates.first(where: { $0.id == activeID }) {
+            return activeCard
+        }
+        if selectedCardIDs.count == 1,
+           let selectedID = selectedCardIDs.first,
+           let selectedCard = candidates.first(where: { $0.id == selectedID }) {
+            return selectedCard
+        }
+        return nil
+    }
+
+    func pruneAICandidateTracking() {
+        if let parentID = aiCandidateParentID, findCard(by: parentID) == nil {
+            aiCandidateParentID = nil
+            aiCandidateCardIDs = []
+            aiCandidateAction = nil
+            clearStaleAICandidateVisualFlags()
+            return
+        }
+
+        if let parentID = aiCandidateParentID {
+            aiCandidateCardIDs = aiCandidateCardIDs.filter { id in
+                guard let card = findCard(by: id) else { return false }
+                guard !card.isArchived else { return false }
+                return card.parent?.id == parentID
+            }
+        }
+
+        if aiCandidateCardIDs.isEmpty {
+            aiCandidateParentID = nil
+            aiCandidateAction = nil
+        }
+
+        clearStaleAICandidateVisualFlags()
+    }
+
+    // MARK: - Prompt Builder
+
+    func buildAIPrompt(
+        for card: SceneCard,
+        action: AICardAction,
+        options: Set<AIGenerationOption>
+    ) -> String {
+        let sortedOptions = sortedAIGenerationOptions(options)
+        let allLevels = getAllLevels()
+        let levelIndex = allLevels.firstIndex { level in
+            level.contains(where: { $0.id == card.id })
+        }
+
+        let pathCards = ancestorPathCards(for: card)
+        let storyFlow = aiColumnFlow(levelIndex: levelIndex, category: "플롯", upToOrder: card.orderIndex)
+        let noteFlow = aiColumnFlow(levelIndex: levelIndex, category: "노트", upToOrder: card.orderIndex)
+        let existingChildren = card.children.sorted {
+            if $0.orderIndex != $1.orderIndex {
+                return $0.orderIndex < $1.orderIndex
+            }
+            return $0.createdAt < $1.createdAt
+        }
+
+        let optionLines = sortedOptions
+            .map { "- \($0.title): \($0.promptInstruction)" }
+            .joined(separator: "\n")
+
+        let currentCardContent = clampedAIText(card.content, maxLength: 1400, preserveLineBreak: true)
+        let parentThemeContext = parentThemeAnchors(from: pathCards)
+        let deepeningPathContext = adaptiveAICardPath(pathCards)
+        let noteFoundation = noteFoundationContext(from: noteFlow)
+        let noteFlowContext = adaptiveAICardList(noteFlow, maxCards: 10, maxLength: 250)
+        let storyFlowContext = adaptiveAICardList(storyFlow, maxCards: 12, maxLength: 280)
+        let childrenContext = adaptiveAICardList(existingChildren, maxCards: 8, maxLength: 220)
+
+        return """
+        당신은 영화 시나리오 공동 집필 파트너다.
+        반드시 한국어로 작성하고, JSON 외의 어떤 텍스트도 출력하지 않는다.
+
+        [작업 모드]
+        \(action.summaryLabel)
+        \(action.promptGuideline)
+
+        [선택된 확장 방향]
+        \(optionLines)
+
+        [핵심 제약]
+        - 부모-자식은 심화 관계다. 부모 라인의 주제/목표/인과를 유지한 채 더 구체화한다.
+        - 현재 열의 위->아래 순서가 이야기 진행 순서다. 현재 카드보다 위에 있는 플롯 흐름과 자연스럽게 이어져야 한다.
+        - 노트 라인은 기획의도, 캐릭터 설정, 연출의도의 기반이다. 플롯 제안은 노트 기반 의도를 훼손하면 안 된다.
+        - 5개 제안은 서로 분명히 다른 방향이어야 한다.
+        - 구체화 모드에서는 길이보다 구체성을 우선한다. (행동, 선택, 인과, 결과가 분명해야 함)
+        - \(action.contentLengthGuideline)
+        - title은 짧고 구분 가능하게 만든다.
+        - markdown, 코드블록, 설명문 금지.
+
+        [부모 라인 주제 앵커]
+        \(parentThemeContext)
+
+        [부모-자식 심화 경로 (좌->우)]
+        \(deepeningPathContext)
+
+        [노트 라인 핵심 의도 앵커]
+        \(noteFoundation)
+
+        [현재 열 노트 흐름 (상->하, 현재까지)]
+        \(noteFlowContext)
+
+        [현재 열 스토리 흐름 (상->하, 플롯 라인, 현재까지)]
+        \(storyFlowContext)
+
+        [현재 카드]
+        카테고리: \(card.category ?? "미분류")
+        내용:
+        \(currentCardContent)
+
+        [이미 존재하는 같은 부모의 자식 카드]
+        \(childrenContext)
+
+        [응답 작성 규칙]
+        - 노트 라인에서 제시된 기획의도/캐릭터 설정/연출의도를 반영하되, 직접 복붙하지 말고 장면 행동으로 변환한다.
+        - 부모 라인 주제와 현재 열의 선행 스토리 흐름을 훼손하지 않는다.
+        - 다음 장면 모드에서는 바로 다음 순서에 자연스럽게 붙는 진행만 제안한다.
+        - 대안/구체화 모드에서는 사건의 목적과 인과를 유지하면서 표현/접근만 차별화한다.
+
+        출력 JSON 스키마:
+        {
+          "suggestions": [
+            {
+              "title": "짧은 제목",
+              "content": "제안 본문",
+              "rationale": "선택 이유 한 줄"
+            }
+          ]
+        }
+
+        필수 조건:
+        - suggestions는 정확히 5개
+        - title, content는 빈 문자열 금지
+        """
+    }
+
+    func buildAISummaryPrompt(for card: SceneCard) -> String {
+        let allLevels = getAllLevels()
+        let levelIndex = allLevels.firstIndex { level in
+            level.contains(where: { $0.id == card.id })
+        }
+        let pathCards = ancestorPathCards(for: card)
+        let plotFlow = aiColumnFlow(levelIndex: levelIndex, category: "플롯", upToOrder: card.orderIndex)
+        let noteFlow = aiColumnFlow(levelIndex: levelIndex, category: "노트", upToOrder: card.orderIndex)
+
+        let articleText = clampedAIText(card.content, maxLength: 4200, preserveLineBreak: true)
+        let pathContext = adaptiveAICardPath(pathCards)
+        let plotContext = adaptiveAICardList(plotFlow, maxCards: 8, maxLength: 220)
+        let noteContext = adaptiveAICardList(noteFlow, maxCards: 8, maxLength: 220)
+
+        return """
+        아래 텍스트를 대상으로 작업하라.
+
+        [Article]
+        \(articleText)
+
+        [맥락: 문서 심화 경로]
+        \(pathContext)
+
+        [맥락: 현재 열 플롯 흐름]
+        \(plotContext)
+
+        [맥락: 현재 열 노트 흐름]
+        \(noteContext)
+
+        아래 지시를 정확히 따른다:
+        You will generate increasingly concise, entity-dense summaries of the above Article or webpage. Repeat the following 2 steps 5 times.
+
+        Step 1. Identify 1-3 informative Entities (";" delimited) from the Article which are missing from the previously generated summary.
+
+
+        Step 2. Write a new, denser summary of identical length which covers every entity and detail from the previous summary plus the Missing Entities.
+
+
+        A Missing Entity is:
+         - Relevant: to the main story.
+         - Specific: descriptive yet concise (5 words or fewer).
+         - Novel: not in the previous summary.
+         - Faithful: present in the Article.
+         - Anywhere: located anywhere in the Article.
+
+
+        Guidelines:
+         - The first summary should be long (4-5 sentences, ~80 words) yet highly non-specific, containing little information beyond the entities marked as missing. Use overly verbose language and fillers (e.g., "this article discusses") to reach ~80 words.
+         - Make every word count: re-write the previous summary to improve flow and make space for additional entities.
+         - Make space with fusion, compression, and removal of uninformative phrases like "the article discusses".
+         - The summaries should become highly dense and concise yet self-contained, e.g., easily understood without the Article.
+         - Missing entities can appear anywhere in the new summary.
+         - Never drop entities from the previous summary. If space cannot be made, add fewer new entities.
+
+
+        Remember, use the exact same number of words for each summary. Answer only in korean.
+
+        추가 출력 규칙:
+        - 중간 단계, 엔티티 목록, 해설을 출력하지 않는다.
+        - 5회 반복이 끝난 최종 요약문 1개만 출력한다.
+        - JSON, 마크다운, 코드블록 금지.
+        """
+    }
+
+    func aiColumnFlow(levelIndex: Int?, category: String?, upToOrder: Int) -> [SceneCard] {
+        guard let levelIndex,
+              let levelCards = getAllLevels()[safe: levelIndex] else {
+            return []
+        }
+        return levelCards
+            .filter { !$0.isArchived && !$0.isFloating }
+            .filter { category == nil || $0.category == category }
+            .sorted {
+                if $0.orderIndex != $1.orderIndex {
+                    return $0.orderIndex < $1.orderIndex
+                }
+                return $0.createdAt < $1.createdAt
+            }
+            .filter { $0.orderIndex <= upToOrder }
+    }
+
+    func ancestorPathCards(for card: SceneCard) -> [SceneCard] {
+        var path: [SceneCard] = []
+        var current: SceneCard? = card
+        while let node = current {
+            path.append(node)
+            current = node.parent
+        }
+        return path.reversed()
+    }
+
+    func formattedAICardPath(_ cards: [SceneCard]) -> String {
+        guard !cards.isEmpty else { return "- 없음" }
+        return cards.enumerated().map { index, card in
+            let label = index == cards.count - 1 ? "현재" : "단계 \(index + 1)"
+            let text = clampedAIText(card.content, maxLength: 240)
+            return "\(label): [\(card.category ?? "미분류")] \(text)"
+        }.joined(separator: "\n")
+    }
+
+    func formattedAICardList(_ cards: [SceneCard], maxCards: Int, maxLength: Int) -> String {
+        guard !cards.isEmpty else { return "- 없음" }
+        let limited = Array(cards.prefix(maxCards))
+        var lines = limited.enumerated().map { index, card in
+            let text = clampedAIText(card.content, maxLength: maxLength)
+            return "\(index + 1). [\(card.category ?? "미분류")] \(text)"
+        }
+        if cards.count > maxCards {
+            lines.append("... \(cards.count - maxCards)개 생략")
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    func adaptiveAICardPath(_ cards: [SceneCard]) -> String {
+        guard !cards.isEmpty else { return "- 없음" }
+        let full = formattedAICardPath(cards)
+        let threshold = 680
+        let detailedTailCount = 3
+        guard full.count > threshold, cards.count > detailedTailCount else {
+            return full
+        }
+
+        let splitIndex = max(0, cards.count - detailedTailCount)
+        let older = Array(cards.prefix(splitIndex))
+        let recent = Array(cards.suffix(detailedTailCount))
+
+        var lines: [String] = []
+        let compressed = compressedCardMemory(from: older, maxItems: 8, snippetLength: 54, budget: 420)
+        if !compressed.isEmpty {
+            lines.append("요약 메모(이전 단계 \(older.count)개): \(compressed)")
+        }
+        let detailedLines = recent.enumerated().map { offset, card in
+            let absoluteIndex = splitIndex + offset
+            let label = absoluteIndex == cards.count - 1 ? "현재" : "단계 \(absoluteIndex + 1)"
+            let text = clampedAIText(card.content, maxLength: 170)
+            return "\(label): [\(card.category ?? "미분류")] \(text)"
+        }
+        lines.append(contentsOf: detailedLines)
+        return lines.joined(separator: "\n")
+    }
+
+    func parentThemeAnchors(from pathCards: [SceneCard]) -> String {
+        guard pathCards.count > 1 else { return "- 없음" }
+        let ancestors = Array(pathCards.dropLast())
+        guard !ancestors.isEmpty else { return "- 없음" }
+
+        if ancestors.count <= 3 {
+            return ancestors.enumerated().map { index, card in
+                let label = index == ancestors.count - 1 ? "직전 부모" : "상위 \(index + 1)"
+                let text = clampedAIText(card.content, maxLength: 150)
+                return "\(label): [\(card.category ?? "미분류")] \(text)"
+            }.joined(separator: "\n")
+        }
+
+        let root = ancestors.first
+        let middle = Array(ancestors.dropFirst().dropLast(2))
+        let recent = Array(ancestors.suffix(2))
+        var lines: [String] = []
+
+        if let root {
+            let rootText = clampedAIText(root.content, maxLength: 150)
+            lines.append("핵심 기원: [\(root.category ?? "미분류")] \(rootText)")
+        }
+        if !middle.isEmpty {
+            let compressed = compressedCardMemory(from: middle, maxItems: 5, snippetLength: 52, budget: 320)
+            if !compressed.isEmpty {
+                lines.append("중간 심화 요약: \(compressed)")
+            }
+        }
+        for (offset, card) in recent.enumerated() {
+            let label = offset == recent.count - 1 ? "직전 부모" : "상위 부모"
+            let text = clampedAIText(card.content, maxLength: 150)
+            lines.append("\(label): [\(card.category ?? "미분류")] \(text)")
+        }
+
+        return lines.joined(separator: "\n")
+    }
+
+    func noteFoundationContext(from noteFlow: [SceneCard]) -> String {
+        guard !noteFlow.isEmpty else { return "- 없음" }
+        let limited = Array(noteFlow.prefix(10))
+        guard !limited.isEmpty else { return "- 없음" }
+
+        if limited.count <= 3 {
+            return limited.enumerated().map { index, card in
+                let label = index == 0 ? "기초 의도" : "보조 의도 \(index)"
+                let text = clampedAIText(card.content, maxLength: 160)
+                return "\(label): \(text)"
+            }.joined(separator: "\n")
+        }
+
+        let first = limited.first
+        let middle = Array(limited.dropFirst().dropLast(2))
+        let recent = Array(limited.suffix(2))
+        var lines: [String] = []
+
+        if let first {
+            let firstText = clampedAIText(first.content, maxLength: 170)
+            lines.append("기초 의도: \(firstText)")
+        }
+        if !middle.isEmpty {
+            let compressed = compressedCardMemory(from: middle, maxItems: 5, snippetLength: 50, budget: 300)
+            if !compressed.isEmpty {
+                lines.append("중간 노트 요약: \(compressed)")
+            }
+        }
+        for (index, card) in recent.enumerated() {
+            let label = index == recent.count - 1 ? "최신 노트" : "최근 노트"
+            let text = clampedAIText(card.content, maxLength: 140)
+            lines.append("\(label): \(text)")
+        }
+
+        return lines.joined(separator: "\n")
+    }
+
+    func adaptiveAICardList(_ cards: [SceneCard], maxCards: Int, maxLength: Int) -> String {
+        guard !cards.isEmpty else { return "- 없음" }
+        let full = formattedAICardList(cards, maxCards: maxCards, maxLength: maxLength)
+        let threshold = maxLength >= 240 ? 920 : 760
+        let detailedTailCount = 3
+        guard full.count > threshold else {
+            return full
+        }
+
+        let limited = Array(cards.prefix(maxCards))
+        let recentCount = min(detailedTailCount, limited.count)
+        let older = Array(limited.dropLast(recentCount))
+        let recent = Array(limited.suffix(recentCount))
+        var lines: [String] = []
+
+        if !older.isEmpty {
+            let compressed = compressedCardMemory(
+                from: older,
+                maxItems: 8,
+                snippetLength: maxLength >= 240 ? 60 : 54,
+                budget: maxLength >= 240 ? 520 : 440
+            )
+            if !compressed.isEmpty {
+                lines.append("요약 메모(이전 카드 \(older.count)개): \(compressed)")
+            }
+        }
+
+        if !recent.isEmpty {
+            lines.append("최근 카드(상세):")
+            let detailedLines = recent.enumerated().map { offset, card in
+                let absoluteIndex = older.count + offset
+                let text = clampedAIText(card.content, maxLength: min(maxLength, 170))
+                return "\(absoluteIndex + 1). [\(card.category ?? "미분류")] \(text)"
+            }
+            lines.append(contentsOf: detailedLines)
+        }
+
+        if cards.count > maxCards {
+            lines.append("... \(cards.count - maxCards)개 생략")
+        }
+
+        return lines.joined(separator: "\n")
+    }
+
+    func compressedCardMemory(from cards: [SceneCard], maxItems: Int, snippetLength: Int, budget: Int) -> String {
+        guard !cards.isEmpty else { return "" }
+        var snippets: [String] = []
+        var seen: Set<String> = []
+
+        for card in cards {
+            let text = clampedAIText(card.content, maxLength: snippetLength)
+            if text == "(비어 있음)" { continue }
+            let normalized = text
+                .replacingOccurrences(of: " / ", with: " ")
+                .replacingOccurrences(of: "  ", with: " ")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !normalized.isEmpty else { continue }
+            let snippet = "[\(card.category ?? "미분류")] \(normalized)"
+            let key = snippet.lowercased()
+            if seen.contains(key) { continue }
+            seen.insert(key)
+            snippets.append(snippet)
+        }
+
+        guard !snippets.isEmpty else { return "" }
+        if snippets.count > maxItems {
+            let headCount = max(1, maxItems / 2)
+            let tailCount = maxItems - headCount
+            snippets = Array(snippets.prefix(headCount)) + Array(snippets.suffix(tailCount))
+        }
+
+        let joined = snippets.joined(separator: " | ")
+        if joined.count <= budget {
+            return joined
+        }
+        let clippedIndex = joined.index(joined.startIndex, offsetBy: budget)
+        return String(joined[..<clippedIndex]) + "..."
+    }
+
+    func clampedAIText(_ text: String, maxLength: Int, preserveLineBreak: Bool = false) -> String {
+        var normalized = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !preserveLineBreak {
+            normalized = normalized.replacingOccurrences(of: "\n", with: " / ")
+        }
+        normalized = normalized.replacingOccurrences(of: "\t", with: " ")
+        if normalized.count <= maxLength {
+            return normalized.isEmpty ? "(비어 있음)" : normalized
+        }
+        let index = normalized.index(normalized.startIndex, offsetBy: maxLength)
+        return String(normalized[..<index]) + "..."
+    }
+
+    func normalizedAICandidateContent(from suggestion: GeminiSuggestion) -> String {
+        let title = suggestion.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let content = suggestion.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        if title.isEmpty { return content }
+        if content.hasPrefix(title) { return content }
+        return title + "\n" + content
+    }
+
+    func sortedAIGenerationOptions(_ options: Set<AIGenerationOption>) -> [AIGenerationOption] {
+        let fallback: Set<AIGenerationOption> = options.isEmpty ? [.balanced] : options
+        let order = Dictionary(uniqueKeysWithValues: AIGenerationOption.allCases.enumerated().map { ($0.element, $0.offset) })
+        return fallback.sorted { lhs, rhs in
+            (order[lhs] ?? 0) < (order[rhs] ?? 0)
+        }
+    }
+
+    func aiCandidateTintHex(for index: Int) -> String {
+        let palette = ["F6D2B8", "D6E8C4", "F2CBD8", "F2E3B3", "D8ECCD"]
+        return palette[index % palette.count]
+    }
+
+    func clearStaleAICandidateVisualFlags() {
+        let activeSet = Set(aiCandidateCardIDs)
+        for card in scenario.cards where card.isAICandidate {
+            if activeSet.contains(card.id) && !card.isArchived {
+                continue
+            }
+            card.isAICandidate = false
+        }
+    }
+
+    // MARK: - AI Status
+
+    func setAIStatus(_ message: String?) {
+        aiStatusMessage = message
+        aiStatusIsError = false
+    }
+
+    func setAIStatusError(_ message: String) {
+        aiStatusMessage = message
+        aiStatusIsError = true
+    }
+}

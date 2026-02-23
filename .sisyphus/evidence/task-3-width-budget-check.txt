@@ -1,0 +1,2 @@
+has_text_editor_measure_width=PASS
+has_explicit_padding_budget=PASS

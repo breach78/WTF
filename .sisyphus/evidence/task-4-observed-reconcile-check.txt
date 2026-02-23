@@ -1,0 +1,3 @@
+has_observed_state=PASS
+has_observed_sampling=PASS
+has_clamp_logic=PASS

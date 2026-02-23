@@ -1,0 +1,3 @@
+focus_observed_state_present=PASS
+focus_uses_runtime_reconcile=PASS
+card_has_measurement_path=PASS

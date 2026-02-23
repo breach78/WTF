@@ -1,0 +1,5 @@
+build=.sisyphus/evidence/task-6-build.log
+layout_smoke=.sisyphus/evidence/task-6-layout-smoketest.txt
+monitor_smoke=.sisyphus/evidence/task-6-monitor-smoketest.txt
+privacy=.sisyphus/evidence/task-6-monitor-privacy.txt
+scope=.sisyphus/evidence/task-7-scope-check.txt

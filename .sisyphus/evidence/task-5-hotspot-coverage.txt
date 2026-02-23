@@ -1,0 +1,3 @@
+has_measurement_logging=PASS
+has_normalization_logging=PASS
+has_caret_logging=PASS

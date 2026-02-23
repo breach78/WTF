@@ -1,0 +1,2 @@
+no_remainingCardIDsByContent=PASS
+has_responder_card_mapping=PASS

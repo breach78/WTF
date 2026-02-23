@@ -1,0 +1,2 @@
+has_controlled_writeback=PASS
+no_unbounded_seed_from_previous=PASS

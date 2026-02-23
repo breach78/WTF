@@ -1,0 +1,2 @@
+has_focus_geometry_helper=PASS
+has_focus_geometry_callsite=PASS

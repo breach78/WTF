@@ -1,0 +1,6 @@
+fdfd5b031a710e0e19593dff7bb44d9d44e954a042418bb90528e0a40d780f0e  .sisyphus/evidence/baseline-wrap-gap/WriterCardViews.swift
+daa5d1e72aba75f052083c783d82153dcdb847352cef61891552088fd8c0b771  .sisyphus/evidence/baseline-wrap-gap/WriterCaretAndScroll.swift
+db8185812a3d32ee4fb825180a0b640607cab1bd6983c6655de3f4472091b04c  .sisyphus/evidence/baseline-wrap-gap/WriterFocusMode.swift
+4f3e9b7aa276ff358da631362eced98e3e4ca51bef763a807cd0a9e5a20c6c7b  .sisyphus/evidence/baseline-wrap-gap/WriterSharedTypes.swift
+2bafa5457eccbe3096eeb0d4ec892ea33a8ddb84378d98a6cf3ebd79e27eca64  .sisyphus/evidence/baseline-wrap-gap/WriterViews.swift
+4685254eb22b2186e0fe071ae6125bd69395ac974771d3ba210d65a58b87ca07  .sisyphus/evidence/baseline-wrap-gap/waApp.swift
