@@ -1,0 +1,4 @@
+ M wa.xcodeproj/project.xcworkspace/xcuserdata/three.xcuserdatad/UserInterfaceState.xcuserstate
+ M wa/WriterKeyboardHandlers.swift
+ M wa/waApp.swift
+?? .sisyphus/

@@ -18,6 +18,8 @@ extension UTType {
 @main
 struct waApp: App {
     @AppStorage("fontSize") private var fontSize: Double = 14.0
+    @AppStorage("mainWorkspaceZoomScale") private var mainWorkspaceZoomScale: Double = 1.0
+    @AppStorage("focusTypewriterEnabled") private var focusTypewriterEnabled: Bool = false
     @AppStorage("appearance") private var appearance: String = "dark"
     @AppStorage("backgroundColorHex") private var backgroundColorHex: String = "F4F2EE"
     @AppStorage("darkBackgroundColorHex") private var darkBackgroundColorHex: String = "111418"
@@ -148,6 +150,42 @@ struct waApp: App {
                     NotificationCenter.default.post(name: .waToggleFocusModeRequested, object: nil)
                 }
                 .keyboardShortcut("F", modifiers: [.command, .shift])
+            }
+            CommandMenu("화면") {
+                Toggle("다크 모드", isOn: darkModeMenuBinding)
+                Divider()
+
+                Toggle("포커스 모드 타이프라이터", isOn: $focusTypewriterEnabled)
+                Divider()
+
+                Button("메인 작업창 줌 축소") {
+                    adjustMainWorkspaceZoom(by: -0.05)
+                }
+                .disabled(mainWorkspaceZoomScale <= 0.70)
+
+                Button("메인 작업창 줌 확대") {
+                    adjustMainWorkspaceZoom(by: 0.05)
+                }
+                .disabled(mainWorkspaceZoomScale >= 1.60)
+
+                Button("메인 작업창 줌 100%") {
+                    mainWorkspaceZoomScale = 1.0
+                }
+            }
+            CommandMenu("편집기") {
+                Button("폰트 작게") {
+                    adjustFontSize(by: -1)
+                }
+                .disabled(fontSize <= 12)
+
+                Button("폰트 크게") {
+                    adjustFontSize(by: 1)
+                }
+                .disabled(fontSize >= 24)
+
+                Button("폰트 기본값 (17pt)") {
+                    fontSize = 17
+                }
             }
         }
         
@@ -361,6 +399,30 @@ struct waApp: App {
         return NSColor(srgbRed: r, green: g, blue: b, alpha: 1.0)
     }
 
+    private var darkModeMenuBinding: Binding<Bool> {
+        Binding(
+            get: {
+                if appearance == "dark" { return true }
+                if appearance == "light" { return false }
+                if let best = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) {
+                    return best == .darkAqua
+                }
+                return false
+            },
+            set: { appearance = $0 ? "dark" : "light" }
+        )
+    }
+
+    private func adjustFontSize(by delta: Double) {
+        let next = min(24.0, max(12.0, fontSize + delta))
+        fontSize = next
+    }
+
+    private func adjustMainWorkspaceZoom(by delta: Double) {
+        let next = min(1.60, max(0.70, mainWorkspaceZoomScale + delta))
+        mainWorkspaceZoomScale = (next * 100).rounded() / 100
+    }
+
 }
 
 struct SettingsView: View {
@@ -502,9 +564,6 @@ struct SettingsView: View {
         }
     }
 
-    @AppStorage("fontSize") private var fontSize: Double = 14.0
-    @AppStorage("mainWorkspaceZoomScale") private var mainWorkspaceZoomScale: Double = 1.0
-    @AppStorage("appearance") private var appearance: String = "dark"
     @AppStorage("backgroundColorHex") private var backgroundColorHex: String = "F4F2EE"
     @AppStorage("darkBackgroundColorHex") private var darkBackgroundColorHex: String = "111418"
     @AppStorage("cardBaseColorHex") private var cardBaseColorHex: String = "FFFFFF"
@@ -617,351 +676,335 @@ struct SettingsView: View {
         ]
     }
 
-    private var darkModeBinding: Binding<Bool> {
-        Binding(
-            get: {
-                if appearance == "dark" { return true }
-                if appearance == "light" { return false }
-                if let best = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) {
-                    return best == .darkAqua
-                }
-                return false
-            },
-            set: { appearance = $0 ? "dark" : "light" }
-        )
-    }
-
     private enum SettingsTab: String, CaseIterable, Identifiable {
-        case editorAndTheme
-        case outputAIStorage
+        case settings
         case shortcuts
 
         var id: String { rawValue }
     }
 
-    @State private var selectedSettingsTab: SettingsTab = .editorAndTheme
-    
+    @State private var selectedSettingsTab: SettingsTab = .settings
+
+    private enum SettingsLayout {
+        static let windowWidth: CGFloat = 1120
+        static let windowHeight: CGFloat = 700
+        static let contentPadding: CGFloat = 12
+        static let columnSpacing: CGFloat = 10
+        static let cardSpacing: CGFloat = 12
+        static let cardContentSpacing: CGFloat = 6
+        static let cardPadding: CGFloat = 10
+        static let cardCornerRadius: CGFloat = 12
+        static let titleCornerRadius: CGFloat = 8
+        static let cardTitleFontSize: CGFloat = 14
+    }
+
+    private var shortcutLeftSections: [ShortcutSection] {
+        Array(shortcutSections.prefix(2))
+    }
+
+    private var shortcutRightSections: [ShortcutSection] {
+        Array(shortcutSections.dropFirst(2))
+    }
+
     var body: some View {
         TabView(selection: $selectedSettingsTab) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    GroupBox("화면 설정") {
+            threeColumnContent(
+                first: {
+                    settingsCard(title: "편집기 설정") {
+                        Text("메인 모드 행간 (임시): \(String(format: "%.2f", mainCardLineSpacingValue))")
+                        Slider(value: $mainCardLineSpacingValue, in: 1.0...8.0, step: 0.05)
+
+                        Text("카드 위아래 간격: \(Int(mainCardVerticalGap.rounded()))")
+                        Slider(value: $mainCardVerticalGap, in: 0.0...28.0, step: 1.0)
+                        Text("기본값은 0이며, 필요할 때만 행 간격을 넓혀 보이게 합니다.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .lineLimit(2)
+
+                        Text("포커스 모드 행간 (임시): \(String(format: "%.2f", focusModeLineSpacingValue))")
+                        Slider(value: $focusModeLineSpacingValue, in: 0.0...6.0, step: 0.05)
+                    }
+
+                    settingsCard(title: "포커스 모드 설정") {
+                        Text("타이프라이터 토글은 상단 메뉴 > 화면에서 변경합니다.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .lineLimit(2)
+
+                        Picker("타이프라이터 기준선", selection: $focusTypewriterBaseline) {
+                            Text("중앙 50%").tag(0.50)
+                            Text("기본 60%").tag(0.60)
+                            Text("아래 66%").tag(0.66)
+                        }
+                        .pickerStyle(.segmented)
+                        .disabled(!focusTypewriterEnabled)
+
+                        Text(focusTypewriterEnabled ? "현재 타이프라이터 모드가 켜져 있습니다." : "현재 타이프라이터 모드가 꺼져 있습니다.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .lineLimit(2)
+                    }
+
+                    settingsCard(title: "데이터 저장소") {
+                        Text("현재 저장 경로:")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Text(currentStoragePath)
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(.secondary)
+                            .lineLimit(2)
+                            .truncationMode(.middle)
+
+                        Button("기존 작업 파일 열기...") {
+                            openWorkspaceFile()
+                        }
+
+                        Button("새 작업 파일 만들기...") {
+                            createWorkspaceFile()
+                        }
+
+                        Button("작업 파일 초기화 (다시 선택)") {
+                            storageBookmark = nil
+                            forceWorkspaceReset = true
+                        }
+                    }
+                },
+                second: {
+                    settingsCard(title: "출력 설정") {
                         VStack(alignment: .leading, spacing: 8) {
-                            Toggle("다크 모드", isOn: darkModeBinding)
-                            Text("눈이 편한 다크 팔레트를 자동 적용합니다.")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
-                    }
-
-                    GroupBox("편집기 설정") {
-                        VStack(alignment: .leading, spacing: 10) {
-                            Text("글꼴 크기: \(Int(fontSize))pt")
-                            Slider(value: $fontSize, in: 12...24, step: 1)
+                            Text("중앙정렬식 PDF")
+                                .font(.subheadline.weight(.semibold))
+                            Text("폰트 크기: \(String(format: "%.1f", exportCenteredFontSize))pt")
+                            Slider(value: $exportCenteredFontSize, in: 8...20, step: 0.5)
+                            Toggle("헤딩 볼드", isOn: $exportCenteredSceneHeadingBold)
+                            Toggle("캐릭터 볼드", isOn: $exportCenteredCharacterBold)
+                            Toggle("오른쪽 씬 번호 표시", isOn: $exportCenteredShowRightSceneNumber)
 
                             Divider()
 
-                            Text("메인 작업창 줌 (임시): \(Int((mainWorkspaceZoomScale * 100).rounded()))%")
-                            Slider(value: $mainWorkspaceZoomScale, in: 0.70...1.60, step: 0.01)
-                            Text("메인 모드에만 적용됩니다. (포커스/히스토리/검색 패널 제외)")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-
-                            Divider()
-
-                            Text("메인 모드 행간 (임시): \(String(format: "%.2f", mainCardLineSpacingValue))")
-                            Slider(value: $mainCardLineSpacingValue, in: 1.0...8.0, step: 0.05)
-
-                            Text("카드 위아래 간격: \(Int(mainCardVerticalGap.rounded()))")
-                            Slider(value: $mainCardVerticalGap, in: 0.0...28.0, step: 1.0)
-                            Text("기본값은 0이며, 필요할 때만 행 간격을 넓혀 보이게 합니다.")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-
-                            Text("포커스 모드 행간 (임시): \(String(format: "%.2f", focusModeLineSpacingValue))")
-                            Slider(value: $focusModeLineSpacingValue, in: 0.0...6.0, step: 0.05)
-
-                            Toggle("포커스 모드 타이프라이터", isOn: $focusTypewriterEnabled)
-                            if focusTypewriterEnabled {
-                                Picker("기준선", selection: $focusTypewriterBaseline) {
-                                    Text("중앙 50%").tag(0.50)
-                                    Text("기본 60%").tag(0.60)
-                                    Text("아래 66%").tag(0.66)
-                                }
-                                .pickerStyle(.segmented)
+                            Text("한국식 PDF")
+                                .font(.subheadline.weight(.semibold))
+                            Text("폰트 크기: \(String(format: "%.1f", exportKoreanFontSize))pt")
+                            Slider(value: $exportKoreanFontSize, in: 8...20, step: 0.5)
+                            Toggle("씬 헤딩 볼드", isOn: $exportKoreanSceneBold)
+                            Toggle("캐릭터 볼드", isOn: $exportKoreanCharacterBold)
+                            Picker("캐릭터 정렬", selection: $exportKoreanCharacterAlignment) {
+                                Text("오른쪽").tag("right")
+                                Text("왼쪽").tag("left")
                             }
+                            .pickerStyle(.segmented)
                         }
                     }
 
-                    GroupBox("색상 테마 프리셋") {
-                        VStack(alignment: .leading, spacing: 10) {
-                            Picker("프리셋", selection: $selectedColorThemePreset) {
-                                ForEach(ColorThemePreset.allCases) { preset in
-                                    Text(preset.title).tag(preset)
-                                }
+                    settingsCard(title: "AI 설정") {
+                        Text("Gemini 모델")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Picker("모델 선택", selection: $selectedGeminiModelOption) {
+                            ForEach(geminiModelOptions) { option in
+                                Text(option.title).tag(option.value)
                             }
-                            .pickerStyle(.menu)
+                            Text("직접 입력").tag(customGeminiModelToken)
+                        }
+                        .pickerStyle(.menu)
+                        .onChange(of: selectedGeminiModelOption) { _, newValue in
+                            guard newValue != customGeminiModelToken else { return }
+                            geminiModelID = newValue
+                        }
 
-                            Button("선택한 프리셋 적용") {
-                                applyColorThemePreset(selectedColorThemePreset)
+                        TextField("예: gemini-3-pro-preview", text: $geminiModelID)
+                            .textFieldStyle(.roundedBorder)
+                            .onChange(of: geminiModelID) { _, _ in
+                                syncGeminiModelOptionSelection()
                             }
 
-                            Text("라이트/다크 모드는 그대로 유지하며 카드/배경 색 팔레트만 교체합니다.")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
+                        Text("Gemini 3 Pro의 API 모델 ID는 gemini-3-pro-preview 입니다. 404가 뜨면 상단 메뉴에서 다른 모델을 선택하세요.")
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                            .lineLimit(2)
+
+                        Text("Gemini API 키")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        SecureField(hasGeminiAPIKey ? "새 키를 입력하면 덮어씁니다" : "API 키 입력", text: $geminiAPIKeyInput)
+                            .textFieldStyle(.roundedBorder)
+
+                        HStack(spacing: 8) {
+                            Button(hasGeminiAPIKey ? "키 업데이트" : "키 저장") {
+                                saveGeminiAPIKey()
+                            }
+                            .disabled(geminiAPIKeyInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                            Button("키 삭제", role: .destructive) {
+                                deleteGeminiAPIKey()
+                            }
+                            .disabled(!hasGeminiAPIKey)
+                        }
+
+                        Text(hasGeminiAPIKey ? "현재 API 키가 저장되어 있습니다." : "현재 저장된 API 키가 없습니다.")
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                            .lineLimit(2)
+
+                        if let message = aiSettingsStatusMessage {
+                            Text(message)
+                                .font(.system(size: 11))
+                                .foregroundColor(aiSettingsStatusIsError ? .red : .secondary)
+                                .lineLimit(2)
+                        }
+                    }
+                },
+                third: {
+                    settingsCard(title: "Whisper 받아쓰기") {
+                        Text("로컬 whisper.cpp 엔진을 사용합니다. 다른 Mac에서는 자동 설치로 CLI/모델을 한 번에 준비할 수 있습니다.")
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                            .lineLimit(2)
+
+                        TextField("설치 루트 경로", text: $whisperInstallRootInput)
+                            .textFieldStyle(.roundedBorder)
+
+                        TextField("whisper-cli 경로", text: $whisperCLIPathInput)
+                            .textFieldStyle(.roundedBorder)
+
+                        TextField("모델 경로 (.bin)", text: $whisperModelPathInput)
+                            .textFieldStyle(.roundedBorder)
+
+                        HStack(spacing: 8) {
+                            Button("경로 저장") {
+                                saveWhisperPathSettings(statusMessage: "Whisper 경로를 저장했습니다.")
+                                refreshWhisperStatusFromInputs()
+                            }
+                            .disabled(whisperIsInstalling)
+
+                            Button("기본 경로 채우기") {
+                                fillWhisperDefaultPaths()
+                                setWhisperStatus("Whisper 기본 경로를 채웠습니다.", isError: false)
+                            }
+                            .disabled(whisperIsInstalling)
+                        }
+
+                        HStack(spacing: 8) {
+                            Button("설치 상태 확인") {
+                                refreshWhisperStatusFromInputs()
+                            }
+                            .disabled(whisperIsInstalling)
+
+                            Button("자동 설치 / 업데이트") {
+                                installOrUpdateWhisper()
+                            }
+                            .disabled(whisperIsInstalling)
+
+                            if whisperIsInstalling {
+                                ProgressView()
+                                    .controlSize(.small)
+                            }
+                        }
+
+                        Text(whisperIsInstalled ? "현재 Whisper 받아쓰기 사용 가능" : "현재 Whisper 설치 또는 경로 확인이 필요합니다.")
+                            .font(.system(size: 11))
+                            .foregroundColor(whisperIsInstalled ? .secondary : .orange)
+                            .lineLimit(2)
+
+                        if let message = whisperStatusMessage {
+                            Text(message)
+                                .font(.system(size: 11))
+                                .foregroundColor(whisperStatusIsError ? .red : .secondary)
+                                .lineLimit(2)
                         }
                     }
 
-                    GroupBox("색상 설정") {
-                        VStack(alignment: .leading, spacing: 10) {
-                            themedColorPickerRow(
-                                title: "앱 배경 색",
-                                lightHex: $backgroundColorHex,
-                                darkHex: $darkBackgroundColorHex,
-                                lightFallback: Color(red: 0.96, green: 0.95, blue: 0.93),
-                                darkFallback: Color(red: 0.07, green: 0.08, blue: 0.10)
-                            )
-                            themedColorPickerRow(
-                                title: "카드 기본 색",
-                                lightHex: $cardBaseColorHex,
-                                darkHex: $darkCardBaseColorHex,
-                                lightFallback: Color.white,
-                                darkFallback: Color(red: 0.10, green: 0.13, blue: 0.16)
-                            )
-                            themedColorPickerRow(
-                                title: "선택 카드 색",
-                                lightHex: $cardActiveColorHex,
-                                darkHex: $darkCardActiveColorHex,
-                                lightFallback: Color(red: 0.75, green: 0.84, blue: 1.0),
-                                darkFallback: Color(red: 0.16, green: 0.23, blue: 0.31)
-                            )
-                            themedColorPickerRow(
-                                title: "연결 카드 색",
-                                lightHex: $cardRelatedColorHex,
-                                darkHex: $darkCardRelatedColorHex,
-                                lightFallback: Color(red: 0.87, green: 0.92, blue: 1.0),
-                                darkFallback: Color(red: 0.14, green: 0.18, blue: 0.25)
-                            )
+                    settingsCard(title: "색상 테마 프리셋") {
+                        Picker("프리셋", selection: $selectedColorThemePreset) {
+                            ForEach(ColorThemePreset.allCases) { preset in
+                                Text(preset.title).tag(preset)
+                            }
                         }
+                        .pickerStyle(.menu)
+
+                        Button("선택한 프리셋 적용") {
+                            applyColorThemePreset(selectedColorThemePreset)
+                        }
+
+                        Text("라이트/다크 모드는 그대로 유지하며 카드/배경 색 팔레트만 교체합니다.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .lineLimit(2)
                     }
 
-                    GroupBox("색상 초기화") {
+                    settingsCard(title: "색상 설정") {
+                        themedColorPickerRow(
+                            title: "앱 배경 색",
+                            lightHex: $backgroundColorHex,
+                            darkHex: $darkBackgroundColorHex,
+                            lightFallback: Color(red: 0.96, green: 0.95, blue: 0.93),
+                            darkFallback: Color(red: 0.07, green: 0.08, blue: 0.10)
+                        )
+                        themedColorPickerRow(
+                            title: "카드 기본 색",
+                            lightHex: $cardBaseColorHex,
+                            darkHex: $darkCardBaseColorHex,
+                            lightFallback: Color.white,
+                            darkFallback: Color(red: 0.10, green: 0.13, blue: 0.16)
+                        )
+                        themedColorPickerRow(
+                            title: "선택 카드 색",
+                            lightHex: $cardActiveColorHex,
+                            darkHex: $darkCardActiveColorHex,
+                            lightFallback: Color(red: 0.75, green: 0.84, blue: 1.0),
+                            darkFallback: Color(red: 0.16, green: 0.23, blue: 0.31)
+                        )
+                        themedColorPickerRow(
+                            title: "연결 카드 색",
+                            lightHex: $cardRelatedColorHex,
+                            darkHex: $darkCardRelatedColorHex,
+                            lightFallback: Color(red: 0.87, green: 0.92, blue: 1.0),
+                            darkFallback: Color(red: 0.14, green: 0.18, blue: 0.25)
+                        )
+                    }
+
+                    settingsCard(title: "색상 초기화") {
                         Button("카드/배경 색 기본값으로") { resetColorsToDefaults() }
                     }
                 }
-                .padding(20)
-            }
-            .tabItem { Label("편집/색상", systemImage: "paintpalette") }
-            .tag(SettingsTab.editorAndTheme)
+            )
+            .padding(SettingsLayout.contentPadding)
+            .controlSize(.small)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .tabItem { Label("설정", systemImage: "gearshape.2") }
+            .tag(SettingsTab.settings)
 
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    GroupBox("출력 설정") {
-                        VStack(alignment: .leading, spacing: 12) {
-                            VStack(alignment: .leading, spacing: 10) {
-                                Text("중앙정렬식 PDF")
-                                    .font(.headline)
-                                HStack {
-                                    Text("폰트 크기: \(String(format: "%.1f", exportCenteredFontSize))pt")
-                                    Spacer()
+            twoColumnContent(
+                left: {
+                    ForEach(shortcutLeftSections) { section in
+                        settingsCard(title: section.title) {
+                            VStack(alignment: .leading, spacing: 6) {
+                                ForEach(section.items) { item in
+                                    shortcutRow(item)
                                 }
-                                Slider(value: $exportCenteredFontSize, in: 8...20, step: 0.5)
-                                Toggle("헤딩 볼드", isOn: $exportCenteredSceneHeadingBold)
-                                Toggle("캐릭터 볼드", isOn: $exportCenteredCharacterBold)
-                                Toggle("오른쪽 씬 번호 표시", isOn: $exportCenteredShowRightSceneNumber)
-                            }
-
-                            Divider()
-
-                            VStack(alignment: .leading, spacing: 10) {
-                                Text("한국식 PDF")
-                                    .font(.headline)
-                                HStack {
-                                    Text("폰트 크기: \(String(format: "%.1f", exportKoreanFontSize))pt")
-                                    Spacer()
-                                }
-                                Slider(value: $exportKoreanFontSize, in: 8...20, step: 0.5)
-                                Toggle("씬 헤딩 볼드", isOn: $exportKoreanSceneBold)
-                                Toggle("캐릭터 볼드", isOn: $exportKoreanCharacterBold)
-                                Picker("캐릭터 정렬", selection: $exportKoreanCharacterAlignment) {
-                                    Text("오른쪽").tag("right")
-                                    Text("왼쪽").tag("left")
-                                }
-                                .pickerStyle(.segmented)
                             }
                         }
                     }
-
-                    GroupBox("AI 설정") {
-                        VStack(alignment: .leading, spacing: 10) {
-                            Text("Gemini 모델")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                            Picker("모델 선택", selection: $selectedGeminiModelOption) {
-                                ForEach(geminiModelOptions) { option in
-                                    Text(option.title).tag(option.value)
-                                }
-                                Text("직접 입력").tag(customGeminiModelToken)
-                            }
-                            .pickerStyle(.menu)
-                            .onChange(of: selectedGeminiModelOption) { _, newValue in
-                                guard newValue != customGeminiModelToken else { return }
-                                geminiModelID = newValue
-                            }
-
-                            TextField("예: gemini-3-pro-preview", text: $geminiModelID)
-                                .textFieldStyle(.roundedBorder)
-                                .onChange(of: geminiModelID) { _, _ in
-                                    syncGeminiModelOptionSelection()
-                                }
-
-                            Text("Gemini 3 Pro의 API 모델 ID는 gemini-3-pro-preview 입니다. 404가 뜨면 상단 메뉴에서 다른 모델을 선택하세요.")
-                                .font(.system(size: 11))
-                                .foregroundColor(.secondary)
-
-                            Text("Gemini API 키")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                            SecureField(hasGeminiAPIKey ? "새 키를 입력하면 덮어씁니다" : "API 키 입력", text: $geminiAPIKeyInput)
-                                .textFieldStyle(.roundedBorder)
-
-                            HStack(spacing: 8) {
-                                Button(hasGeminiAPIKey ? "키 업데이트" : "키 저장") {
-                                    saveGeminiAPIKey()
-                                }
-                                .disabled(geminiAPIKeyInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-
-                                Button("키 삭제", role: .destructive) {
-                                    deleteGeminiAPIKey()
-                                }
-                                .disabled(!hasGeminiAPIKey)
-                            }
-
-                            Text(hasGeminiAPIKey ? "현재 API 키가 저장되어 있습니다." : "현재 저장된 API 키가 없습니다.")
-                                .font(.system(size: 11))
-                                .foregroundColor(.secondary)
-
-                            if let message = aiSettingsStatusMessage {
-                                Text(message)
-                                    .font(.system(size: 11))
-                                    .foregroundColor(aiSettingsStatusIsError ? .red : .secondary)
-                            }
-                        }
-                    }
-
-                    GroupBox("Whisper 받아쓰기") {
-                        VStack(alignment: .leading, spacing: 10) {
-                            Text("로컬 whisper.cpp 엔진을 사용합니다. 다른 Mac에서는 자동 설치로 CLI/모델을 한 번에 준비할 수 있습니다.")
-                                .font(.system(size: 11))
-                                .foregroundColor(.secondary)
-
-                            TextField("설치 루트 경로", text: $whisperInstallRootInput)
-                                .textFieldStyle(.roundedBorder)
-
-                            TextField("whisper-cli 경로", text: $whisperCLIPathInput)
-                                .textFieldStyle(.roundedBorder)
-
-                            TextField("모델 경로 (.bin)", text: $whisperModelPathInput)
-                                .textFieldStyle(.roundedBorder)
-
-                            HStack(spacing: 8) {
-                                Button("경로 저장") {
-                                    saveWhisperPathSettings(statusMessage: "Whisper 경로를 저장했습니다.")
-                                    refreshWhisperStatusFromInputs()
-                                }
-                                .disabled(whisperIsInstalling)
-
-                                Button("기본 경로 채우기") {
-                                    fillWhisperDefaultPaths()
-                                    setWhisperStatus("Whisper 기본 경로를 채웠습니다.", isError: false)
-                                }
-                                .disabled(whisperIsInstalling)
-                            }
-
-                            HStack(spacing: 8) {
-                                Button("설치 상태 확인") {
-                                    refreshWhisperStatusFromInputs()
-                                }
-                                .disabled(whisperIsInstalling)
-
-                                Button("자동 설치 / 업데이트") {
-                                    installOrUpdateWhisper()
-                                }
-                                .disabled(whisperIsInstalling)
-
-                                if whisperIsInstalling {
-                                    ProgressView()
-                                        .controlSize(.small)
-                                }
-                            }
-
-                            Text(whisperIsInstalled ? "현재 Whisper 받아쓰기 사용 가능" : "현재 Whisper 설치 또는 경로 확인이 필요합니다.")
-                                .font(.system(size: 11))
-                                .foregroundColor(whisperIsInstalled ? .secondary : .orange)
-
-                            if let message = whisperStatusMessage {
-                                Text(message)
-                                    .font(.system(size: 11))
-                                    .foregroundColor(whisperStatusIsError ? .red : .secondary)
-                            }
-                        }
-                    }
-
-                    GroupBox("데이터 저장소") {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("현재 저장 경로:")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                            Text(currentStoragePath)
-                                .font(.system(size: 11, design: .monospaced))
-                                .foregroundColor(.secondary)
-                                .lineLimit(3)
-
-                            Button("기존 작업 파일 열기...") {
-                                openWorkspaceFile()
-                            }
-
-                            Button("새 작업 파일 만들기...") {
-                                createWorkspaceFile()
-                            }
-
-                            Button("작업 파일 초기화 (다시 선택)") {
-                                storageBookmark = nil
-                                forceWorkspaceReset = true
-                            }
-                        }
-                    }
-                }
-                .padding(20)
-            }
-            .tabItem { Label("출력/AI/저장", systemImage: "gearshape.2") }
-            .tag(SettingsTab.outputAIStorage)
-
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    GroupBox("단축키") {
-                        VStack(alignment: .leading, spacing: 12) {
-                            ForEach(Array(shortcutSections.enumerated()), id: \.element.id) { index, section in
-                                VStack(alignment: .leading, spacing: 8) {
-                                    Text(section.title)
-                                        .font(.headline)
-                                    ForEach(section.items) { item in
-                                        shortcutRow(item)
-                                    }
-                                }
-                                if index < shortcutSections.count - 1 {
-                                    Divider()
+                },
+                right: {
+                    ForEach(shortcutRightSections) { section in
+                        settingsCard(title: section.title) {
+                            VStack(alignment: .leading, spacing: 6) {
+                                ForEach(section.items) { item in
+                                    shortcutRow(item)
                                 }
                             }
                         }
                     }
                 }
-                .padding(20)
-            }
+            )
+            .padding(SettingsLayout.contentPadding)
+            .controlSize(.small)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .tabItem { Label("단축키", systemImage: "keyboard") }
             .tag(SettingsTab.shortcuts)
         }
-        .frame(width: 1120, height: 700)
+        .frame(width: SettingsLayout.windowWidth, height: SettingsLayout.windowHeight)
         .onAppear {
             refreshGeminiAPIKeyStatus()
             syncGeminiModelOptionSelection()
@@ -971,15 +1014,92 @@ struct SettingsView: View {
     }
 
     @ViewBuilder
+    private func settingsCard<Content: View>(
+        title: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: SettingsLayout.cardContentSpacing) {
+            Text(title)
+                .font(.system(size: SettingsLayout.cardTitleFontSize, weight: .semibold))
+                .foregroundStyle(.primary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(
+                    RoundedRectangle(cornerRadius: SettingsLayout.titleCornerRadius, style: .continuous)
+                        .fill(Color.primary.opacity(0.10))
+                )
+
+            VStack(alignment: .leading, spacing: SettingsLayout.cardContentSpacing) {
+                content()
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(SettingsLayout.cardPadding)
+        .background(
+            RoundedRectangle(cornerRadius: SettingsLayout.cardCornerRadius, style: .continuous)
+                .fill(Color.primary.opacity(0.05))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: SettingsLayout.cardCornerRadius, style: .continuous)
+                .stroke(Color.primary.opacity(0.14), lineWidth: 1)
+        )
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+
+    @ViewBuilder
+    private func threeColumnContent<First: View, Second: View, Third: View>(
+        @ViewBuilder first: () -> First,
+        @ViewBuilder second: () -> Second,
+        @ViewBuilder third: () -> Third
+    ) -> some View {
+        HStack(alignment: .top, spacing: SettingsLayout.columnSpacing) {
+            VStack(alignment: .leading, spacing: SettingsLayout.cardSpacing) {
+                first()
+            }
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+
+            VStack(alignment: .leading, spacing: SettingsLayout.cardSpacing) {
+                second()
+            }
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+
+            VStack(alignment: .leading, spacing: SettingsLayout.cardSpacing) {
+                third()
+            }
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+        }
+    }
+
+    @ViewBuilder
+    private func twoColumnContent<Left: View, Right: View>(
+        @ViewBuilder left: () -> Left,
+        @ViewBuilder right: () -> Right
+    ) -> some View {
+        HStack(alignment: .top, spacing: SettingsLayout.columnSpacing) {
+            VStack(alignment: .leading, spacing: SettingsLayout.cardSpacing) {
+                left()
+            }
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+
+            VStack(alignment: .leading, spacing: SettingsLayout.cardSpacing) {
+                right()
+            }
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+        }
+    }
+
+    @ViewBuilder
     private func shortcutRow(_ item: ShortcutItem) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 10) {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
             Text(item.action)
-                .font(.system(size: 12))
+                .font(.system(size: 11))
+                .lineLimit(2)
             Spacer(minLength: 8)
             Text(item.keys)
-                .font(.system(size: 11, design: .monospaced))
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
+                .font(.system(size: 10, design: .monospaced))
+                .padding(.horizontal, 5)
+                .padding(.vertical, 1)
                 .background(Color.secondary.opacity(0.14))
                 .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
         }

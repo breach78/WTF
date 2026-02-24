@@ -123,6 +123,21 @@ extension ScenarioWriterView {
             return .handled
         }
         if isTyping {
+            if isMainEditorTyping &&
+                !showFocusMode &&
+                press.phase == .down &&
+                !press.modifiers.contains(.command) &&
+                !press.modifiers.contains(.option) &&
+                !press.modifiers.contains(.control) {
+                switch press.key {
+                case .upArrow, .downArrow:
+                    if handleMainEditorBoundaryNavigation(press) {
+                        return .handled
+                    }
+                default:
+                    break
+                }
+            }
             if press.phase == .down && press.key != .tab {
                 clearMainEditTabArm()
             }
@@ -242,6 +257,71 @@ extension ScenarioWriterView {
     func clearMainEditTabArm() {
         mainEditTabArmCardID = nil
         mainEditTabArmAt = .distantPast
+    }
+
+    func handleMainEditorBoundaryNavigation(_ press: KeyPress) -> Bool {
+        guard let editingID = editingCardID,
+              let editingCard = findCard(by: editingID) else { return false }
+        guard let textView = NSApp.keyWindow?.firstResponder as? NSTextView else { return false }
+        guard textView.string == editingCard.content else { return false }
+        guard !textView.hasMarkedText() else { return false }
+
+        let levels = getAllLevels()
+        guard let location = scenario.cardLocationByID(editingID) else { return false }
+        let levelIndex = location.level
+        let cardIndex = location.index
+        guard levels.indices.contains(levelIndex),
+              levels[levelIndex].indices.contains(cardIndex) else { return false }
+
+        let currentLevel = levels[levelIndex]
+        let content = textView.string as NSString
+        let cursor = min(max(0, textView.selectedRange().location), content.length)
+        let visualBoundary = focusCaretVisualBoundaryState(textView: textView, cursor: cursor)
+        let atTopBoundary = (cursor == 0) && (visualBoundary?.isTop ?? true)
+        let atBottomBoundary = (cursor == content.length) && (visualBoundary?.isBottom ?? true)
+        let isRepeat = (press.phase == .repeat)
+
+        switch press.key {
+        case .upArrow:
+            guard atTopBoundary, cardIndex > 0 else { return false }
+            let target = currentLevel[cardIndex - 1]
+            if isRepeat && levelIndex >= 2 && target.category != editingCard.category {
+                return true
+            }
+            clearMainEditTabArm()
+            changeActiveCard(to: target, shouldFocusMain: false, deferToMainAsync: false)
+            selectedCardIDs = [target.id]
+            editingCardID = target.id
+            editingStartContent = target.content
+            editingStartState = captureScenarioState()
+            editingIsNewCard = false
+            let targetLength = (target.content as NSString).length
+            mainCaretLocationByCardID[target.id] = targetLength
+            requestMainCaretRestore(for: target.id)
+            requestMainCaretEnsure(delay: 0.0)
+            return true
+
+        case .downArrow:
+            guard atBottomBoundary, cardIndex < currentLevel.count - 1 else { return false }
+            let target = currentLevel[cardIndex + 1]
+            if isRepeat && levelIndex >= 2 && target.category != editingCard.category {
+                return true
+            }
+            clearMainEditTabArm()
+            changeActiveCard(to: target, shouldFocusMain: false, deferToMainAsync: false)
+            selectedCardIDs = [target.id]
+            editingCardID = target.id
+            editingStartContent = target.content
+            editingStartState = captureScenarioState()
+            editingIsNewCard = false
+            mainCaretLocationByCardID[target.id] = 0
+            requestMainCaretRestore(for: target.id)
+            requestMainCaretEnsure(delay: 0.0)
+            return true
+
+        default:
+            return false
+        }
     }
 
     // --- Main Nav Key Monitor ---
