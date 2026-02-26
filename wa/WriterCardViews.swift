@@ -179,7 +179,6 @@ struct FocusModeCardEditor: View {
     @AppStorage("focusModeLineSpacingValueTemp") private var focusModeLineSpacingValue: Double = 4.5
     @State private var measuredBodyHeight: CGFloat = 0
     @State private var measuredCardWidth: CGFloat = 0
-    @State private var lastContentEditAt: Date = .distantPast
     private let verticalInset: CGFloat = 40
     private var targetMeasuredHeight: CGFloat {
         guard measuredBodyHeight > 1 else { return 0 }
@@ -197,6 +196,19 @@ struct FocusModeCardEditor: View {
         let text = card.content
         if text.isEmpty { return " " }
         return text
+    }
+
+    private var focusModeTextBinding: Binding<String> {
+        Binding(
+            get: { card.content },
+            set: { newValue in
+                let oldValue = card.content
+                guard oldValue != newValue else { return }
+                card.content = newValue
+                onContentChange(oldValue, newValue)
+                refreshMeasuredHeights()
+            }
+        )
     }
 
     private func refreshMeasuredHeights() {
@@ -230,11 +242,11 @@ struct FocusModeCardEditor: View {
         if abs(measuredBodyHeight - resolvedBodyHeight) > 0.25 {
             measuredBodyHeight = resolvedBodyHeight
         }
-    }
+        }
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            TextEditor(text: $card.content)
+            TextEditor(text: focusModeTextBinding)
                 .font(.custom("SansMonoCJKFinalDraft", size: Double(focusModeFontSize)))
                 .lineSpacing(focusModeLineSpacing)
                 .scrollContentBackground(.hidden)
@@ -246,6 +258,11 @@ struct FocusModeCardEditor: View {
                 .padding(.bottom, verticalInset)
                 .foregroundStyle(appearance == "light" ? .black : .white)
                 .focused($focusModeEditorCardID, equals: card.id)
+                .simultaneousGesture(
+                    TapGesture().onEnded {
+                        onActivate()
+                    }
+                )
         }
         .frame(height: targetMeasuredHeight > 1 ? targetMeasuredHeight : nil, alignment: .topLeading)
         .background(
@@ -260,11 +277,6 @@ struct FocusModeCardEditor: View {
             refreshMeasuredHeights()
         }
         .onAppear {
-            refreshMeasuredHeights()
-        }
-        .onChange(of: card.content) { oldValue, newValue in
-            onContentChange(oldValue, newValue)
-            lastContentEditAt = Date()
             refreshMeasuredHeights()
         }
         .onChange(of: isActive) { _, newValue in
@@ -282,7 +294,6 @@ struct FocusModeCardEditor: View {
             refreshMeasuredHeights()
         }
         .contentShape(Rectangle())
-        .background(isActive ? Color.accentColor.opacity(0.06) : Color.clear)
         .onTapGesture { onActivate() }
     }
 
@@ -292,7 +303,7 @@ struct FocusModeCardEditor: View {
 
 struct CardItem: View {
     @ObservedObject var card: SceneCard
-    let isActive, isSelected, isArchived, isAncestor, isDescendant, isEditing: Bool
+    let isActive, isSelected, isMultiSelected, isArchived, isAncestor, isDescendant, isEditing: Bool
     let dropTarget: DropTarget?
     let forceNamedSnapshotNoteStyle: Bool
     let forceCustomColorVisibility: Bool
@@ -301,9 +312,14 @@ struct CardItem: View {
     var onContentChange: ((String, String) -> Void)? = nil
     var onColorChange: ((String?) -> Void)? = nil
     var onReferenceCard: (() -> Void)? = nil
+    var onCreateUpperCardFromSelection: (() -> Void)? = nil
+    var onSummarizeChildren: (() -> Void)? = nil
+    var isSummarizingChildren: Bool = false
     var onDelete: (() -> Void)? = nil
     var onHardDelete: (() -> Void)? = nil
     @State private var mainEditingMeasuredBodyHeight: CGFloat = 0
+    @State private var mainEditingMeasureWorkItem: DispatchWorkItem? = nil
+    @State private var mainEditingMeasureLastAt: Date = .distantPast
     @FocusState private var editorFocus: Bool
     @AppStorage("fontSize") private var fontSize: Double = 14.0
     @AppStorage("appearance") private var appearance: String = "dark"
@@ -318,6 +334,8 @@ struct CardItem: View {
     private let mainCardContentPadding: CGFloat = MainEditorLayoutMetrics.mainCardContentPadding
     private let mainEditorVerticalPadding: CGFloat = 24
     private let mainEditorLineFragmentPadding: CGFloat = MainEditorLayoutMetrics.mainEditorLineFragmentPadding
+    private let mainEditingMeasureMinInterval: TimeInterval = 0.033
+    private let mainEditingMeasureUpdateThreshold: CGFloat = 0.5
     private var mainEditorHorizontalPadding: CGFloat {
         MainEditorLayoutMetrics.mainEditorHorizontalPadding
     }
@@ -335,25 +353,46 @@ struct CardItem: View {
     private var isCandidateVisualCard: Bool {
         (forceCustomColorVisibility || card.isAICandidate) && card.colorHex != nil
     }
+    private var shouldShowChildRightEdge: Bool {
+        !isArchived && !card.children.isEmpty
+    }
+
+    private var resolvedCardRGB: (r: Double, g: Double, b: Double) {
+        if forceNamedSnapshotNoteStyle {
+            return resolvedNamedSnapshotNoteRGB()
+        }
+        let base = resolvedBaseRGB()
+        if isMultiSelected {
+            let overlay = usesDarkPalette ? (r: 0.42, g: 0.56, b: 0.78) : (r: 0.70, g: 0.83, b: 0.98)
+            let amount = usesDarkPalette ? 0.58 : 0.62
+            return mix(base: base, overlay: overlay, amount: amount)
+        }
+        if isCandidateVisualCard {
+            return base
+        }
+        let active = resolvedActiveRGB()
+        let related = resolvedRelatedRGB()
+        if isOntoTarget || isActive {
+            return active
+        }
+        if isAncestor || isDescendant {
+            return related
+        }
+        return base
+    }
+
+    private var childRightEdgeColor: Color {
+        let amount = usesDarkPalette ? 0.34 : 0.24
+        let rgb = mix(base: resolvedCardRGB, overlay: (0, 0, 0), amount: amount)
+        return Color(red: rgb.r, green: rgb.g, blue: rgb.b)
+    }
 
     private var backgroundColor: Color {
         if isArchived {
             return appearance == "light" ? Color.gray.opacity(0.25) : Color.gray.opacity(0.35)
         }
-        if forceNamedSnapshotNoteStyle {
-            let named = resolvedNamedSnapshotNoteRGB()
-            return Color(red: named.r, green: named.g, blue: named.b)
-        }
-        let base = resolvedBaseRGB()
-        if isCandidateVisualCard {
-            return Color(red: base.r, green: base.g, blue: base.b)
-        }
-        let active = resolvedActiveRGB()
-        let related = resolvedRelatedRGB()
-        if isOntoTarget { return Color(red: active.r, green: active.g, blue: active.b) }
-        if isActive { return Color(red: active.r, green: active.g, blue: active.b) }
-        if isAncestor || isDescendant { return Color(red: related.r, green: related.g, blue: related.b) }
-        return Color(red: base.r, green: base.g, blue: base.b)
+        let rgb = resolvedCardRGB
+        return Color(red: rgb.r, green: rgb.g, blue: rgb.b)
     }
 
     private var mainEditingTextMeasureWidth: CGFloat {
@@ -366,6 +405,19 @@ struct CardItem: View {
             return mainEditingMeasuredBodyHeight
         }
         return measureMainEditorBodyHeight(text: card.content, width: mainEditingTextMeasureWidth)
+    }
+
+    private var mainEditorTextBinding: Binding<String> {
+        Binding(
+            get: { card.content },
+            set: { newValue in
+                let oldValue = card.content
+                guard oldValue != newValue else { return }
+                card.content = newValue
+                onContentChange?(oldValue, newValue)
+                scheduleMainEditingMeasuredBodyHeightRefresh()
+            }
+        )
     }
 
     private func liveMainResponderBodyHeight() -> CGFloat? {
@@ -422,10 +474,36 @@ struct CardItem: View {
     private func refreshMainEditingMeasuredBodyHeight() {
         let measured = liveMainResponderBodyHeight()
             ?? measureMainEditorBodyHeight(text: card.content, width: mainEditingTextMeasureWidth)
+        mainEditingMeasureLastAt = Date()
         let previous = mainEditingMeasuredBodyHeight
-        if abs(previous - measured) > 0.25 {
+        if abs(previous - measured) > mainEditingMeasureUpdateThreshold {
             mainEditingMeasuredBodyHeight = measured
         }
+    }
+
+    private func scheduleMainEditingMeasuredBodyHeightRefresh(immediate: Bool = false) {
+        if immediate {
+            mainEditingMeasureWorkItem?.cancel()
+            mainEditingMeasureWorkItem = nil
+            refreshMainEditingMeasuredBodyHeight()
+            return
+        }
+
+        let now = Date()
+        let elapsed = now.timeIntervalSince(mainEditingMeasureLastAt)
+        let delay = max(0, mainEditingMeasureMinInterval - elapsed)
+        guard delay > 0.001 else {
+            refreshMainEditingMeasuredBodyHeight()
+            return
+        }
+
+        mainEditingMeasureWorkItem?.cancel()
+        let work = DispatchWorkItem {
+            mainEditingMeasureWorkItem = nil
+            refreshMainEditingMeasuredBodyHeight()
+        }
+        mainEditingMeasureWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
     }
 
     var body: some View {
@@ -444,7 +522,7 @@ struct CardItem: View {
                 }
 
                 if isEditing {
-                    TextEditor(text: $card.content)
+                    TextEditor(text: mainEditorTextBinding)
                         .font(.custom("SansMonoCJKFinalDraft", size: fontSize))
                         .lineSpacing(mainCardLineSpacing)
                         .scrollContentBackground(.hidden)
@@ -456,29 +534,30 @@ struct CardItem: View {
                         .foregroundStyle(appearance == "light" ? .black : .white)
                         .focused($editorFocus)
                         .onAppear {
-                            refreshMainEditingMeasuredBodyHeight()
-                            editorFocus = true
+                            scheduleMainEditingMeasuredBodyHeightRefresh(immediate: true)
                             DispatchQueue.main.async {
-                                editorFocus = true
-                                refreshMainEditingMeasuredBodyHeight()
+                                let alreadyFocusedHere: Bool = {
+                                    guard let textView = NSApp.keyWindow?.firstResponder as? NSTextView else { return false }
+                                    return textView.string == card.content
+                                }()
+                                if !alreadyFocusedHere {
+                                    editorFocus = true
+                                }
+                                scheduleMainEditingMeasuredBodyHeightRefresh(immediate: true)
                             }
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                                editorFocus = true
-                                refreshMainEditingMeasuredBodyHeight()
-                            }
+                        }
+                        .onDisappear {
+                            mainEditingMeasureWorkItem?.cancel()
+                            mainEditingMeasureWorkItem = nil
                         }
                         .onChange(of: measuredWidth) { _, _ in
-                            refreshMainEditingMeasuredBodyHeight()
+                            scheduleMainEditingMeasuredBodyHeightRefresh(immediate: true)
                         }
                         .onChange(of: fontSize) { _, _ in
-                            refreshMainEditingMeasuredBodyHeight()
+                            scheduleMainEditingMeasuredBodyHeightRefresh(immediate: true)
                         }
                         .onChange(of: mainCardLineSpacing) { _, _ in
-                            refreshMainEditingMeasuredBodyHeight()
-                        }
-                        .onChange(of: card.content) { oldValue, newValue in
-                            onContentChange?(oldValue, newValue)
-                            refreshMainEditingMeasuredBodyHeight()
+                            scheduleMainEditingMeasuredBodyHeightRefresh(immediate: true)
                         }
                 }
 
@@ -499,11 +578,34 @@ struct CardItem: View {
                 }
             }
         }
+        .overlay(alignment: .trailing) {
+            if shouldShowChildRightEdge {
+                Rectangle()
+                    .fill(childRightEdgeColor)
+                    .frame(width: 4)
+                    .allowsHitTesting(false)
+            }
+        }
+        .overlay(alignment: .topTrailing) {
+            if isSummarizingChildren {
+                ProgressView()
+                    .controlSize(.small)
+                    .padding(8)
+                    .background(appearance == "light" ? Color.white.opacity(0.92) : Color.black.opacity(0.42))
+                    .clipShape(Capsule())
+                    .padding(.top, 6)
+                    .padding(.trailing, 8)
+                    .allowsHitTesting(false)
+            }
+        }
         .onTapGesture { onSelect() }
         .simultaneousGesture(TapGesture(count: 2).onEnded { onDoubleClick() })
         .onChange(of: isEditing) { _, newValue in
             if newValue {
-                refreshMainEditingMeasuredBodyHeight()
+                scheduleMainEditingMeasuredBodyHeightRefresh(immediate: true)
+            } else {
+                mainEditingMeasureWorkItem?.cancel()
+                mainEditingMeasureWorkItem = nil
             }
         }
         .contextMenu {
@@ -511,13 +613,18 @@ struct CardItem: View {
                 Button("레퍼런스 카드로") { onReferenceCard() }
                 Divider()
             }
+            if let onCreateUpperCardFromSelection {
+                Button("새 상위 카드 만들기") { onCreateUpperCardFromSelection() }
+                Divider()
+            }
+            if let onSummarizeChildren {
+                Button("하위 카드 요약") { onSummarizeChildren() }
+                Divider()
+            }
             if let onDelete {
                 Button("삭제", role: .destructive) { onDelete() }
             }
-            if let onHardDelete {
-                Button("완전 삭제 (모든 곳)", role: .destructive) { onHardDelete() }
-            }
-            if onDelete != nil || onHardDelete != nil {
+            if onDelete != nil {
                 Divider()
             }
             Button("기본") { onColorChange?(nil) }
@@ -527,6 +634,10 @@ struct CardItem: View {
             Button("민트") { onColorChange?("CFF2E8") }
             Button("살구") { onColorChange?("FFE1CC") }
             Button("연노랑") { onColorChange?("FFF3C4") }
+            if let onHardDelete {
+                Divider()
+                Button("완전 삭제 (모든 곳)", role: .destructive) { onHardDelete() }
+            }
         }
     }
 

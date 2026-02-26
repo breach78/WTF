@@ -7,12 +7,17 @@ final class Scenario: ObservableObject, Identifiable, Hashable {
     func hash(into hasher: inout Hasher) { hasher.combine(id) }
 
     let id: UUID
-    @Published var title: String
-    @Published var isTemplate: Bool
+    @Published var title: String { didSet { markModified() } }
+    @Published var isTemplate: Bool { didSet { markModified() } }
     @Published var timestamp: Date
     @Published var changeCountSinceLastSnapshot: Int
-    @Published var cards: [SceneCard]
-    @Published var snapshots: [HistorySnapshot] { didSet { cachedSortedSnapshots = nil } }
+    @Published var cards: [SceneCard] { didSet { markModified() } }
+    @Published var snapshots: [HistorySnapshot] {
+        didSet {
+            cachedSortedSnapshots = nil
+            markModified()
+        }
+    }
     @Published private(set) var cardsVersion: Int = 0
     private var cachedVersion: Int = -1
     private var cachedRoots: [SceneCard] = []
@@ -21,6 +26,12 @@ final class Scenario: ObservableObject, Identifiable, Hashable {
     private var cachedCardLocationByID: [UUID: (level: Int, index: Int)] = [:]
     private var cachedSortedSnapshots: [HistorySnapshot]?
     private var cachedLevels: [[SceneCard]] = []
+    private var timestampTrackingSuppressionCount: Int = 0
+    private var interactiveTimestampSuppressionCount: Int = 0
+    private var pendingModifiedTimestamp: Date?
+    private var pendingModifiedWorkItem: DispatchWorkItem?
+    private var lastAppliedModifiedAt: Date = .distantPast
+    private let modifiedTimestampDebounceInterval: TimeInterval = 0.14
 
     init(id: UUID = UUID(), title: String = "새 시나리오", isTemplate: Bool = false, timestamp: Date = Date(), changeCountSinceLastSnapshot: Int = 0, cards: [SceneCard] = [], snapshots: [HistorySnapshot] = []) {
         self.id = id
@@ -30,6 +41,7 @@ final class Scenario: ObservableObject, Identifiable, Hashable {
         self.changeCountSinceLastSnapshot = changeCountSinceLastSnapshot
         self.cards = cards
         self.snapshots = snapshots
+        self.lastAppliedModifiedAt = timestamp
     }
 
     var rootCards: [SceneCard] {
@@ -46,6 +58,86 @@ final class Scenario: ObservableObject, Identifiable, Hashable {
 
     func invalidateSnapshotCache() {
         cachedSortedSnapshots = nil
+    }
+
+    func markModified(at date: Date = Date()) {
+        guard totalTimestampSuppressionCount == 0 else {
+            recordPendingModifiedTimestamp(date)
+            return
+        }
+        let elapsed = date.timeIntervalSince(lastAppliedModifiedAt)
+        if elapsed >= modifiedTimestampDebounceInterval {
+            pendingModifiedWorkItem?.cancel()
+            pendingModifiedWorkItem = nil
+            pendingModifiedTimestamp = nil
+            applyModifiedTimestamp(date)
+            return
+        }
+
+        recordPendingModifiedTimestamp(date)
+
+        guard pendingModifiedWorkItem == nil else { return }
+        let delay = max(0.01, modifiedTimestampDebounceInterval - max(0, elapsed))
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.pendingModifiedWorkItem = nil
+            guard self.totalTimestampSuppressionCount == 0 else { return }
+            guard let pending = self.pendingModifiedTimestamp else { return }
+            self.pendingModifiedTimestamp = nil
+            self.applyModifiedTimestamp(pending)
+        }
+        pendingModifiedWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    func performWithoutTimestampTracking(_ work: () -> Void) {
+        timestampTrackingSuppressionCount += 1
+        defer {
+            timestampTrackingSuppressionCount = max(0, timestampTrackingSuppressionCount - 1)
+            if totalTimestampSuppressionCount == 0 {
+                flushPendingModifiedTimestamp()
+            }
+        }
+        work()
+    }
+
+    func beginInteractiveTimestampSuppression() {
+        interactiveTimestampSuppressionCount += 1
+    }
+
+    func endInteractiveTimestampSuppression(flush: Bool = true) {
+        interactiveTimestampSuppressionCount = max(0, interactiveTimestampSuppressionCount - 1)
+        if flush, totalTimestampSuppressionCount == 0 {
+            flushPendingModifiedTimestamp()
+        }
+    }
+
+    func flushPendingModifiedTimestamp() {
+        pendingModifiedWorkItem?.cancel()
+        pendingModifiedWorkItem = nil
+        guard totalTimestampSuppressionCount == 0 else { return }
+        guard let pending = pendingModifiedTimestamp else { return }
+        pendingModifiedTimestamp = nil
+        applyModifiedTimestamp(pending)
+    }
+
+    private var totalTimestampSuppressionCount: Int {
+        timestampTrackingSuppressionCount + interactiveTimestampSuppressionCount
+    }
+
+    private func recordPendingModifiedTimestamp(_ date: Date) {
+        if let pending = pendingModifiedTimestamp {
+            if date > pending {
+                pendingModifiedTimestamp = date
+            }
+        } else {
+            pendingModifiedTimestamp = date
+        }
+    }
+
+    private func applyModifiedTimestamp(_ date: Date) {
+        lastAppliedModifiedAt = date
+        timestamp = date
     }
 
     func bumpCardsVersion() {
@@ -118,16 +210,36 @@ final class Scenario: ObservableObject, Identifiable, Hashable {
 @MainActor
 final class SceneCard: ObservableObject, Identifiable {
     let id: UUID
-    @Published var content: String
-    @Published var orderIndex: Int { didSet { scenario?.bumpCardsVersion() } }
+    @Published var content: String { didSet { scenario?.markModified() } }
+    @Published var orderIndex: Int {
+        didSet {
+            scenario?.bumpCardsVersion()
+            scenario?.markModified()
+        }
+    }
     @Published var createdAt: Date
-    @Published var parent: SceneCard? { didSet { scenario?.bumpCardsVersion() } }
+    @Published var parent: SceneCard? {
+        didSet {
+            scenario?.bumpCardsVersion()
+            scenario?.markModified()
+        }
+    }
     weak var scenario: Scenario?
-    @Published var category: String?
-    @Published var isFloating: Bool { didSet { scenario?.bumpCardsVersion() } }
-    @Published var isArchived: Bool { didSet { scenario?.bumpCardsVersion() } }
+    @Published var category: String? { didSet { scenario?.markModified() } }
+    @Published var isFloating: Bool {
+        didSet {
+            scenario?.bumpCardsVersion()
+            scenario?.markModified()
+        }
+    }
+    @Published var isArchived: Bool {
+        didSet {
+            scenario?.bumpCardsVersion()
+            scenario?.markModified()
+        }
+    }
     @Published var lastSelectedChildID: UUID?
-    @Published var colorHex: String?
+    @Published var colorHex: String? { didSet { scenario?.markModified() } }
     @Published var isAICandidate: Bool
 
     init(id: UUID = UUID(), content: String = "", orderIndex: Int = 0, createdAt: Date = Date(), parent: SceneCard? = nil, scenario: Scenario? = nil, category: String? = nil, isFloating: Bool = false, isArchived: Bool = false, lastSelectedChildID: UUID? = nil, colorHex: String? = nil, isAICandidate: Bool = false) {
@@ -280,6 +392,22 @@ final class FileStore: ObservableObject {
         let cardContents: [UUID: String]
     }
 
+    private func scenarioSortComparator(_ lhs: Scenario, _ rhs: Scenario) -> Bool {
+        if lhs.isTemplate != rhs.isTemplate {
+            return !lhs.isTemplate && rhs.isTemplate
+        }
+        if lhs.timestamp != rhs.timestamp {
+            return lhs.timestamp > rhs.timestamp
+        }
+        return lhs.id.uuidString < rhs.id.uuidString
+    }
+
+    private func resortScenariosInPlace() {
+        let sorted = scenarios.sorted(by: scenarioSortComparator)
+        guard sorted.map(\.id) != scenarios.map(\.id) else { return }
+        scenarios = sorted
+    }
+
     func load() async {
             try? fileManager.createDirectory(at: folderURL, withIntermediateDirectories: true)
             let decoder = JSONDecoder()
@@ -351,41 +479,43 @@ final class FileStore: ObservableObject {
                 guard let scenario = scenarioMap[s.id],
                       let result = resultsByID[s.id] else { continue }
 
-                var cardMap: [UUID: SceneCard] = Dictionary(minimumCapacity: result.cardRecords.count)
-                for r in result.cardRecords {
-                    let content = result.cardContents[r.id] ?? ""
-                    let card = SceneCard(id: r.id, content: content, orderIndex: r.orderIndex, createdAt: r.createdAt, parent: nil, scenario: scenario, category: r.category, isFloating: r.isFloating, isArchived: r.isArchived ?? false, lastSelectedChildID: r.lastSelectedChildID, colorHex: r.colorHex)
-                    cardMap[r.id] = card
-                    scenario.cards.append(card)
-                    lastSavedCardContent[s.id, default: [:]][r.id] = content
-                }
-
-                for r in result.cardRecords {
-                    if let parentID = r.parentID, let card = cardMap[r.id], let parent = cardMap[parentID] {
-                        card.parent = parent
+                scenario.performWithoutTimestampTracking {
+                    var cardMap: [UUID: SceneCard] = Dictionary(minimumCapacity: result.cardRecords.count)
+                    for r in result.cardRecords {
+                        let content = result.cardContents[r.id] ?? ""
+                        let card = SceneCard(id: r.id, content: content, orderIndex: r.orderIndex, createdAt: r.createdAt, parent: nil, scenario: scenario, category: r.category, isFloating: r.isFloating, isArchived: r.isArchived ?? false, lastSelectedChildID: r.lastSelectedChildID, colorHex: r.colorHex)
+                        cardMap[r.id] = card
+                        scenario.cards.append(card)
+                        lastSavedCardContent[s.id, default: [:]][r.id] = content
                     }
-                }
 
-                var snapshots: [HistorySnapshot] = []
-                snapshots.reserveCapacity(result.historyRecords.count)
-                for h in result.historyRecords {
-                    snapshots.append(HistorySnapshot(
-                        id: h.id,
-                        timestamp: h.timestamp,
-                        name: h.name,
-                        scenarioID: h.scenarioID,
-                        cardSnapshots: h.cardSnapshots,
-                        isDelta: h.isDelta ?? false,
-                        deletedCardIDs: h.deletedCardIDs ?? [],
-                        isPromoted: h.isPromoted ?? false,
-                        promotionReason: h.promotionReason,
-                        noteCardID: h.noteCardID
-                    ))
+                    for r in result.cardRecords {
+                        if let parentID = r.parentID, let card = cardMap[r.id], let parent = cardMap[parentID] {
+                            card.parent = parent
+                        }
+                    }
+
+                    var snapshots: [HistorySnapshot] = []
+                    snapshots.reserveCapacity(result.historyRecords.count)
+                    for h in result.historyRecords {
+                        snapshots.append(HistorySnapshot(
+                            id: h.id,
+                            timestamp: h.timestamp,
+                            name: h.name,
+                            scenarioID: h.scenarioID,
+                            cardSnapshots: h.cardSnapshots,
+                            isDelta: h.isDelta ?? false,
+                            deletedCardIDs: h.deletedCardIDs ?? [],
+                            isPromoted: h.isPromoted ?? false,
+                            promotionReason: h.promotionReason,
+                            noteCardID: h.noteCardID
+                        ))
+                    }
+                    scenario.snapshots = snapshots
                 }
-                scenario.snapshots = snapshots
             }
 
-            scenarios = scenarioMap.values.sorted { $0.timestamp > $1.timestamp }
+            scenarios = scenarioMap.values.sorted(by: scenarioSortComparator)
             for scenario in scenarios {
                 scenario.bumpCardsVersion()
             }
@@ -398,6 +528,10 @@ final class FileStore: ObservableObject {
     }
 
     func saveAll(immediate: Bool = false) {
+        for scenario in scenarios {
+            scenario.flushPendingModifiedTimestamp()
+        }
+        resortScenariosInPlace()
         requestSave(immediate: immediate)
     }
 

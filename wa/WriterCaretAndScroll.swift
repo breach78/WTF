@@ -19,6 +19,7 @@ extension ScenarioWriterView {
                 guard !showFocusMode else { return }
                 guard let editingID = editingCardID else { return }
                 guard !isSearchFocused else { return }
+                guard NSApp.keyWindow?.identifier?.rawValue != ReferenceWindowConstants.windowID else { return }
 
                 guard let textView =
                     (notification.object as? NSTextView) ??
@@ -26,14 +27,10 @@ extension ScenarioWriterView {
                 else {
                     return
                 }
+                guard textView.window?.identifier?.rawValue != ReferenceWindowConstants.windowID else { return }
                 guard (NSApp.keyWindow?.firstResponder as? NSTextView) === textView else { return }
 
                 let responderID = ObjectIdentifier(textView)
-                if mainLineSpacingAppliedResponderID != responderID || mainLineSpacingAppliedCardID != editingID {
-                    applyMainEditorLineSpacingIfNeeded()
-                }
-                normalizeMainEditorTextViewOffsetIfNeeded(textView, reason: "selection-change")
-
                 let selected = textView.selectedRange()
                 let textLength = (textView.string as NSString).length
                 let selectedStart = min(max(0, selected.location), textLength)
@@ -83,12 +80,13 @@ extension ScenarioWriterView {
                 mainSelectionLastTextLength = textLength
                 mainSelectionLastResponderID = responderID
 
+                if mainLineSpacingAppliedResponderID != responderID || mainLineSpacingAppliedCardID != editingID {
+                    applyMainEditorLineSpacingIfNeeded()
+                }
+                normalizeMainEditorTextViewOffsetIfNeeded(textView, reason: "selection-change")
+
                 guard !textView.hasMarkedText() else { return }
-                let now = Date()
-                let elapsed = now.timeIntervalSince(mainCaretEnsureLastScheduledAt)
-                let delay = max(0, mainCaretSelectionEnsureMinInterval - elapsed)
-                mainCaretEnsureLastScheduledAt = now.addingTimeInterval(delay)
-                requestMainCaretEnsure(delay: delay)
+                requestCoalescedMainCaretEnsure(minInterval: mainCaretSelectionEnsureMinInterval, delay: 0.0)
             }
         }
     }
@@ -259,10 +257,11 @@ extension ScenarioWriterView {
         _ = newLineCount
         applyMainEditorLineSpacingIfNeeded()
         if let textView = NSApp.keyWindow?.firstResponder as? NSTextView,
+           textView.window?.identifier?.rawValue != ReferenceWindowConstants.windowID,
            textView.string == newValue {
             normalizeMainEditorTextViewOffsetIfNeeded(textView, reason: "content-change")
         }
-        requestMainCaretEnsure(delay: 0.0)
+        requestCoalescedMainCaretEnsure(minInterval: mainCaretSelectionEnsureMinInterval, delay: 0.0)
     }
 
     // MARK: - Main Caret Ensure Visible
@@ -277,6 +276,15 @@ extension ScenarioWriterView {
         }
         mainCaretEnsureWorkItem = work
         DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    func requestCoalescedMainCaretEnsure(minInterval: TimeInterval, delay: Double = 0.0) {
+        let now = Date()
+        let elapsed = now.timeIntervalSince(mainCaretEnsureLastScheduledAt)
+        let extraDelay = max(0, minInterval - elapsed)
+        let resolvedDelay = max(delay, extraDelay)
+        mainCaretEnsureLastScheduledAt = now.addingTimeInterval(resolvedDelay)
+        requestMainCaretEnsure(delay: resolvedDelay)
     }
 
     func ensureMainCaretVisible() {

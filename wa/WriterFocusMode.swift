@@ -9,6 +9,32 @@ fileprivate var _focusSelectionActiveEdge: FocusSelectionActiveEdge = .end
 
 extension ScenarioWriterView {
 
+    private var focusTypewriterEnabledLive: Bool {
+        if let stored = UserDefaults.standard.object(forKey: "focusTypewriterEnabled") as? Bool {
+            return stored
+        }
+        return focusTypewriterEnabled
+    }
+
+    private var isReferenceWindowFocused: Bool {
+        NSApp.keyWindow?.identifier?.rawValue == ReferenceWindowConstants.windowID
+    }
+
+    private func isReferenceTextView(_ textView: NSTextView) -> Bool {
+        textView.window?.identifier?.rawValue == ReferenceWindowConstants.windowID
+    }
+
+    private var focusModeCardsBackgroundColor: Color {
+        let fallbackLight = (r: 0.75, g: 0.84, b: 1.0)
+        let fallbackDark = (r: 0.16, g: 0.23, b: 0.31)
+        let hex = isDarkAppearanceActive ? darkCardActiveColorHex : cardActiveColorHex
+        if let rgb = rgbFromHex(hex) {
+            return Color(red: rgb.0, green: rgb.1, blue: rgb.2)
+        }
+        let fallback = isDarkAppearanceActive ? fallbackDark : fallbackLight
+        return Color(red: fallback.r, green: fallback.g, blue: fallback.b)
+    }
+
     @ViewBuilder
     func focusModeCanvas(size: CGSize) -> some View {
         let cards = focusedColumnCards()
@@ -42,7 +68,7 @@ extension ScenarioWriterView {
                                 }
                             }
                         }
-                        .background(appearance == "light" ? Color.white : Color(white: 0.10))
+                        .background(focusModeCardsBackgroundColor)
                         .overlay(
                             Rectangle()
                                 .stroke(appearance == "light" ? Color.black.opacity(0.10) : Color.white.opacity(0.12), lineWidth: 1)
@@ -114,6 +140,7 @@ extension ScenarioWriterView {
             }
         }
         .coordinateSpace(name: "focus-mode-canvas")
+        .ignoresSafeArea(.container, edges: .top)
         .onChange(of: size.width) { oldWidth, newWidth in
             guard showFocusMode else { return }
             let widthChanged = abs(newWidth - oldWidth) > 0.5
@@ -143,6 +170,9 @@ extension ScenarioWriterView {
     }
 
     func activateFocusModeCardFromClick(_ card: SceneCard) {
+        if splitModeEnabled && !isSplitPaneActive {
+            activateSplitPaneIfNeeded()
+        }
         let clickCaretLocation = resolveFocusModeClickCaretLocation(for: card)
         
         // Click-to-activate should preserve the system-calculated click caret.
@@ -211,6 +241,7 @@ extension ScenarioWriterView {
             if isReferenceWindowEvent || isReferenceWindowKey {
                 return event
             }
+            if !acceptsKeyboardInput { return event }
             if !showFocusMode { return event }
             if showDeleteAlert {
                 let hasChildren = selectedCardsForDeletion().contains { !$0.children.isEmpty }
@@ -238,6 +269,15 @@ extension ScenarioWriterView {
             }
             let isCmdOnly = flags.contains(.command) && !flags.contains(.option) && !flags.contains(.control) && !flags.contains(.shift)
             let isCmdShift = flags.contains(.command) && flags.contains(.shift) && !flags.contains(.option) && !flags.contains(.control)
+            if isCmdShift {
+                let normalized = (event.charactersIgnoringModifiers ?? "").lowercased()
+                if normalized == "t" || normalized == "ㅅ" || normalized == "ㅆ" {
+                    DispatchQueue.main.async {
+                        focusTypewriterEnabled = !focusTypewriterEnabledLive
+                    }
+                    return nil
+                }
+            }
             if isCmdShift && (event.keyCode == 51 || event.keyCode == 117) { // delete / forward-delete
                 if event.isARepeat { return nil }
                 DispatchQueue.main.async {
@@ -282,7 +322,7 @@ extension ScenarioWriterView {
             if event.modifierFlags.contains(.command) || event.modifierFlags.contains(.option) || event.modifierFlags.contains(.control) {
                 return event
             }
-            if focusTypewriterEnabled && isTypewriterTriggerKey(event) {
+            if focusTypewriterEnabledLive && isTypewriterTriggerKey(event) {
                 if let textView = NSApp.keyWindow?.firstResponder as? NSTextView, textView.hasMarkedText() {
                     focusTypewriterDeferredUntilCompositionEnd = true
                     return event
@@ -390,6 +430,7 @@ extension ScenarioWriterView {
         
         var monitors: [Any] = []
         if let eventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.scrollWheel], handler: { event in
+            guard acceptsKeyboardInput else { return event }
             guard showFocusMode else { return event }
             let shouldNormalize = event.phase == .ended || event.momentumPhase == .ended
             DispatchQueue.main.async {
@@ -408,6 +449,7 @@ extension ScenarioWriterView {
             object: nil,
             queue: .main
         ) { notification in
+            guard acceptsKeyboardInput else { return }
             guard showFocusMode else { return }
             guard let clipView = notification.object as? NSClipView else { return }
             let origin = clipView.bounds.origin
@@ -542,47 +584,78 @@ extension ScenarioWriterView {
         includeActive: Bool = false
     ) -> (scanned: Int, reset: Int, skippedActive: Int, observedUpdates: Int) {
         guard showFocusMode else { return (0, 0, 0, 0) }
+        guard !isReferenceWindowFocused else { return (0, 0, 0, 0) }
         guard let root = NSApp.keyWindow?.contentView else { return (0, 0, 0, 0) }
         let activeTextView = NSApp.keyWindow?.firstResponder as? NSTextView
         let focusedCards = focusedColumnCards()
         let focusedCardIDs = Set(focusedCards.map(\.id))
         let activeFocusedCardID = focusModeEditorCardID ?? editingCardID ?? activeCardID
 
-        var textViews = collectTextViews(in: root).filter { $0.isEditable }
-        // 화면에 렌더링된 컴포넌트들을 Y축 기준으로 정렬하여 정확하게 카드와 매핑 (Jittering 방지)
-        textViews.sort {
-            let y1 = $0.convert(NSPoint.zero, to: nil).y
-            let y2 = $1.convert(NSPoint.zero, to: nil).y
-            return y1 > y2
+        let allEditableTextViews = collectTextViews(in: root).filter { textView in
+            textView.isEditable && !isReferenceTextView(textView)
+        }
+        let rootBounds = root.bounds
+        let rootCenterX = rootBounds.midX
+        let strictMinWidth = max(280, rootBounds.width * 0.34)
+        let looseMinWidth = max(220, rootBounds.width * 0.24)
+
+        func sortedByVerticalPosition(_ views: [NSTextView]) -> [NSTextView] {
+            views.sorted {
+                let y1 = $0.convert(NSPoint.zero, to: nil).y
+                let y2 = $1.convert(NSPoint.zero, to: nil).y
+                return y1 > y2
+            }
         }
 
-        if textViews.count == focusedCards.count {
-            for (i, tv) in textViews.enumerated() {
-                let identity = ObjectIdentifier(tv)
+        var textViews = allEditableTextViews.filter { textView in
+            let frameInRoot = textView.convert(textView.bounds, to: root)
+            guard frameInRoot.width >= strictMinWidth else { return false }
+            let centerDistance = abs(frameInRoot.midX - rootCenterX)
+            return centerDistance <= (rootBounds.width * 0.22)
+        }
+
+        if textViews.count < focusedCards.count {
+            textViews = allEditableTextViews.filter { textView in
+                let frameInRoot = textView.convert(textView.bounds, to: root)
+                return frameInRoot.width >= looseMinWidth
+            }
+        }
+
+        if textViews.count < focusedCards.count {
+            textViews = allEditableTextViews
+        }
+
+        if textViews.count > focusedCards.count, !focusedCards.isEmpty {
+            let ranked = textViews.sorted { lhs, rhs in
+                let lhsFrame = lhs.convert(lhs.bounds, to: root)
+                let rhsFrame = rhs.convert(rhs.bounds, to: root)
+                let lhsDistance = abs(lhsFrame.midX - rootCenterX)
+                let rhsDistance = abs(rhsFrame.midX - rootCenterX)
+                if abs(lhsDistance - rhsDistance) > 1 {
+                    return lhsDistance < rhsDistance
+                }
+                return lhsFrame.midY > rhsFrame.midY
+            }
+            textViews = Array(ranked.prefix(focusedCards.count))
+        }
+
+        textViews = sortedByVerticalPosition(textViews)
+
+        if !focusedCards.isEmpty && !textViews.isEmpty {
+            let pairCount = min(textViews.count, focusedCards.count)
+            for i in 0 ..< pairCount {
+                let identity = ObjectIdentifier(textViews[i])
                 focusResponderCardByObjectID[identity] = focusedCards[i].id
             }
-        } else {
-            // 개수가 안맞을 경우를 대비한 Fallback (내용 기반 매핑)
-            var uniqueFocusedCardIDByContent: [String: UUID] = [:]
-            var duplicateFocusedContents = Set<String>()
-            for card in focusedCards {
-                if uniqueFocusedCardIDByContent[card.content] != nil {
-                    duplicateFocusedContents.insert(card.content)
-                } else {
-                    uniqueFocusedCardIDByContent[card.content] = card.id
-                }
-            }
-            if !duplicateFocusedContents.isEmpty {
-                for content in duplicateFocusedContents {
-                    uniqueFocusedCardIDByContent.removeValue(forKey: content)
-                }
-            }
-            for tv in textViews {
-                let identity = ObjectIdentifier(tv)
-                if focusResponderCardByObjectID[identity] == nil,
-                   let mapped = uniqueFocusedCardIDByContent[tv.string] {
-                    focusResponderCardByObjectID[identity] = mapped
-                }
+        }
+
+        for tv in textViews {
+            let identity = ObjectIdentifier(tv)
+            if focusResponderCardByObjectID[identity] == nil,
+               tv === activeTextView,
+               let activeFocusedCardID,
+               focusedCardIDs.contains(activeFocusedCardID) {
+                focusResponderCardByObjectID[identity] = activeFocusedCardID
             }
         }
 
@@ -707,12 +780,14 @@ extension ScenarioWriterView {
                 queue: .main
             ) { notification in
                 if showFocusMode {
+                    guard !isReferenceWindowFocused else { return }
                     guard let textView =
                         (notification.object as? NSTextView) ??
                         (NSApp.keyWindow?.firstResponder as? NSTextView)
                     else {
                         return
                     }
+                    guard !isReferenceTextView(textView) else { return }
                     guard (NSApp.keyWindow?.firstResponder as? NSTextView) === textView else { return }
                     rememberFocusResponderCardMapping(textView: textView)
                     if focusUndoSelectionEnsureSuppressed {
@@ -883,7 +958,12 @@ extension ScenarioWriterView {
                 focusCaretPendingTypewriter = false
                 return
             }
-            var runTypewriter = focusTypewriterEnabled && focusCaretPendingTypewriter
+            guard !isReferenceTextView(textView) else {
+                focusCaretPendingTypewriter = false
+                focusTypewriterDeferredUntilCompositionEnd = false
+                return
+            }
+            var runTypewriter = focusTypewriterEnabledLive && focusCaretPendingTypewriter
             focusCaretPendingTypewriter = false
             
             if runTypewriter && textView.hasMarkedText() {
@@ -904,6 +984,7 @@ extension ScenarioWriterView {
     func ensureFocusModeCaretVisible(typewriter: Bool = false) {
         guard showFocusMode else { return }
         guard let textView = NSApp.keyWindow?.firstResponder as? NSTextView else { return }
+        guard !isReferenceTextView(textView) else { return }
         guard let outerScrollView = outerScrollView(containing: textView) else { return }
         guard let outerDocumentView = outerScrollView.documentView else { return }
         guard let layoutManager = textView.layoutManager, let textContainer = textView.textContainer else { return }
@@ -943,7 +1024,7 @@ extension ScenarioWriterView {
         let maxVisibleY = visible.maxY - bottomPadding
 
         var targetY = visible.origin.y
-        if focusTypewriterEnabled && typewriter {
+        if focusTypewriterEnabledLive && typewriter {
             let baseline = CGFloat(min(max(focusTypewriterBaseline, 0.40), 0.80))
             let activeRect = (sel.length > 0 && _focusSelectionActiveEdge == .start) ? startRect : endRect
             targetY = activeRect.midY - (visible.height * baseline)
@@ -1114,8 +1195,9 @@ extension ScenarioWriterView {
         guard !isApplyingUndo else { return }
         guard oldValue != newValue else { return }
         guard cardID == (editingCardID ?? focusModeEditorCardID) else { return }
-        
+
         if let textView = NSApp.keyWindow?.firstResponder as? NSTextView {
+            guard !isReferenceTextView(textView) else { return }
             normalizeSingleTextEditorOffsetIfNeeded(textView, reason: "content-change-sync")
         }
 
@@ -1164,8 +1246,9 @@ extension ScenarioWriterView {
 
     func handleFocusModeSelectionChanged() {
         guard showFocusMode else { return }
-        
+
         if let textView = NSApp.keyWindow?.firstResponder as? NSTextView {
+            guard !isReferenceTextView(textView) else { return }
             normalizeSingleTextEditorOffsetIfNeeded(textView, reason: "selection-change-sync")
         }
         
@@ -1269,6 +1352,10 @@ extension ScenarioWriterView {
                 pendingFocusModeEntryCaretHint = nil
             }
             beginFocusModeEditing(target, cursorToEnd: false)
+            DispatchQueue.main.async {
+                requestFocusModeOffsetNormalization(includeActive: true, force: true, reason: "focus-enter-initial")
+                scheduleFocusModeOffsetNormalizationBurst(includeActive: true)
+            }
         } else {
             pendingFocusModeEntryCaretHint = nil
             focusPendingProgrammaticBeginEditCardID = nil

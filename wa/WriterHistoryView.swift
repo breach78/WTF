@@ -3,6 +3,17 @@ import AppKit
 
 extension ScenarioWriterView {
 
+    private func snapshotOrderLess(_ lhs: CardSnapshot, _ rhs: CardSnapshot) -> Bool {
+        if lhs.orderIndex != rhs.orderIndex {
+            return lhs.orderIndex < rhs.orderIndex
+        }
+        return lhs.cardID.uuidString < rhs.cardID.uuidString
+    }
+
+    private func snapshotDiffOrderLess(_ lhs: SnapshotDiff, _ rhs: SnapshotDiff) -> Bool {
+        snapshotOrderLess(lhs.snapshot, rhs.snapshot)
+    }
+
     @ViewBuilder
     func previewColumn(for diffs: [SnapshotDiff], level: Int, screenHeight: CGFloat) -> some View {
         VStack(spacing: 0) {
@@ -40,20 +51,25 @@ extension ScenarioWriterView {
     }
 
     func getPreviewLevels() -> [[SnapshotDiff]] {
-        var result: [[SnapshotDiff]] = []
-        let roots = previewDiffs.filter { $0.snapshot.parentID == nil && !$0.snapshot.isFloating }.sorted { $0.snapshot.orderIndex < $1.snapshot.orderIndex }
+        let orderedDiffs = previewDiffs.filter { !$0.snapshot.isFloating }
+        let byParent = Dictionary(grouping: orderedDiffs) { $0.snapshot.parentID }
+        let roots = (byParent[nil] ?? []).sorted(by: snapshotDiffOrderLess)
         if roots.isEmpty { return [] }
-        result.append(roots)
-        var currentLevelIds = Set(roots.map { $0.id })
+
+        var result: [[SnapshotDiff]] = [roots]
+        var currentLevel = roots
+
         while true {
-            let nextLevel = previewDiffs.filter { diff in
-                guard let pid = diff.snapshot.parentID else { return false }
-                return currentLevelIds.contains(pid)
-            }.sorted { $0.snapshot.orderIndex < $1.snapshot.orderIndex }
+            var nextLevel: [SnapshotDiff] = []
+            for parentDiff in currentLevel {
+                let children = (byParent[parentDiff.id] ?? []).sorted(by: snapshotDiffOrderLess)
+                nextLevel.append(contentsOf: children)
+            }
             if nextLevel.isEmpty { break }
             result.append(nextLevel)
-            currentLevelIds = Set(nextLevel.map { $0.id })
+            currentLevel = nextLevel
         }
+
         return result
     }
 
@@ -726,6 +742,7 @@ extension ScenarioWriterView {
     func startHistoryKeyMonitor() {
         if historyKeyMonitor != nil { return }
         historyKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { event in
+            if !acceptsKeyboardInput { return event }
             if !showHistoryBar { return event }
             let keyCode = event.keyCode
             if keyCode == 53 { // esc
@@ -1265,12 +1282,33 @@ extension ScenarioWriterView {
     }
 
     func sortedCardSnapshots(from state: [UUID: CardSnapshot]) -> [CardSnapshot] {
-        state.values.sorted {
-            if $0.orderIndex != $1.orderIndex {
-                return $0.orderIndex < $1.orderIndex
+        let byParent = Dictionary(grouping: state.values) { $0.parentID }
+        var ordered: [CardSnapshot] = []
+        var visited = Set<UUID>()
+
+        func appendSubtree(parentID: UUID?) {
+            let children = (byParent[parentID] ?? []).sorted(by: snapshotOrderLess)
+            for snapshot in children {
+                if visited.insert(snapshot.cardID).inserted {
+                    ordered.append(snapshot)
+                    appendSubtree(parentID: snapshot.cardID)
+                }
             }
-            return $0.cardID.uuidString < $1.cardID.uuidString
         }
+
+        appendSubtree(parentID: nil)
+
+        let remaining = state.values
+            .filter { !visited.contains($0.cardID) }
+            .sorted(by: snapshotOrderLess)
+        for snapshot in remaining {
+            if visited.insert(snapshot.cardID).inserted {
+                ordered.append(snapshot)
+                appendSubtree(parentID: snapshot.cardID)
+            }
+        }
+
+        return ordered
     }
 
     func buildDeltaPayload(
@@ -1368,10 +1406,7 @@ extension ScenarioWriterView {
         in snapshots: [HistorySnapshot]
     ) -> [CardSnapshot]? {
         guard let resolved = resolvedCardSnapshotMap(at: index, in: snapshots) else { return nil }
-        return resolved.values.sorted {
-            if $0.orderIndex != $1.orderIndex { return $0.orderIndex < $1.orderIndex }
-            return $0.cardID.uuidString < $1.cardID.uuidString
-        }
+        return sortedCardSnapshots(from: resolved)
     }
 
     func enterPreviewMode(at index: Int) {

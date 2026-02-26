@@ -293,7 +293,7 @@ extension ScenarioWriterView {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
             applyMainCaretWithRetry(expectedCardID: id, location: targetLocation, retries: 6, requestID: requestID)
         }
-        requestMainCaretEnsure(delay: 0.0)
+        requestCoalescedMainCaretEnsure(minInterval: mainCaretSelectionEnsureMinInterval, delay: 0.0)
     }
 
     func performMainTextUndoIfPossible() -> Bool {

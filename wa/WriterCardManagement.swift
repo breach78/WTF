@@ -103,10 +103,11 @@ extension ScenarioWriterView {
             card: card,
             isActive: activeCardID == card.id,
             isSelected: selectedCardIDs.contains(card.id),
+            isMultiSelected: selectedCardIDs.count > 1 && selectedCardIDs.contains(card.id),
             isArchived: card.isArchived,
             isAncestor: false,
             isDescendant: false,
-            isEditing: editingCardID == card.id,
+            isEditing: acceptsKeyboardInput && editingCardID == card.id,
             dropTarget: nil,
             forceNamedSnapshotNoteStyle: isNamedNote,
             forceCustomColorVisibility: isAICandidate,
@@ -129,6 +130,8 @@ extension ScenarioWriterView {
             onContentChange: nil,
             onColorChange: { hex in setCardColor(card, hex: hex) },
             onReferenceCard: { addCardToReferenceWindow(card) },
+            onSummarizeChildren: nil,
+            isSummarizingChildren: false,
             onDelete: { performDelete(card) },
             onHardDelete: { performHardDelete(card) }
         )
@@ -148,9 +151,19 @@ extension ScenarioWriterView {
                         }
                         .frame(height: screenHeight * 0.4)
 
-                        ForEach(cards) { card in
+                        ForEach(Array(cards.enumerated()), id: \.element.id) { index, card in
                             VStack(spacing: 0) {
                                 cardRow(card, proxy: proxy)
+
+                                if index < cards.count - 1 {
+                                    let next = cards[index + 1]
+                                    if card.parent?.id != next.parent?.id {
+                                        Rectangle()
+                                            .fill(appearance == "light" ? Color.black.opacity(0.16) : Color.black.opacity(0.40))
+                                            .frame(height: 2)
+                                            .padding(.horizontal, 14)
+                                    }
+                                }
 
                                 // --- 카드 사이 드롭 영역 ---
                                 DropSpacer(target: .after(card.id), activeDropTarget: $activeDropTarget, alignment: .center) { providers in
@@ -170,24 +183,29 @@ extension ScenarioWriterView {
                     .padding(.horizontal, 6).frame(width: columnWidth)
                 }
                 .onChange(of: activeCardID) { _, newID in
+                    guard acceptsKeyboardInput else { return }
                     // 현재 열이 활성 카드 본인이거나 그 조상을 포함한 '포커스 경로'일 때만 애니메이션 스크롤
                     // 자식 열이 부모의 움직임에 따라 마구 스크롤되는 현상(Dancing)을 방지합니다.
                     let isDirectPath = cards.contains { $0.id == newID || activeAncestorIDs.contains($0.id) }
-                    if isDirectPath {
+                    let isImmediateChildColumn = cards.contains { $0.parent?.id == newID }
+                    if isDirectPath || isImmediateChildColumn {
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) {
                             scrollToFocus(in: cards, parent: parent, proxy: proxy, viewportHeight: screenHeight, animated: true)
                         }
                     }
                 }
                 .onChange(of: cards.map { $0.id }) { _, _ in
+                    guard acceptsKeyboardInput else { return }
                     // 부모가 바뀌어 열의 카드 구성이 달라진 경우(자식 열 등장), 애니메이션 없이 즉시 위치를 잡습니다.
                     scrollToFocus(in: cards, parent: parent, proxy: proxy, viewportHeight: screenHeight, animated: false)
                 }
                 .onAppear {
+                    guard acceptsKeyboardInput else { return }
                     // 처음 열이 그려질 때는 지연 없이 즉시 스냅하여 튀어오르는 느낌을 제거합니다.
                     scrollToFocus(in: cards, parent: parent, proxy: proxy, viewportHeight: screenHeight, animated: false)
                 }
                 .onPreferenceChange(MainCardHeightPreferenceKey.self) { heights in
+                    guard acceptsKeyboardInput else { return }
                     let previousHeights = mainCardHeights
                     mainCardHeights.merge(heights, uniquingKeysWith: { _, new in new })
                     guard let activeID = activeCardID else { return }
@@ -201,6 +219,7 @@ extension ScenarioWriterView {
                     }
                 }
                 .onPreferenceChange(MainCardWidthPreferenceKey.self) { widths in
+                    guard acceptsKeyboardInput else { return }
                     let previousWidths = mainCardWidths
                     mainCardWidths.merge(widths, uniquingKeysWith: { _, new in new })
                     guard !showFocusMode else { return }
@@ -215,6 +234,7 @@ extension ScenarioWriterView {
                     }
                 }
                 .onChange(of: mainBottomRevealTick) { _, _ in
+                    guard acceptsKeyboardInput else { return }
                     guard let requestedID = mainBottomRevealCardID else { return }
                     guard activeCardID == requestedID else { return }
                     guard cards.last?.id == requestedID else { return }
@@ -236,6 +256,7 @@ extension ScenarioWriterView {
         viewportHeight: CGFloat,
         animated: Bool = true
     ) {
+        guard acceptsKeyboardInput else { return }
         let defaultAnchor = UnitPoint(x: 0.5, y: 0.4)
 
         let targetID: UUID?
@@ -243,8 +264,17 @@ extension ScenarioWriterView {
             targetID = id
         } else if let target = cards.first(where: { activeAncestorIDs.contains($0.id) }) {
             targetID = target.id
-        } else if let p = parent, p.id == activeCardID, let lastID = p.lastSelectedChildID ?? cards.first?.id {
-            targetID = lastID
+        } else if
+            let activeID = activeCardID,
+            let activeCard = findCard(by: activeID)
+        {
+            let directChildren = cards.filter { $0.parent?.id == activeID }
+            if let rememberedID = activeCard.lastSelectedChildID,
+               directChildren.contains(where: { $0.id == rememberedID }) {
+                targetID = rememberedID
+            } else {
+                targetID = directChildren.first?.id
+            }
         } else {
             targetID = nil
         }
@@ -281,14 +311,17 @@ extension ScenarioWriterView {
     @ViewBuilder
     func cardRow(_ card: SceneCard, proxy: ScrollViewProxy) -> some View {
         let isAICandidate = aiCandidateCardIDs.contains(card.id) || card.isAICandidate
+        let canCreateUpperCard = canCreateUpperCardFromSelection(contextCard: card)
+        let canSummarizeChildren = canSummarizeDirectChildren(for: card)
         CardItem(
             card: card,
             isActive: activeCardID == card.id,
             isSelected: selectedCardIDs.contains(card.id),
+            isMultiSelected: selectedCardIDs.count > 1 && selectedCardIDs.contains(card.id),
             isArchived: card.isArchived,
             isAncestor: activeAncestorIDs.contains(card.id) || activeSiblingIDs.contains(card.id),
             isDescendant: activeDescendantIDs.contains(card.id),
-            isEditing: editingCardID == card.id,
+            isEditing: acceptsKeyboardInput && editingCardID == card.id,
             dropTarget: activeDropTarget,
             forceNamedSnapshotNoteStyle: false,
             forceCustomColorVisibility: isAICandidate,
@@ -309,6 +342,13 @@ extension ScenarioWriterView {
             },
             onColorChange: { hex in setCardColor(card, hex: hex) },
             onReferenceCard: { addCardToReferenceWindow(card) },
+            onCreateUpperCardFromSelection: canCreateUpperCard ? {
+                createUpperCardFromSelection(contextCard: card)
+            } : nil,
+            onSummarizeChildren: canSummarizeChildren ? {
+                summarizeDirectChildrenIntoParent(cardID: card.id)
+            } : nil,
+            isSummarizingChildren: aiChildSummaryLoadingCardIDs.contains(card.id),
             onHardDelete: { performHardDelete(card) }
         )
         .background(
@@ -566,6 +606,7 @@ extension ScenarioWriterView {
         force: Bool = false,
         animated: Bool = true
     ) {
+        if !acceptsKeyboardInput && !force { return }
         let levels = getAllLevels(); guard let targetLevel = levels.firstIndex(where: { $0.contains(where: { $0.id == targetCardID }) }) else { return }
         let hOffset = (columnWidth / 2) / availableWidth; let hAnchor = UnitPoint(x: 0.5 - hOffset, y: 0.4)
         let performScroll: (Int) -> Void = { level in
@@ -630,6 +671,7 @@ extension ScenarioWriterView {
         deferToMainAsync: Bool = true,
         force: Bool = false
     ) {
+        cleanupEmptyEditingCardIfNeeded(beforeSwitchingTo: card.id)
         if !force {
             if activeCardID == card.id, pendingActiveCardID == nil {
                 if shouldFocusMain { isMainViewFocused = true }
@@ -660,6 +702,15 @@ extension ScenarioWriterView {
         } else {
             apply()
         }
+    }
+
+    func cleanupEmptyEditingCardIfNeeded(beforeSwitchingTo targetCardID: UUID) {
+        guard !isApplyingUndo else { return }
+        guard let currentEditingID = editingCardID,
+              currentEditingID != targetCardID,
+              let currentCard = findCard(by: currentEditingID) else { return }
+        guard currentCard.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        finishEditing()
     }
 
     func getAllDescendants(of card: SceneCard) -> Set<UUID> {
@@ -1078,6 +1129,280 @@ extension ScenarioWriterView {
 
     // MARK: - Insert, Add Child, Delete
 
+    func selectedSiblingsForParentCreation(contextCard: SceneCard) -> [SceneCard]? {
+        guard !showFocusMode else { return nil }
+        guard selectedCardIDs.count > 1 else { return nil }
+        guard selectedCardIDs.contains(contextCard.id) else { return nil }
+
+        let selectedCards = selectedCardIDs.compactMap { findCard(by: $0) }
+        guard selectedCards.count == selectedCardIDs.count else { return nil }
+        guard !selectedCards.isEmpty else { return nil }
+
+        let parentID = selectedCards.first?.parent?.id
+        guard selectedCards.allSatisfy({ $0.parent?.id == parentID }) else { return nil }
+
+        return selectedCards.sorted { lhs, rhs in
+            if lhs.orderIndex != rhs.orderIndex {
+                return lhs.orderIndex < rhs.orderIndex
+            }
+            return lhs.createdAt < rhs.createdAt
+        }
+    }
+
+    func canCreateUpperCardFromSelection(contextCard: SceneCard) -> Bool {
+        selectedSiblingsForParentCreation(contextCard: contextCard) != nil
+    }
+
+    func createUpperCardFromSelection(contextCard: SceneCard) {
+        guard let selectedSiblings = selectedSiblingsForParentCreation(contextCard: contextCard),
+              let firstSelected = selectedSiblings.first else { return }
+
+        let prevState = captureScenarioState()
+        suppressMainFocusRestoreAfterFinishEditing = true
+        finishEditing()
+
+        let parent = firstSelected.parent
+        let insertionIndex = firstSelected.orderIndex
+        let newParent = SceneCard(
+            orderIndex: insertionIndex,
+            parent: parent,
+            scenario: scenario,
+            category: parent?.category ?? firstSelected.category
+        )
+        scenario.cards.append(newParent)
+
+        for (childIndex, selectedCard) in selectedSiblings.enumerated() {
+            selectedCard.parent = newParent
+            selectedCard.orderIndex = childIndex
+        }
+
+        normalizeIndices(parent: parent)
+        normalizeIndices(parent: newParent)
+
+        scenario.bumpCardsVersion()
+        store.saveAll()
+        takeSnapshot()
+        keyboardRangeSelectionAnchorCardID = nil
+        selectedCardIDs = [newParent.id]
+        changeActiveCard(to: newParent, shouldFocusMain: false)
+        editingCardID = newParent.id
+        editingStartContent = newParent.content
+        editingStartState = captureScenarioState()
+        editingIsNewCard = false
+        pendingNewCardPrevState = nil
+        mainCaretLocationByCardID[newParent.id] = 0
+        requestMainCaretRestore(for: newParent.id)
+        requestCoalescedMainCaretEnsure(minInterval: mainCaretSelectionEnsureMinInterval, delay: 0.0)
+        isMainViewFocused = true
+        pushUndoState(prevState, actionName: "새 상위 카드 만들기")
+    }
+
+    func canSummarizeDirectChildren(for parentCard: SceneCard) -> Bool {
+        guard !showFocusMode else { return false }
+        return parentCard.children.count >= 2
+    }
+
+    func summarizeDirectChildrenIntoParent(cardID: UUID) {
+        guard !showFocusMode else { return }
+        guard !aiChildSummaryLoadingCardIDs.contains(cardID) else { return }
+        guard !aiIsGenerating else {
+            setAIStatusError("이미 다른 AI 작업이 진행 중입니다.")
+            return
+        }
+        guard let parentCard = findCard(by: cardID) else { return }
+        let directChildren = parentCard.children.sorted {
+            if $0.orderIndex != $1.orderIndex { return $0.orderIndex < $1.orderIndex }
+            return $0.createdAt < $1.createdAt
+        }
+        guard directChildren.count >= 2 else {
+            setAIStatusError("요약하려면 하위 카드가 2개 이상 필요합니다.")
+            return
+        }
+
+        suppressMainFocusRestoreAfterFinishEditing = true
+        finishEditing()
+
+        let prompt = buildChildCardsSummaryPrompt(parentCard: parentCard, directChildren: directChildren)
+        let resolvedModel = currentGeminiModel()
+
+        aiIsGenerating = true
+        aiChildSummaryLoadingCardIDs.insert(parentCard.id)
+        setAIStatus("하위 카드 요약을 생성하는 중입니다...")
+
+        Task { @MainActor in
+            defer {
+                aiIsGenerating = false
+                aiChildSummaryLoadingCardIDs.remove(parentCard.id)
+            }
+
+            do {
+                guard let latestParent = findCard(by: parentCard.id) else { return }
+                guard let apiKey = try KeychainStore.loadGeminiAPIKey() else {
+                    throw GeminiServiceError.missingAPIKey
+                }
+                let rawSummary = try await GeminiService.generateText(
+                    prompt: prompt,
+                    model: resolvedModel,
+                    apiKey: apiKey
+                )
+                let summary = normalizedChildSummaryOutput(rawSummary)
+                guard !summary.isEmpty else {
+                    throw GeminiServiceError.invalidResponse
+                }
+
+                let prevState = captureScenarioState()
+                let blockTitle = "하위 카드 요약"
+                let block = "\(blockTitle)\n\(summary)"
+                if latestParent.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    latestParent.content = block
+                } else {
+                    latestParent.content += "\n\n\(block)"
+                }
+
+                scenario.bumpCardsVersion()
+                store.saveAll()
+                takeSnapshot(force: true)
+                pushUndoState(prevState, actionName: "하위 카드 요약")
+
+                selectedCardIDs = [latestParent.id]
+                changeActiveCard(to: latestParent, shouldFocusMain: false)
+                editingCardID = latestParent.id
+                editingStartContent = latestParent.content
+                editingStartState = captureScenarioState()
+                editingIsNewCard = false
+                pendingNewCardPrevState = nil
+                mainCaretLocationByCardID[latestParent.id] = (latestParent.content as NSString).length
+                requestMainCaretRestore(for: latestParent.id)
+                requestCoalescedMainCaretEnsure(minInterval: mainCaretSelectionEnsureMinInterval, delay: 0.0)
+                isMainViewFocused = true
+
+                setAIStatus("하위 카드 요약을 카드 하단에 추가했습니다.")
+            } catch {
+                setAIStatusError(error.localizedDescription)
+            }
+        }
+    }
+
+    func buildChildCardsSummaryPrompt(parentCard: SceneCard, directChildren: [SceneCard]) -> String {
+        let parentContext = clampedAIText(parentCard.content, maxLength: 1200, preserveLineBreak: true)
+        let orderedChildrenText = directChildren.enumerated().map { idx, child in
+            let content = clampedAIText(child.content, maxLength: 1400, preserveLineBreak: true)
+            return "\(idx + 1). \(content)"
+        }.joined(separator: "\n\n")
+
+        return """
+        당신은 시나리오 편집 도우미다.
+        아래는 하나의 부모 카드와, 그 부모 카드의 \"직계 하위 카드들\"이다.
+        하위 카드들은 위에서 아래 순서가 곧 이야기 전개 순서다.
+
+        [중요 규칙]
+        - 반드시 직계 하위 카드들만 사용해 요약한다. 하위의 하위 카드(더 깊은 열)는 절대 참조하지 않는다.
+        - 한국어로 작성한다.
+        - 한 문단, 2~3문장으로 작성하고 예시 문단과 비슷한 길이(약 35~45어절)를 목표로 한다.
+        - 가능하면 45어절을 넘기지 않는다. 길어질 경우 핵심 사건만 남기고 압축한다.
+        - 핵심 사건 흐름, 인과, 전환을 간결하게 유지한다.
+        - 번호 목록, 마크다운, 따옴표 블록 없이 순수 본문만 출력한다.
+
+        [부모 카드 문맥]
+        \(parentContext)
+
+        [직계 하위 카드 목록(이 순서가 이야기 순서)]
+        \(orderedChildrenText)
+        """
+    }
+
+    func normalizedChildSummaryOutput(_ raw: String) -> String {
+        var text = raw.replacingOccurrences(of: "\r\n", with: "\n")
+        text = text.replacingOccurrences(of: "\n", with: " ")
+        text = text.replacingOccurrences(of: "\t", with: " ")
+        text = text.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+        text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return "" }
+
+        let sentenceEndings: Set<Character> = [".", "!", "?", "…", "。"]
+        var sentenceCount = 0
+        var sentenceLimited = ""
+        for char in text {
+            sentenceLimited.append(char)
+            if sentenceEndings.contains(char) {
+                sentenceCount += 1
+                if sentenceCount >= 3 { break }
+            }
+        }
+        if sentenceCount > 0 {
+            text = sentenceLimited.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        let maxWords = 45
+        let words = text.split(whereSeparator: { $0.isWhitespace })
+        if words.count > maxWords {
+            text = words.prefix(maxWords).map(String.init).joined(separator: " ")
+        }
+
+        let maxCharacters = 180
+        if text.count > maxCharacters {
+            let cutoff = text.index(text.startIndex, offsetBy: maxCharacters)
+            var trimmed = String(text[..<cutoff])
+            if let lastSpace = trimmed.lastIndex(of: " "), lastSpace > trimmed.startIndex {
+                trimmed = String(trimmed[..<lastSpace])
+            }
+            text = trimmed.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        if let last = text.last, !sentenceEndings.contains(last) {
+            text += "."
+        }
+        return text
+    }
+
+    func splitCardAtCaret() {
+        let prevState = captureScenarioState()
+        guard let id = editingCardID ?? activeCardID,
+              let card = findCard(by: id) else { return }
+        guard let textView = NSApp.keyWindow?.firstResponder as? NSTextView else { return }
+        guard !textView.hasMarkedText() else { return }
+
+        if showFocusMode {
+            finalizeFocusTypingCoalescing(reason: "split-card")
+            pushFocusUndoState(prevState, actionName: "카드 나누기")
+        }
+
+        let sourceText = textView.string as NSString
+        let splitLocation = min(max(0, textView.selectedRange().location), sourceText.length)
+        let upperContent = sourceText.substring(to: splitLocation)
+        let lowerContent = sourceText.substring(from: splitLocation)
+
+        let targetOrderIndex = card.orderIndex + 1
+        for sibling in (card.parent?.sortedChildren ?? scenario.rootCards) where sibling.orderIndex >= targetOrderIndex {
+            sibling.orderIndex += 1
+        }
+
+        card.content = upperContent
+        let new = SceneCard(orderIndex: targetOrderIndex, parent: card.parent, scenario: scenario, category: card.category)
+        new.content = lowerContent
+        scenario.cards.append(new)
+        scenario.bumpCardsVersion()
+        store.saveAll()
+
+        selectedCardIDs = [new.id]
+        changeActiveCard(to: new, shouldFocusMain: false)
+        editingCardID = new.id
+        editingStartContent = new.content
+        editingIsNewCard = true
+        pendingNewCardPrevState = prevState
+
+        if showFocusMode {
+            focusModeEditorCardID = new.id
+            DispatchQueue.main.async {
+                beginFocusModeEditing(new, cursorToEnd: false, cardScrollAnchor: .center)
+            }
+        } else {
+            mainCaretLocationByCardID[new.id] = 0
+            requestMainCaretRestore(for: new.id)
+            requestCoalescedMainCaretEnsure(minInterval: mainCaretSelectionEnsureMinInterval, delay: 0.0)
+        }
+    }
+
     func insertSibling(above: Bool) {
         let prevState = captureScenarioState()
         guard let id = activeCardID, let card = findCard(by: id) else { return }
@@ -1283,6 +1608,7 @@ extension ScenarioWriterView {
     func handleCardTap(_ card: SceneCard) {
         let isCommandPressed = NSEvent.modifierFlags.contains(.command)
         finishEditing()
+        keyboardRangeSelectionAnchorCardID = nil
         if isCommandPressed {
             if selectedCardIDs.contains(card.id) {
                 selectedCardIDs.remove(card.id)

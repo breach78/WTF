@@ -208,10 +208,13 @@ extension ScenarioWriterView {
         let clampedContext = clampedAIText(contextStr, maxLength: 10000, preserveLineBreak: true)
         
         var chatHistory = ""
-        for msg in aiChatMessages {
+        let recentMessages = Array(aiChatMessages.suffix(20))
+        for msg in recentMessages {
             let roleName = msg.role == "user" ? "사용자" : "AI"
-            chatHistory += "\(roleName): \(msg.text)\n\n"
+            let compactText = clampedAIText(msg.text, maxLength: 600, preserveLineBreak: true)
+            chatHistory += "\(roleName): \(compactText)\n\n"
         }
+        chatHistory = clampedAIText(chatHistory, maxLength: 6000, preserveLineBreak: true)
         
         let prompt = """
         당신은 이 시나리오를 함께 쓰는 전문 보조 작가다. 
@@ -233,6 +236,7 @@ extension ScenarioWriterView {
         setAIStatus(nil)
         
         Task { @MainActor in
+            defer { isAIChatLoading = false }
             do {
                 guard let apiKey = try KeychainStore.loadGeminiAPIKey() else {
                     throw GeminiServiceError.missingAPIKey
@@ -249,7 +253,6 @@ extension ScenarioWriterView {
                 setAIStatusError(error.localizedDescription)
                 aiChatMessages.append(AIChatMessage(role: "model", text: "오류가 발생했습니다: \(error.localizedDescription)"))
             }
-            isAIChatLoading = false
         }
     }
 

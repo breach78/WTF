@@ -5,6 +5,18 @@ extension ScenarioWriterView {
 
     // --- Key Handling Logic ---
     func handleGlobalKeyPress(_ press: KeyPress) -> KeyPress.Result {
+        if press.phase == .down,
+           press.key == .tab,
+           press.modifiers.contains(.control),
+           !press.modifiers.contains(.command),
+           !press.modifiers.contains(.option),
+           !press.modifiers.contains(.shift) {
+            NotificationCenter.default.post(name: .waCycleSplitPaneRequested, object: nil)
+            return .handled
+        }
+        if !acceptsKeyboardInput {
+            return .ignored
+        }
         let isNoModifier =
             !press.modifiers.contains(.command) &&
             !press.modifiers.contains(.option) &&
@@ -29,16 +41,6 @@ extension ScenarioWriterView {
         let isHistoryNoteTyping = showHistoryBar && isNamedSnapshotNoteEditing && isNamedSnapshotNoteEditorFocused
         let isTyping = isMainEditorTyping || isTimelineSearchTyping || isHistorySearchTyping || isHistoryNoteTyping
         if press.phase == .down {
-            if showFocusMode && press.modifiers.contains([.command, .shift]) {
-                let normalized = press.characters.lowercased()
-                if normalized == "t" || press.characters == "ㅅ" || press.characters == "ㅆ" {
-                    DispatchQueue.main.async {
-                        focusTypewriterEnabled.toggle()
-                        requestFocusModeCaretEnsure(typewriter: focusTypewriterEnabled, delay: 0.0)
-                    }
-                    return .handled
-                }
-            }
             if isMainEditorTyping && !showFocusMode && isNoModifier && press.key == .tab {
                 let now = Date()
                 let editingID = editingCardID
@@ -60,7 +62,24 @@ extension ScenarioWriterView {
                 mainEditTabArmAt = now
                 return .handled
             }
-            if isMainEditorTyping && !showFocusMode && press.modifiers.contains(.command) && press.key == .return {
+            if isMainEditorTyping &&
+                press.key == .return &&
+                press.modifiers.contains([.command, .option]) &&
+                !press.modifiers.contains(.control) &&
+                !press.modifiers.contains(.shift) {
+                clearMainEditTabArm()
+                DispatchQueue.main.async {
+                    splitCardAtCaret()
+                }
+                return .handled
+            }
+            if isMainEditorTyping &&
+                !showFocusMode &&
+                press.modifiers.contains(.command) &&
+                !press.modifiers.contains(.option) &&
+                !press.modifiers.contains(.control) &&
+                !press.modifiers.contains(.shift) &&
+                press.key == .return {
                 if editingCardID != nil {
                     clearMainEditTabArm()
                     suppressMainFocusRestoreAfterFinishEditing = true
@@ -88,6 +107,9 @@ extension ScenarioWriterView {
                     return .handled
                 } else if showTimeline {
                     DispatchQueue.main.async { closeSearch() }
+                    return .handled
+                }
+                if isFullscreen {
                     return .handled
                 }
             }
@@ -130,7 +152,7 @@ extension ScenarioWriterView {
                 !press.modifiers.contains(.option) &&
                 !press.modifiers.contains(.control) {
                 switch press.key {
-                case .upArrow, .downArrow:
+                case .upArrow, .downArrow, .leftArrow, .rightArrow:
                     if handleMainEditorBoundaryNavigation(press) {
                         return .handled
                     }
@@ -259,6 +281,39 @@ extension ScenarioWriterView {
         mainEditTabArmAt = .distantPast
     }
 
+    func clearKeyboardRangeSelectionAnchor() {
+        keyboardRangeSelectionAnchorCardID = nil
+    }
+
+    func applyKeyboardRangeSelection(on level: [SceneCard], anchorID: UUID, targetID: UUID) {
+        guard let anchorIndex = level.firstIndex(where: { $0.id == anchorID }),
+              let targetIndex = level.firstIndex(where: { $0.id == targetID }) else {
+            selectedCardIDs = [targetID]
+            return
+        }
+        let lower = min(anchorIndex, targetIndex)
+        let upper = max(anchorIndex, targetIndex)
+        let ids = level[lower ... upper].map { $0.id }
+        selectedCardIDs = Set(ids)
+    }
+
+    func updateKeyboardRangeSelection(from currentCard: SceneCard, to targetCard: SceneCard, in level: [SceneCard]) {
+        let anchorID: UUID
+        if let existingAnchor = keyboardRangeSelectionAnchorCardID,
+           level.contains(where: { $0.id == existingAnchor }) {
+            anchorID = existingAnchor
+        } else {
+            anchorID = currentCard.id
+            keyboardRangeSelectionAnchorCardID = anchorID
+        }
+
+        if level.contains(where: { $0.id == targetCard.id }) {
+            applyKeyboardRangeSelection(on: level, anchorID: anchorID, targetID: targetCard.id)
+        } else {
+            selectedCardIDs = Set([anchorID, targetCard.id])
+        }
+    }
+
     func handleMainEditorBoundaryNavigation(_ press: KeyPress) -> Bool {
         guard let editingID = editingCardID,
               let editingCard = findCard(by: editingID) else { return false }
@@ -280,6 +335,10 @@ extension ScenarioWriterView {
         let atTopBoundary = (cursor == 0) && (visualBoundary?.isTop ?? true)
         let atBottomBoundary = (cursor == content.length) && (visualBoundary?.isBottom ?? true)
         let isRepeat = (press.phase == .repeat)
+        let shouldDiscardEmptyNewCardOnBoundaryMove =
+            editingIsNewCard &&
+            editingCard.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let isShiftSelection = press.modifiers.contains(.shift)
 
         switch press.key {
         case .upArrow:
@@ -289,6 +348,18 @@ extension ScenarioWriterView {
                 return true
             }
             clearMainEditTabArm()
+            clearMainBoundaryParentLeftArm()
+            clearMainBoundaryChildRightArm()
+            clearMainNoChildRightArm()
+            if isShiftSelection && press.phase == .down {
+                finishEditing()
+                changeActiveCard(to: target, shouldFocusMain: false, deferToMainAsync: false)
+                updateKeyboardRangeSelection(from: editingCard, to: target, in: currentLevel)
+                return true
+            }
+            if shouldDiscardEmptyNewCardOnBoundaryMove {
+                finishEditing()
+            }
             changeActiveCard(to: target, shouldFocusMain: false, deferToMainAsync: false)
             selectedCardIDs = [target.id]
             editingCardID = target.id
@@ -298,7 +369,7 @@ extension ScenarioWriterView {
             let targetLength = (target.content as NSString).length
             mainCaretLocationByCardID[target.id] = targetLength
             requestMainCaretRestore(for: target.id)
-            requestMainCaretEnsure(delay: 0.0)
+            requestCoalescedMainCaretEnsure(minInterval: mainCaretSelectionEnsureMinInterval, delay: 0.0)
             return true
 
         case .downArrow:
@@ -308,6 +379,18 @@ extension ScenarioWriterView {
                 return true
             }
             clearMainEditTabArm()
+            clearMainBoundaryParentLeftArm()
+            clearMainBoundaryChildRightArm()
+            clearMainNoChildRightArm()
+            if isShiftSelection && press.phase == .down {
+                finishEditing()
+                changeActiveCard(to: target, shouldFocusMain: false, deferToMainAsync: false)
+                updateKeyboardRangeSelection(from: editingCard, to: target, in: currentLevel)
+                return true
+            }
+            if shouldDiscardEmptyNewCardOnBoundaryMove {
+                finishEditing()
+            }
             changeActiveCard(to: target, shouldFocusMain: false, deferToMainAsync: false)
             selectedCardIDs = [target.id]
             editingCardID = target.id
@@ -316,10 +399,118 @@ extension ScenarioWriterView {
             editingIsNewCard = false
             mainCaretLocationByCardID[target.id] = 0
             requestMainCaretRestore(for: target.id)
-            requestMainCaretEnsure(delay: 0.0)
+            requestCoalescedMainCaretEnsure(minInterval: mainCaretSelectionEnsureMinInterval, delay: 0.0)
+            return true
+
+        case .leftArrow:
+            guard atTopBoundary, cursor == 0 else {
+                clearMainBoundaryParentLeftArm()
+                return false
+            }
+            guard let parentCard = editingCard.parent else {
+                clearMainBoundaryParentLeftArm()
+                return false
+            }
+            guard press.phase == .down else {
+                return true
+            }
+
+            clearMainEditTabArm()
+            clearMainBoundaryChildRightArm()
+            clearMainNoChildRightArm()
+            if isShiftSelection {
+                finishEditing()
+                changeActiveCard(to: parentCard, shouldFocusMain: false, deferToMainAsync: false)
+                updateKeyboardRangeSelection(from: editingCard, to: parentCard, in: currentLevel)
+                return true
+            }
+            if isMainBoundaryParentLeftArmed(for: editingCard.id) {
+                clearMainBoundaryParentLeftArm()
+                if shouldDiscardEmptyNewCardOnBoundaryMove {
+                    finishEditing()
+                }
+                changeActiveCard(to: parentCard, shouldFocusMain: false, deferToMainAsync: false)
+                selectedCardIDs = [parentCard.id]
+                editingCardID = parentCard.id
+                editingStartContent = parentCard.content
+                editingStartState = captureScenarioState()
+                editingIsNewCard = false
+                let parentLength = (parentCard.content as NSString).length
+                mainCaretLocationByCardID[parentCard.id] = parentLength
+                requestMainCaretRestore(for: parentCard.id)
+                requestCoalescedMainCaretEnsure(minInterval: mainCaretSelectionEnsureMinInterval, delay: 0.0)
+                return true
+            }
+
+            armMainBoundaryParentLeft(for: editingCard.id)
+            return true
+
+        case .rightArrow:
+            guard atBottomBoundary, cursor == content.length else {
+                clearMainBoundaryChildRightArm()
+                clearMainNoChildRightArm()
+                return false
+            }
+            guard press.phase == .down else {
+                return true
+            }
+
+            clearMainEditTabArm()
+            clearMainBoundaryParentLeftArm()
+            if isShiftSelection {
+                clearMainBoundaryChildRightArm()
+                let nextLevel = (levelIndex + 1 < levels.count) ? levels[levelIndex + 1] : []
+                let result = resolvedMainRightTarget(
+                    for: editingCard,
+                    currentLevel: currentLevel,
+                    nextLevel: nextLevel,
+                    currentIndex: cardIndex,
+                    allowDoublePressFallback: true
+                )
+                if case .target(let target) = result {
+                    finishEditing()
+                    changeActiveCard(to: target, shouldFocusMain: false, deferToMainAsync: false)
+                    updateKeyboardRangeSelection(from: editingCard, to: target, in: currentLevel)
+                }
+                return true
+            }
+            if isMainBoundaryChildRightArmed(for: editingCard.id) {
+                clearMainBoundaryChildRightArm()
+                let nextLevel = (levelIndex + 1 < levels.count) ? levels[levelIndex + 1] : []
+                let result = resolvedMainRightTarget(
+                    for: editingCard,
+                    currentLevel: currentLevel,
+                    nextLevel: nextLevel,
+                    currentIndex: cardIndex,
+                    allowDoublePressFallback: true
+                )
+                if case .target(let target) = result {
+                    if shouldDiscardEmptyNewCardOnBoundaryMove {
+                        finishEditing()
+                    }
+                    changeActiveCard(to: target, shouldFocusMain: false, deferToMainAsync: false)
+                    selectedCardIDs = [target.id]
+                    editingCardID = target.id
+                    editingStartContent = target.content
+                    editingStartState = captureScenarioState()
+                    editingIsNewCard = false
+                    mainCaretLocationByCardID[target.id] = 0
+                    requestMainCaretRestore(for: target.id)
+                    requestCoalescedMainCaretEnsure(minInterval: mainCaretSelectionEnsureMinInterval, delay: 0.0)
+                }
+                return true
+            }
+
+            if preferredChild(for: editingCard, matching: editingCard.category) == nil {
+                armMainNoChildRight(for: editingCard.id)
+            }
+            armMainBoundaryChildRight(for: editingCard.id)
             return true
 
         default:
+            clearMainBoundaryParentLeftArm()
+            clearMainBoundaryChildRightArm()
+            clearMainNoChildRightArm()
             return false
         }
     }
@@ -333,6 +524,7 @@ extension ScenarioWriterView {
             if isReferenceWindowEvent || isReferenceWindowKey {
                 return event
             }
+            if !acceptsKeyboardInput { return event }
             if showFocusMode || showHistoryBar || isPreviewingHistory { return event }
             if showDeleteAlert {
                 let hasChildren = selectedCardsForDeletion().contains { !$0.children.isEmpty }
@@ -350,6 +542,11 @@ extension ScenarioWriterView {
             let isCmdOnly = flags.contains(.command) && !flags.contains(.option) && !flags.contains(.control) && !flags.contains(.shift)
             let normalized = (event.charactersIgnoringModifiers ?? "").lowercased()
             let isFindShortcut = normalized == "f" || normalized == "ㄹ" || event.keyCode == 3
+            let isCtrlTab = flags.contains(.control) && !flags.contains(.command) && !flags.contains(.option) && !flags.contains(.shift) && event.keyCode == 48
+            if isCtrlTab {
+                NotificationCenter.default.post(name: .waCycleSplitPaneRequested, object: nil)
+                return nil
+            }
             if isCmdOnly && isFindShortcut {
                 DispatchQueue.main.async {
                     toggleSearch()
@@ -360,7 +557,7 @@ extension ScenarioWriterView {
             if event.modifierFlags.contains(.command) || event.modifierFlags.contains(.option) || event.modifierFlags.contains(.control) {
                 return event
             }
-            if handleNavigationKeyCode(event.keyCode, isRepeat: event.isARepeat) {
+            if handleNavigationKeyCode(event.keyCode, isRepeat: event.isARepeat, isShiftPressed: flags.contains(.shift)) {
                 return nil
             }
             return event
@@ -387,6 +584,36 @@ extension ScenarioWriterView {
     func isMainNoChildRightArmed(for cardID: UUID) -> Bool {
         guard mainNoChildRightArmCardID == cardID else { return false }
         return Date().timeIntervalSince(mainNoChildRightArmAt) <= mainNoChildRightDoublePressInterval
+    }
+
+    func clearMainBoundaryParentLeftArm() {
+        mainBoundaryParentLeftArmCardID = nil
+        mainBoundaryParentLeftArmAt = .distantPast
+    }
+
+    func armMainBoundaryParentLeft(for cardID: UUID) {
+        mainBoundaryParentLeftArmCardID = cardID
+        mainBoundaryParentLeftArmAt = Date()
+    }
+
+    func isMainBoundaryParentLeftArmed(for cardID: UUID) -> Bool {
+        guard mainBoundaryParentLeftArmCardID == cardID else { return false }
+        return Date().timeIntervalSince(mainBoundaryParentLeftArmAt) <= mainNoChildRightDoublePressInterval
+    }
+
+    func clearMainBoundaryChildRightArm() {
+        mainBoundaryChildRightArmCardID = nil
+        mainBoundaryChildRightArmAt = .distantPast
+    }
+
+    func armMainBoundaryChildRight(for cardID: UUID) {
+        mainBoundaryChildRightArmCardID = cardID
+        mainBoundaryChildRightArmAt = Date()
+    }
+
+    func isMainBoundaryChildRightArmed(for cardID: UUID) -> Bool {
+        guard mainBoundaryChildRightArmCardID == cardID else { return false }
+        return Date().timeIntervalSince(mainBoundaryChildRightArmAt) <= mainNoChildRightDoublePressInterval
     }
 
     // --- Preferred Child / Right Target Resolution ---
@@ -561,11 +788,16 @@ extension ScenarioWriterView {
     }
 
     // --- Navigation Key Code Handler ---
-    func handleNavigationKeyCode(_ keyCode: UInt16, isRepeat: Bool = false) -> Bool {
+    func handleNavigationKeyCode(_ keyCode: UInt16, isRepeat: Bool = false, isShiftPressed: Bool = false) -> Bool {
         guard let id = activeCardID else {
             if let first = scenario.rootCards.first {
                 changeActiveCard(to: first, deferToMainAsync: false)
                 selectedCardIDs = [first.id]
+                if isShiftPressed {
+                    keyboardRangeSelectionAnchorCardID = first.id
+                } else {
+                    clearKeyboardRangeSelectionAnchor()
+                }
                 return true
             }
             return false
@@ -578,7 +810,7 @@ extension ScenarioWriterView {
         let currentLevel = levels[lIdx]
         let nextLevel = (lIdx + 1 < levels.count) ? levels[lIdx + 1] : []
         let card = currentLevel[cIdx]
-        if selectedCardIDs.count > 1 { selectedCardIDs = [card.id] }
+        if !isShiftPressed && selectedCardIDs.count > 1 { selectedCardIDs = [card.id] }
 
         switch keyCode {
         case 126: // up
@@ -588,7 +820,12 @@ extension ScenarioWriterView {
                 // Block key-repeat from crossing category boundary (level >= 2)
                 if isRepeat && lIdx >= 2 && target.category != card.category { return true }
                 changeActiveCard(to: target, deferToMainAsync: false)
-                selectedCardIDs = [target.id]
+                if isShiftPressed {
+                    updateKeyboardRangeSelection(from: card, to: target, in: currentLevel)
+                } else {
+                    selectedCardIDs = [target.id]
+                    clearKeyboardRangeSelectionAnchor()
+                }
                 return true
             }
         case 125: // down
@@ -598,7 +835,12 @@ extension ScenarioWriterView {
                 // Block key-repeat from crossing category boundary (level >= 2)
                 if isRepeat && lIdx >= 2 && target.category != card.category { return true }
                 changeActiveCard(to: target, deferToMainAsync: false)
-                selectedCardIDs = [target.id]
+                if isShiftPressed {
+                    updateKeyboardRangeSelection(from: card, to: target, in: currentLevel)
+                } else {
+                    selectedCardIDs = [target.id]
+                    clearKeyboardRangeSelectionAnchor()
+                }
                 return true
             }
             if requestMainBottomRevealIfNeeded(currentLevel: currentLevel, currentIndex: cIdx, card: card) {
@@ -615,6 +857,7 @@ extension ScenarioWriterView {
             if case .target(let target) = result {
                 changeActiveCard(to: target, deferToMainAsync: false)
                 selectedCardIDs = [target.id]
+                clearKeyboardRangeSelectionAnchor()
             }
             // Consume right-arrow in main nav even when no move, so arm/double-press
             // state is not re-processed by the parallel SwiftUI onKeyPress path.
@@ -624,6 +867,7 @@ extension ScenarioWriterView {
             if let p = card.parent {
                 changeActiveCard(to: p, deferToMainAsync: false)
                 selectedCardIDs = [p.id]
+                clearKeyboardRangeSelectionAnchor()
                 return true
             }
         default:
@@ -641,7 +885,8 @@ extension ScenarioWriterView {
         let cIdx = location.index
         guard levels.indices.contains(lIdx), levels[lIdx].indices.contains(cIdx) else { return .handled }
         let currentLevel = levels[lIdx]; let nextLevel = (lIdx + 1 < levels.count) ? levels[lIdx + 1] : []; let card = currentLevel[cIdx]
-        if selectedCardIDs.count > 1 { selectedCardIDs = [card.id] }
+        let isShiftPressed = press.modifiers.contains(.shift)
+        if !isShiftPressed && selectedCardIDs.count > 1 { selectedCardIDs = [card.id] }
         let isRepeat = (press.phase == .repeat)
         switch press.key {
         case .upArrow:
@@ -651,7 +896,12 @@ extension ScenarioWriterView {
                 // Block key-repeat from crossing category boundary (level >= 2)
                 if isRepeat && lIdx >= 2 && target.category != card.category { break }
                 changeActiveCard(to: target, deferToMainAsync: false)
-                selectedCardIDs = [target.id]
+                if isShiftPressed {
+                    updateKeyboardRangeSelection(from: card, to: target, in: currentLevel)
+                } else {
+                    selectedCardIDs = [target.id]
+                    clearKeyboardRangeSelectionAnchor()
+                }
             }
         case .downArrow:
             clearMainNoChildRightArm()
@@ -660,7 +910,12 @@ extension ScenarioWriterView {
                 // Block key-repeat from crossing category boundary (level >= 2)
                 if isRepeat && lIdx >= 2 && target.category != card.category { break }
                 changeActiveCard(to: target, deferToMainAsync: false)
-                selectedCardIDs = [target.id]
+                if isShiftPressed {
+                    updateKeyboardRangeSelection(from: card, to: target, in: currentLevel)
+                } else {
+                    selectedCardIDs = [target.id]
+                    clearKeyboardRangeSelectionAnchor()
+                }
             }
             else {
                 _ = requestMainBottomRevealIfNeeded(currentLevel: currentLevel, currentIndex: cIdx, card: card)
@@ -677,12 +932,14 @@ extension ScenarioWriterView {
             if case .target(let target) = result {
                 changeActiveCard(to: target, deferToMainAsync: false)
                 selectedCardIDs = [target.id]
+                clearKeyboardRangeSelectionAnchor()
             }
         case .leftArrow:
             clearMainNoChildRightArm()
             if let p = card.parent {
                 changeActiveCard(to: p, deferToMainAsync: false)
                 selectedCardIDs = [p.id]
+                clearKeyboardRangeSelectionAnchor()
             }
         default: return .ignored
         }

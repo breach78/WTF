@@ -323,8 +323,6 @@ struct ReferenceWindowView: View {
     @AppStorage("mainCardLineSpacingValueV2") private var mainCardLineSpacingValue: Double = 5.0
     @AppStorage("appearance") private var appearance: String = "dark"
     @FocusState private var focusedEntryID: String?
-    @State private var bottomRevealEntryID: String? = nil
-    @State private var bottomRevealTick: Int = 0
     private let referenceCardWidth: CGFloat = ReferenceWindowConstants.cardWidth
 
     private var referenceFontSize: CGFloat {
@@ -354,15 +352,6 @@ struct ReferenceWindowView: View {
         appearance == "light" ? Color(red: 0.95, green: 0.95, blue: 0.94) : Color(red: 0.12, green: 0.13, blue: 0.15)
     }
 
-    private func scrollTargetID(for entryID: String) -> String {
-        "reference-row-\(entryID)"
-    }
-
-    private func requestBottomReveal(for entryID: String) {
-        bottomRevealEntryID = entryID
-        bottomRevealTick += 1
-    }
-
     var body: some View {
         ZStack {
             panelBackground
@@ -374,54 +363,36 @@ struct ReferenceWindowView: View {
                     .foregroundStyle(.secondary)
                     .padding()
             } else {
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        VStack(spacing: 10) {
-                            ForEach(resolvedEntries) { resolved in
-                                ReferenceCardEditorRow(
-                                    scenarioID: resolved.entry.scenarioID,
-                                    cardID: resolved.entry.cardID,
-                                    entryID: resolved.entry.id,
-                                    card: resolved.card,
-                                    appearance: appearance,
-                                    cardWidth: referenceCardWidth,
-                                    fontSize: referenceFontSize,
-                                    lineSpacing: referenceLineSpacing,
-                                    focusedEntryID: $focusedEntryID,
-                                    onContentChange: { scenarioID, cardID, oldValue, newValue in
-                                        referenceCardStore.handleContentChange(
-                                            scenarioID: scenarioID,
-                                            cardID: cardID,
-                                            oldValue: oldValue,
-                                            newValue: newValue,
-                                            fileStore: store
-                                        )
-                                    },
-                                    onRequestBottomReveal: { entryID in
-                                        requestBottomReveal(for: entryID)
-                                    },
-                                    onRemove: {
-                                        referenceCardStore.removeCard(cardID: resolved.entry.cardID, scenarioID: resolved.entry.scenarioID)
-                                    }
-                                )
-                                .id(scrollTargetID(for: resolved.entry.id))
-                            }
-                        }
-                        .padding(12)
-                        .frame(maxWidth: .infinity)
-                    }
-                    .onChange(of: bottomRevealTick) { _, _ in
-                        guard let entryID = bottomRevealEntryID else { return }
-                        let target = scrollTargetID(for: entryID)
-                        DispatchQueue.main.async {
-                            withAnimation(.easeOut(duration: 0.12)) {
-                                proxy.scrollTo(target, anchor: .bottom)
-                            }
-                        }
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.06) {
-                            proxy.scrollTo(target, anchor: .bottom)
+                ScrollView {
+                    VStack(spacing: 10) {
+                        ForEach(resolvedEntries) { resolved in
+                            ReferenceCardEditorRow(
+                                scenarioID: resolved.entry.scenarioID,
+                                cardID: resolved.entry.cardID,
+                                entryID: resolved.entry.id,
+                                card: resolved.card,
+                                appearance: appearance,
+                                cardWidth: referenceCardWidth,
+                                fontSize: referenceFontSize,
+                                lineSpacing: referenceLineSpacing,
+                                focusedEntryID: $focusedEntryID,
+                                onContentChange: { scenarioID, cardID, oldValue, newValue in
+                                    referenceCardStore.handleContentChange(
+                                        scenarioID: scenarioID,
+                                        cardID: cardID,
+                                        oldValue: oldValue,
+                                        newValue: newValue,
+                                        fileStore: store
+                                    )
+                                },
+                                onRemove: {
+                                    referenceCardStore.removeCard(cardID: resolved.entry.cardID, scenarioID: resolved.entry.scenarioID)
+                                }
+                            )
                         }
                     }
+                    .padding(12)
+                    .frame(maxWidth: .infinity)
                 }
             }
         }
@@ -441,16 +412,22 @@ private struct ReferenceCardEditorRow: View {
     let cardWidth: CGFloat
     let fontSize: CGFloat
     let lineSpacing: CGFloat
+    @AppStorage("cardActiveColorHex") private var cardActiveColorHex: String = "BFD7FF"
+    @AppStorage("darkCardActiveColorHex") private var darkCardActiveColorHex: String = "2A3A4E"
     @FocusState.Binding var focusedEntryID: String?
     let onContentChange: (UUID, UUID, String, String) -> Void
-    let onRequestBottomReveal: (String) -> Void
     let onRemove: () -> Void
 
     @State private var measuredBodyHeight: CGFloat = 0
     @State private var isHovering: Bool = false
+    @State private var caretVisibilityWorkItem: DispatchWorkItem? = nil
 
     private let outerPadding: CGFloat = 10
     private let editorVerticalPadding: CGFloat = 16
+
+    private var isReferenceWindowFocused: Bool {
+        NSApp.keyWindow?.identifier?.rawValue == ReferenceWindowConstants.windowID
+    }
 
     private var editorHorizontalPadding: CGFloat {
         MainEditorLayoutMetrics.mainEditorHorizontalPadding
@@ -460,14 +437,38 @@ private struct ReferenceCardEditorRow: View {
         max(1, cardWidth - (outerPadding * 2) - (editorHorizontalPadding * 2))
     }
 
+    private var measurementSafetyInset: CGFloat {
+        max(12, lineSpacing + 8)
+    }
+
     private var resolvedEditorHeight: CGFloat {
         max(1, measuredBodyHeight)
+    }
+
+    private var isDarkAppearanceActive: Bool {
+        if appearance == "dark" { return true }
+        if appearance == "light" { return false }
+        if let best = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) {
+            return best == .darkAqua
+        }
+        return true
+    }
+
+    private var referenceCardBackgroundColor: Color {
+        let fallbackLight = (r: 0.75, g: 0.84, b: 1.0)
+        let fallbackDark = (r: 0.16, g: 0.23, b: 0.31)
+        let hex = isDarkAppearanceActive ? darkCardActiveColorHex : cardActiveColorHex
+        if let rgb = rgbFromHex(hex) {
+            return Color(red: rgb.0, green: rgb.1, blue: rgb.2)
+        }
+        let fallback = isDarkAppearanceActive ? fallbackDark : fallbackLight
+        return Color(red: fallback.r, green: fallback.g, blue: fallback.b)
     }
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(appearance == "light" ? Color.white : Color(red: 0.19, green: 0.20, blue: 0.23))
+                .fill(referenceCardBackgroundColor)
 
             VStack(alignment: .leading, spacing: 0) {
                 TextEditor(text: Binding(
@@ -476,8 +477,9 @@ private struct ReferenceCardEditorRow: View {
                         let oldValue = card.content
                         card.content = newValue
                         focusedEntryID = entryID
+                        refreshMeasuredBodyHeight(for: newValue)
                         onContentChange(scenarioID, cardID, oldValue, newValue)
-                        onRequestBottomReveal(entryID)
+                        requestCaretVisibilityEnsure()
                     }
                 ))
                 .font(.custom("SansMonoCJKFinalDraft", size: Double(fontSize)))
@@ -488,7 +490,7 @@ private struct ReferenceCardEditorRow: View {
                 .frame(height: resolvedEditorHeight, alignment: .topLeading)
                 .padding(.horizontal, editorHorizontalPadding)
                 .padding(.vertical, editorVerticalPadding)
-                .foregroundStyle(appearance == "light" ? .black : .white)
+                .foregroundStyle(isDarkAppearanceActive ? .white : .black)
                 .focused($focusedEntryID, equals: entryID)
             }
             .padding(outerPadding)
@@ -514,37 +516,175 @@ private struct ReferenceCardEditorRow: View {
         }
         .onAppear {
             refreshMeasuredBodyHeight()
+            DispatchQueue.main.async {
+                refreshMeasuredBodyHeight()
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) {
+                refreshMeasuredBodyHeight()
+            }
         }
-        .onChange(of: card.content) { _, _ in
-            refreshMeasuredBodyHeight()
-            if focusedEntryID == entryID {
-                onRequestBottomReveal(entryID)
+        .onChange(of: card.content) { _, newValue in
+            DispatchQueue.main.async {
+                refreshMeasuredBodyHeight(for: newValue)
+                requestCaretVisibilityEnsure()
             }
         }
         .onChange(of: fontSize) { _, _ in
             refreshMeasuredBodyHeight()
-            if focusedEntryID == entryID {
-                onRequestBottomReveal(entryID)
-            }
+            requestCaretVisibilityEnsure()
         }
         .onChange(of: lineSpacing) { _, _ in
             refreshMeasuredBodyHeight()
-            if focusedEntryID == entryID {
-                onRequestBottomReveal(entryID)
+            requestCaretVisibilityEnsure()
+        }
+        .onChange(of: focusedEntryID) { _, newValue in
+            if newValue == entryID {
+                refreshMeasuredBodyHeight()
+                requestCaretVisibilityEnsure()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSTextView.didChangeSelectionNotification)) { notification in
+            guard focusedEntryID == entryID else { return }
+            guard isReferenceWindowFocused else { return }
+            guard let textView = notification.object as? NSTextView else { return }
+            guard textView.window?.identifier?.rawValue == ReferenceWindowConstants.windowID else { return }
+            guard (NSApp.keyWindow?.firstResponder as? NSTextView) === textView else { return }
+            guard textView.string == card.content else { return }
+            requestCaretVisibilityEnsure(delay: 0.0)
+        }
+        .onDisappear {
+            caretVisibilityWorkItem?.cancel()
+            caretVisibilityWorkItem = nil
+        }
+    }
+
+    private func requestCaretVisibilityEnsure(delay: Double = 0.012) {
+        caretVisibilityWorkItem?.cancel()
+        let work = DispatchWorkItem {
+            ensureCaretVisibleInReferenceWindow()
+        }
+        caretVisibilityWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    private func outerScrollView(containing textView: NSTextView) -> NSScrollView? {
+        var node: NSView? = textView
+        while let view = node {
+            if let scrollView = view as? NSScrollView,
+               scrollView.documentView !== textView.enclosingScrollView?.documentView {
+                return scrollView
+            }
+            node = view.superview
+        }
+        return nil
+    }
+
+    private func ensureCaretVisibleInReferenceWindow() {
+        guard focusedEntryID == entryID else { return }
+        guard isReferenceWindowFocused else { return }
+        guard let textView = NSApp.keyWindow?.firstResponder as? NSTextView else { return }
+        guard textView.window?.identifier?.rawValue == ReferenceWindowConstants.windowID else { return }
+        guard textView.string == card.content else { return }
+        guard let outerScrollView = outerScrollView(containing: textView) else { return }
+        guard let outerDocumentView = outerScrollView.documentView else { return }
+        guard let layoutManager = textView.layoutManager, let textContainer = textView.textContainer else { return }
+
+        layoutManager.ensureLayout(for: textContainer)
+        let textLength = (textView.string as NSString).length
+        let selection = textView.selectedRange()
+        let caretLocation = min(max(0, selection.location + selection.length), textLength)
+        let glyphRange = layoutManager.glyphRange(
+            forCharacterRange: NSRange(location: caretLocation, length: 0),
+            actualCharacterRange: nil
+        )
+        var caretRect = layoutManager.boundingRect(forGlyphRange: glyphRange, in: textContainer)
+        caretRect.origin.x += textView.textContainerInset.width
+        caretRect.origin.y += textView.textContainerInset.height
+        if caretRect.height < fontSize {
+            caretRect.size.height = fontSize + 2
+        }
+        let caretRectInDocument = outerDocumentView.convert(caretRect, from: textView)
+
+        let visible = outerScrollView.documentVisibleRect
+        let insets = outerScrollView.contentInsets
+        let clipOriginY = outerScrollView.contentView.bounds.origin.y
+        let inferredTopInset = max(0, -clipOriginY)
+        let effectiveTopInset = max(insets.top, inferredTopInset)
+        let minY = -effectiveTopInset
+        let documentHeight = outerDocumentView.bounds.height
+        let maxY = max(minY, documentHeight - visible.height + insets.bottom)
+
+        let topPadding: CGFloat = 48
+        let bottomPadding: CGFloat = 64
+        let minVisibleY = visible.minY + topPadding
+        let maxVisibleY = visible.maxY - bottomPadding
+
+        var targetY = visible.origin.y
+        if caretRectInDocument.maxY > maxVisibleY {
+            targetY = caretRectInDocument.maxY - (visible.height - bottomPadding)
+        } else if caretRectInDocument.minY < minVisibleY {
+            targetY = max(minY, caretRectInDocument.minY - topPadding)
+        }
+
+        let clampedY = min(max(minY, targetY), maxY)
+        if abs(clampedY - visible.origin.y) > 0.5 {
+            outerScrollView.contentView.setBoundsOrigin(NSPoint(x: visible.origin.x, y: clampedY))
+            outerScrollView.reflectScrolledClipView(outerScrollView.contentView)
+        }
+    }
+
+    private func refreshMeasuredBodyHeight(for text: String? = nil) {
+        let resolvedText = text ?? card.content
+        let measured: CGFloat
+        if focusedEntryID == entryID,
+           let textView = NSApp.keyWindow?.firstResponder as? NSTextView,
+           textView.window?.identifier?.rawValue == ReferenceWindowConstants.windowID,
+           textView.string == resolvedText,
+           let liveMeasured = liveFocusedBodyHeight(for: textView) {
+            measured = liveMeasured
+        } else {
+            measured = ReferenceCardTextHeightCalculator.measureBodyHeight(
+                text: resolvedText,
+                fontSize: fontSize,
+                lineSpacing: lineSpacing,
+                width: measuredEditorWidth,
+                safetyInset: measurementSafetyInset
+            )
+        }
+        if abs(measuredBodyHeight - measured) > 0.25 {
+            var noAnimation = Transaction()
+            noAnimation.animation = nil
+            withTransaction(noAnimation) {
+                measuredBodyHeight = measured
             }
         }
     }
 
-    private func refreshMeasuredBodyHeight() {
-        let measured = ReferenceCardTextHeightCalculator.measureBodyHeight(
-            text: card.content,
-            fontSize: fontSize,
-            lineSpacing: lineSpacing,
-            width: measuredEditorWidth
-        )
-        if abs(measuredBodyHeight - measured) > 0.25 {
-            measuredBodyHeight = measured
+    private func rgbFromHex(_ hex: String) -> (Double, Double, Double)? {
+        let cleaned = hex
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "#", with: "")
+        guard cleaned.count == 6, let value = UInt64(cleaned, radix: 16) else { return nil }
+        let r = Double((value >> 16) & 0xFF) / 255.0
+        let g = Double((value >> 8) & 0xFF) / 255.0
+        let b = Double(value & 0xFF) / 255.0
+        return (r, g, b)
+    }
+
+    private func liveFocusedBodyHeight(for textView: NSTextView) -> CGFloat? {
+        guard let layoutManager = textView.layoutManager,
+              let textContainer = textView.textContainer else { return nil }
+        let textLength = (textView.string as NSString).length
+        let fullRange = NSRange(location: 0, length: textLength)
+        if textLength > 0 {
+            layoutManager.ensureGlyphs(forCharacterRange: fullRange)
+            layoutManager.ensureLayout(forCharacterRange: fullRange)
         }
+        layoutManager.ensureLayout(for: textContainer)
+        let usedHeight = layoutManager.usedRect(for: textContainer).height
+        guard usedHeight > 0 else { return nil }
+        let insetHeight = textView.textContainerInset.height * 2
+        return max(1, ceil(usedHeight + insetHeight + measurementSafetyInset))
     }
 }
 
@@ -553,7 +693,8 @@ private enum ReferenceCardTextHeightCalculator {
         text: String,
         fontSize: CGFloat,
         lineSpacing: CGFloat,
-        width: CGFloat
+        width: CGFloat,
+        safetyInset: CGFloat
     ) -> CGFloat {
         let measuringText: String
         if text.isEmpty {
@@ -591,7 +732,7 @@ private enum ReferenceCardTextHeightCalculator {
         layoutManager.ensureLayout(for: textContainer)
 
         let usedHeight = layoutManager.usedRect(for: textContainer).height
-        return max(1, ceil(usedHeight))
+        return max(1, ceil(usedHeight + safetyInset))
     }
 }
 
@@ -605,7 +746,7 @@ private struct FloatingReferenceWindowAccessor: NSViewRepresentable {
             guard let window = view.window else { return }
             window.identifier = NSUserInterfaceItemIdentifier(ReferenceWindowConstants.windowID)
             window.title = "레퍼런스 카드"
-            window.level = .floating
+            window.level = .normal
             window.collectionBehavior.insert(.fullScreenAuxiliary)
             let fixedWidth = ReferenceWindowConstants.windowWidth
             window.minSize = NSSize(width: fixedWidth, height: 220)

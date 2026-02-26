@@ -14,11 +14,30 @@ struct ScenarioWriterView: View {
     @EnvironmentObject var store: FileStore
     @EnvironmentObject var referenceCardStore: ReferenceCardStore
     @ObservedObject var scenario: Scenario
+    let showWorkspaceTopToolbar: Bool
+    let splitModeEnabled: Bool
+    let splitPaneID: Int
+    @State var isSplitPaneActive: Bool
+
+    init(
+        scenario: Scenario,
+        showWorkspaceTopToolbar: Bool = true,
+        splitModeEnabled: Bool = false,
+        splitPaneID: Int = 2
+    ) {
+        self._scenario = ObservedObject(wrappedValue: scenario)
+        self.showWorkspaceTopToolbar = showWorkspaceTopToolbar
+        self.splitModeEnabled = splitModeEnabled
+        self.splitPaneID = splitPaneID
+        self._isSplitPaneActive = State(initialValue: !splitModeEnabled || splitPaneID == 2)
+    }
 
     @AppStorage("fontSize") var fontSize: Double = 14.0
     @AppStorage("appearance") var appearance: String = "dark"
     @AppStorage("backgroundColorHex") var backgroundColorHex: String = "F4F2EE"
     @AppStorage("darkBackgroundColorHex") var darkBackgroundColorHex: String = "111418"
+    @AppStorage("cardActiveColorHex") var cardActiveColorHex: String = "BFD7FF"
+    @AppStorage("darkCardActiveColorHex") var darkCardActiveColorHex: String = "2A3A4E"
     @AppStorage("exportCenteredFontSize") var exportCenteredFontSize: Double = 12.0
     @AppStorage("exportCenteredCharacterBold") var exportCenteredCharacterBold: Bool = true
     @AppStorage("exportCenteredSceneHeadingBold") var exportCenteredSceneHeadingBold: Bool = true
@@ -32,6 +51,9 @@ struct ScenarioWriterView: View {
     @AppStorage("mainCardLineSpacingValueV2") var mainCardLineSpacingValue: Double = 5.0
     @AppStorage("mainWorkspaceZoomScale") var mainWorkspaceZoomScale: Double = 1.0
     @AppStorage("geminiModelID") var geminiModelID: String = "gemini-3-pro-preview"
+    @AppStorage("focusModeWindowBackgroundActive") var focusModeWindowBackgroundActive: Bool = false
+    @AppStorage("lastEditedScenarioID") var lastEditedScenarioID: String = ""
+    @AppStorage("lastEditedCardID") var lastEditedCardID: String = ""
 
     @State var activeCardID: UUID? = nil
     @State var activeAncestorIDs: Set<UUID> = []
@@ -81,6 +103,7 @@ struct ScenarioWriterView: View {
     @State var focusModeKeyMonitor: Any? = nil
     @State var focusModeScrollMonitor: Any? = nil
     @State var mainNavKeyMonitor: Any? = nil
+    @State var splitPaneMouseMonitor: Any? = nil
     @State var isApplyingUndo: Bool = false
     @State var editingIsNewCard: Bool = false
     @State var editingStartContent: String = ""
@@ -163,12 +186,18 @@ struct ScenarioWriterView: View {
     @State var aiCandidateParentID: UUID? = nil
     @State var aiCandidateCardIDs: [UUID] = []
     @State var aiCandidateAction: AICardAction? = nil
+    @State var aiChildSummaryLoadingCardIDs: Set<UUID> = []
     @State var dictationRecorder: LiveSpeechDictationRecorder? = nil
     @State var dictationIsRecording: Bool = false
     @State var dictationIsProcessing: Bool = false
     @State var dictationTargetParentID: UUID? = nil
     @State var mainNoChildRightArmCardID: UUID? = nil
     @State var mainNoChildRightArmAt: Date = .distantPast
+    @State var mainBoundaryParentLeftArmCardID: UUID? = nil
+    @State var mainBoundaryParentLeftArmAt: Date = .distantPast
+    @State var mainBoundaryChildRightArmCardID: UUID? = nil
+    @State var mainBoundaryChildRightArmAt: Date = .distantPast
+    @State var keyboardRangeSelectionAnchorCardID: UUID? = nil
     @State var mainCardHeights: [UUID: CGFloat] = [:]
     @State var mainCardWidths: [UUID: CGFloat] = [:]
     @State var mainBottomRevealCardID: UUID? = nil
@@ -181,6 +210,10 @@ struct ScenarioWriterView: View {
     @State var historyBarMeasuredHeight: CGFloat = 0
     @State var historyRetentionLastAppliedCount: Int = 0
     @State var caretEnsureBurstWorkItems: [DispatchWorkItem] = []
+    @State var inactivePaneLevelsDataSnapshot: [LevelData] = []
+    @State var inactivePaneMaxLevelCountSnapshot: Int = 0
+    @State var inactivePaneSyncWorkItem: DispatchWorkItem? = nil
+    @State var scenarioTimestampSuppressionActive: Bool = false
     @FocusState var isNamedSnapshotNoteEditorFocused: Bool
     let focusTypingIdleInterval: TimeInterval = 1.5
     let focusOffsetNormalizationMinInterval: TimeInterval = 0.08
@@ -197,6 +230,7 @@ struct ScenarioWriterView: View {
     let historyPromotionLargeEditScoreThreshold: Int = 1200
     let historyPromotionChangedCardsThreshold: Int = 8
     let historyPromotionSessionGapThreshold: TimeInterval = 60 * 15
+    let inactivePaneSyncThrottleInterval: TimeInterval = 0.16
     var quickEaseAnimation: Animation {
         .timingCurve(0.25, 0.10, 0.25, 1.00, duration: 0.24)
     }
@@ -222,6 +256,18 @@ struct ScenarioWriterView: View {
         return true
     }
 
+    var acceptsKeyboardInput: Bool {
+        !splitModeEnabled || isSplitPaneActive
+    }
+
+    var isInactiveSplitPane: Bool {
+        splitModeEnabled && !isSplitPaneActive
+    }
+
+    var shouldSuppressScenarioTimestampDuringEditing: Bool {
+        acceptsKeyboardInput && editingCardID != nil
+    }
+
     @FocusState var isMainViewFocused: Bool
 
     struct LevelData {
@@ -245,6 +291,13 @@ struct ScenarioWriterView: View {
     var body: some View {
         GeometryReader { geometry in
             configuredWorkspaceRoot(for: geometry)
+                .overlay {
+                    if splitModeEnabled && !isSplitPaneActive {
+                        Color.black
+                            .opacity(0.15)
+                            .allowsHitTesting(false)
+                    }
+                }
         }
     }
 
@@ -260,8 +313,11 @@ struct ScenarioWriterView: View {
             )
 
         let lifecycleBound = focusedLayout
+            .simultaneousGesture(TapGesture().onEnded {
+                activateSplitPaneIfNeeded()
+            })
             .onAppear {
-                if activeCardID == nil, let first = scenario.rootCards.first { changeActiveCard(to: first) }
+                if activeCardID == nil, let startupCard = startupActiveCard() { changeActiveCard(to: startupCard) }
                 isMainViewFocused = true
                 if scenario.sortedSnapshots.isEmpty { takeSnapshot(force: true) }
                 let snapshotCountBeforeRetention = scenario.snapshots.count
@@ -271,7 +327,9 @@ struct ScenarioWriterView: View {
                 }
                 historyIndex = Double(max(0, scenario.sortedSnapshots.count - 1))
                 maxLevelCount = max(maxLevelCount, getLevelsWithParents().count)
+                refreshInactivePaneSnapshotNow()
                 updateHistoryKeyMonitor()
+                syncScenarioTimestampSuppressionIfNeeded()
             }
             .onChange(of: showHistoryBar) { _, isShown in
                 updateHistoryKeyMonitor()
@@ -307,9 +365,17 @@ struct ScenarioWriterView: View {
                 }
             }
             .onChange(of: activeCardID) { _, newID in
+                guard acceptsKeyboardInput else { return }
                 synchronizeActiveRelationState(for: newID)
             }
+            .onChange(of: isSplitPaneActive) { _, _ in
+                syncScenarioTimestampSuppressionIfNeeded()
+            }
             .onChange(of: scenario.cardsVersion) { _, _ in
+                if isInactiveSplitPane {
+                    scheduleInactivePaneSnapshotRefresh()
+                    return
+                }
                 synchronizeActiveRelationState(for: activeCardID)
                 pruneAICandidateTracking()
             }
@@ -320,15 +386,20 @@ struct ScenarioWriterView: View {
                 lastWorkspaceRootSize = size
             }
             .onDisappear {
+                releaseScenarioTimestampSuppressionIfNeeded()
+                cancelInactivePaneSnapshotRefresh()
+                focusModeWindowBackgroundActive = false
                 stopHistoryKeyMonitor()
                 stopFocusModeKeyMonitor()
                 stopFocusModeScrollMonitor()
                 stopFocusModeCaretMonitor()
                 stopMainNavKeyMonitor()
                 stopMainCaretMonitor()
+                stopSplitPaneMouseMonitor()
                 stopDictationRecording(discardAudio: true)
             }
             .onChange(of: showFocusMode) { _, isOn in
+                focusModeWindowBackgroundActive = isOn
                 FocusMonitorRecorder.shared.record("focus.toggle", reason: "showFocusMode-onChange") {
                     [
                         "entering": isOn ? "true" : "false",
@@ -365,7 +436,20 @@ struct ScenarioWriterView: View {
                     stopFocusModeCaretMonitor()
                 }
             }
+            .onChange(of: focusTypewriterEnabled) { _, isOn in
+                guard showFocusMode else { return }
+                if !isOn {
+                    focusCaretPendingTypewriter = false
+                    focusTypewriterDeferredUntilCompositionEnd = false
+                }
+                requestFocusModeCaretEnsure(typewriter: isOn, delay: 0.0, force: true, reason: "typewriter-toggle")
+            }
             .onChange(of: editingCardID) { oldID, newID in
+                if let newID {
+                    persistLastEditedCard(newID)
+                }
+                syncScenarioTimestampSuppressionIfNeeded()
+                guard acceptsKeyboardInput else { return }
                 guard !showFocusMode else { return }
                 guard focusModeEditorCardID == nil else { return }
                 clearMainEditTabArm()
@@ -401,7 +485,7 @@ struct ScenarioWriterView: View {
                 }
                 requestMainCaretRestore(for: newID)
                 scheduleMainEditorLineSpacingApplyBurst(for: newID)
-                requestMainCaretEnsure(delay: 0.03)
+                requestCoalescedMainCaretEnsure(minInterval: mainCaretSelectionEnsureMinInterval, delay: 0.03)
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) {
                     guard !showFocusMode else { return }
                     guard editingCardID == newID else { return }
@@ -411,13 +495,21 @@ struct ScenarioWriterView: View {
                 }
             }
             .onChange(of: mainCardLineSpacingValue) { _, _ in
+                guard acceptsKeyboardInput else { return }
                 guard !showFocusMode else { return }
                 applyMainEditorLineSpacingIfNeeded(forceApplyToFullText: true)
-                requestMainCaretEnsure(delay: 0.0)
+                requestCoalescedMainCaretEnsure(minInterval: mainCaretSelectionEnsureMinInterval, delay: 0.0)
             }
             .onChange(of: focusModeEditorCardID) { _, newID in
                 guard showFocusMode else { return }
                 guard let id = newID else { return }
+                if !acceptsKeyboardInput {
+                    if let textView = NSApp.keyWindow?.firstResponder as? NSTextView,
+                       isTextViewInCurrentSplitPane(textView) {
+                        activateSplitPaneIfNeeded()
+                    }
+                    return
+                }
                 FocusMonitorRecorder.shared.record("focus.editor.card.change", reason: "focusModeEditorCardID-onChange") {
                     [
                         "focusModeEditorCardID": id.uuidString,
@@ -439,6 +531,7 @@ struct ScenarioWriterView: View {
 
         let commandBound = lifecycleBound
             .onReceive(NotificationCenter.default.publisher(for: .waUndoRequested)) { _ in
+                guard acceptsKeyboardInput else { return }
                 if isPreviewingHistory || showHistoryBar || isSearchFocused { return }
                 if showFocusMode {
                     performFocusUndo()
@@ -450,6 +543,7 @@ struct ScenarioWriterView: View {
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: .waRedoRequested)) { _ in
+                guard acceptsKeyboardInput else { return }
                 if isPreviewingHistory || showHistoryBar || isSearchFocused { return }
                 if showFocusMode {
                     performFocusRedo()
@@ -461,10 +555,31 @@ struct ScenarioWriterView: View {
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: .waToggleFocusModeRequested)) { _ in
+                guard acceptsKeyboardInput else { return }
                 if isPreviewingHistory || showHistoryBar { return }
                 toggleFocusMode()
             }
+            .onReceive(NotificationCenter.default.publisher(for: .waRequestSplitPaneFocus)) { notification in
+                guard splitModeEnabled else { return }
+                guard let targetPaneID = notification.object as? Int else { return }
+                let shouldActivate = (targetPaneID == splitPaneID)
+                isSplitPaneActive = shouldActivate
+                guard shouldActivate else {
+                    refreshInactivePaneSnapshotNow()
+                    deactivateSplitPaneInput()
+                    syncScenarioTimestampSuppressionIfNeeded()
+                    return
+                }
+                cancelInactivePaneSnapshotRefresh()
+                if activeCardID == nil, let first = scenario.rootCards.first {
+                    changeActiveCard(to: first)
+                }
+                synchronizeActiveRelationState(for: activeCardID)
+                isMainViewFocused = true
+                syncScenarioTimestampSuppressionIfNeeded()
+            }
             .onKeyPress(phases: [.down, .repeat]) { press in
+                if !acceptsKeyboardInput { return .handled }
                 if isPreviewingHistory { return .ignored }
                 return handleGlobalKeyPress(press)
             }
@@ -493,6 +608,7 @@ struct ScenarioWriterView: View {
             .task {
                 startMainNavKeyMonitor()
                 startMainCaretMonitor()
+                startSplitPaneMouseMonitor()
             }
             .sheet(isPresented: $showCheckpointDialog) {
                 namedCheckpointSheet
@@ -538,11 +654,14 @@ struct ScenarioWriterView: View {
             ZStack {
                 if showFocusMode {
                     focusModeCanvas(size: size)
+                        .ignoresSafeArea(.container, edges: .top)
                         .transition(.opacity)
                         .zIndex(10)
                 } else {
                     mainCanvasWithOptionalZoom(size: size, availableWidth: availableWidth)
-                    workspaceTopToolbar
+                    if showWorkspaceTopToolbar {
+                        workspaceTopToolbar
+                    }
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -629,8 +748,7 @@ struct ScenarioWriterView: View {
             }
             Spacer()
         }
-        .ignoresSafeArea()
-        .padding(.top, isFullscreen ? 24 : 0)
+        .ignoresSafeArea(.container, edges: [.top, .leading, .trailing, .bottom])
     }
 
     var checkpointToolbarButton: some View {
@@ -646,7 +764,7 @@ struct ScenarioWriterView: View {
                 .foregroundColor(.orange)
         }
         .buttonStyle(.plain)
-        .padding(.top, 10)
+        .padding(.top, 2)
         .help("이름 있는 분기점 만들기")
     }
 
@@ -673,7 +791,7 @@ struct ScenarioWriterView: View {
                 .foregroundColor(showHistoryBar ? .white : .primary)
         }
         .buttonStyle(.plain)
-        .padding(.top, 10)
+        .padding(.top, 2)
         .help("히스토리 타임라인 열기")
     }
 
@@ -700,7 +818,7 @@ struct ScenarioWriterView: View {
             .foregroundColor((dictationIsRecording || isBusy) ? .white : .primary)
         }
         .buttonStyle(.plain)
-        .padding(.top, 10)
+        .padding(.top, 2)
         .disabled(dictationIsProcessing || aiIsGenerating || (activeCardID == nil && !dictationIsRecording))
         .help(dictationIsRecording ? "받아쓰기 중지 후 요약 카드 생성" : "받아쓰기 시작")
     }
@@ -717,7 +835,7 @@ struct ScenarioWriterView: View {
                 .foregroundColor(showAIChat ? .white : .primary)
         }
         .buttonStyle(.plain)
-        .padding(.top, 10)
+        .padding(.top, 2)
         .help("AI와 시나리오 상담하기")
     }
 
@@ -742,7 +860,7 @@ struct ScenarioWriterView: View {
                 .foregroundColor(showTimeline ? .white : .primary)
         }
         .buttonStyle(.plain)
-        .padding(.top, 10)
+        .padding(.top, 2)
         .padding(.trailing, 20)
         .help("전체 카드 목록 열기")
     }
@@ -822,7 +940,8 @@ struct ScenarioWriterView: View {
                                         .id("preview-col-\(index)")
                                 }
                             } else {
-                                let levelsData = getLevelsWithParents()
+                                let levelsData = displayedLevelsData()
+                                let visualMaxLevelCount = displayedMaxLevelCount(for: levelsData)
                                 ForEach(Array(levelsData.enumerated()), id: \.offset) { index, data in
                                     let filteredCards: [SceneCard] = {
                                         if index <= 1 || isActiveCardRoot {
@@ -840,8 +959,8 @@ struct ScenarioWriterView: View {
                                         Color.clear.frame(width: columnWidth)
                                     }
                                 }
-                                if maxLevelCount > levelsData.count {
-                                    ForEach(levelsData.count..<maxLevelCount, id: \.self) { _ in
+                                if visualMaxLevelCount > levelsData.count {
+                                    ForEach(levelsData.count..<visualMaxLevelCount, id: \.self) { _ in
                                         Color.clear.frame(width: columnWidth)
                                     }
                                 }
@@ -862,6 +981,7 @@ struct ScenarioWriterView: View {
                 }
                 }
                 .onChange(of: Int(historyIndex)) { _, _ in
+                    guard acceptsKeyboardInput else { return }
                     if isPreviewingHistory {
                         withAnimation(quickEaseAnimation) {
                             autoScrollToChanges(hProxy: hProxy)
@@ -869,6 +989,7 @@ struct ScenarioWriterView: View {
                     }
                 }
                 .onChange(of: activeCardID) { _, newID in
+                    guard acceptsKeyboardInput else { return }
                     guard let id = newID else { return }
                     if showFocusMode { return }
                     if suppressHorizontalAutoScroll { return }
@@ -885,13 +1006,144 @@ struct ScenarioWriterView: View {
                     }
                 }
                 .onChange(of: pendingMainCanvasRestoreCardID) { _, _ in
+                    guard acceptsKeyboardInput else { return }
                     restoreMainCanvasPositionIfNeeded(proxy: hProxy, availableWidth: availableWidth)
                 }
                 .onAppear {
-                    restoreMainCanvasPositionIfNeeded(proxy: hProxy, availableWidth: availableWidth)
+                    if acceptsKeyboardInput {
+                        restoreMainCanvasPositionIfNeeded(proxy: hProxy, availableWidth: availableWidth)
+                    }
                 }
             }
         }
         .allowsHitTesting(true)
+    }
+
+    func activateSplitPaneIfNeeded() {
+        guard splitModeEnabled else { return }
+        NotificationCenter.default.post(name: .waSplitPaneActivateRequested, object: splitPaneID)
+    }
+
+    private func startSplitPaneMouseMonitor() {
+        guard splitModeEnabled else { return }
+        guard splitPaneMouseMonitor == nil else { return }
+        splitPaneMouseMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown]) { event in
+            guard splitModeEnabled else { return event }
+            guard !isSplitPaneActive else { return event }
+            guard let window = event.window, let contentView = window.contentView else { return event }
+            let pointInContent = contentView.convert(event.locationInWindow, from: nil)
+            let dividerX = contentView.bounds.midX
+            let isTargetPane = splitPaneID == 1 ? pointInContent.x <= dividerX : pointInContent.x >= dividerX
+            if isTargetPane {
+                NotificationCenter.default.post(name: .waSplitPaneActivateRequested, object: splitPaneID)
+            }
+            return event
+        }
+    }
+
+    private func stopSplitPaneMouseMonitor() {
+        guard let monitor = splitPaneMouseMonitor else { return }
+        NSEvent.removeMonitor(monitor)
+        splitPaneMouseMonitor = nil
+    }
+
+    private func isTextViewInCurrentSplitPane(_ textView: NSTextView) -> Bool {
+        guard splitModeEnabled else { return true }
+        guard let window = textView.window, let contentView = window.contentView else { return true }
+        let frameInContent = textView.convert(textView.bounds, to: contentView)
+        let dividerX = contentView.bounds.midX
+        if splitPaneID == 1 {
+            return frameInContent.midX <= dividerX
+        }
+        return frameInContent.midX >= dividerX
+    }
+
+    private func deactivateSplitPaneInput() {
+        isMainViewFocused = false
+        isSearchFocused = false
+        isNamedSnapshotSearchFocused = false
+        isNamedSnapshotNoteEditorFocused = false
+        isNamedSnapshotNoteEditing = false
+        isAIChatInputFocused = false
+    }
+
+    private func syncScenarioTimestampSuppressionIfNeeded() {
+        let shouldSuppress = shouldSuppressScenarioTimestampDuringEditing
+        if shouldSuppress {
+            if !scenarioTimestampSuppressionActive {
+                scenario.beginInteractiveTimestampSuppression()
+                scenarioTimestampSuppressionActive = true
+            }
+            return
+        }
+        if scenarioTimestampSuppressionActive {
+            scenarioTimestampSuppressionActive = false
+            scenario.endInteractiveTimestampSuppression(flush: true)
+        }
+    }
+
+    private func releaseScenarioTimestampSuppressionIfNeeded() {
+        guard scenarioTimestampSuppressionActive else { return }
+        scenarioTimestampSuppressionActive = false
+        scenario.endInteractiveTimestampSuppression(flush: true)
+    }
+
+    private func displayedLevelsData() -> [LevelData] {
+        if isInactiveSplitPane, !inactivePaneLevelsDataSnapshot.isEmpty {
+            return inactivePaneLevelsDataSnapshot
+        }
+        return getLevelsWithParents()
+    }
+
+    private func displayedMaxLevelCount(for levelsData: [LevelData]) -> Int {
+        if isInactiveSplitPane {
+            return max(inactivePaneMaxLevelCountSnapshot, levelsData.count)
+        }
+        return maxLevelCount
+    }
+
+    private func cancelInactivePaneSnapshotRefresh() {
+        inactivePaneSyncWorkItem?.cancel()
+        inactivePaneSyncWorkItem = nil
+    }
+
+    private func refreshInactivePaneSnapshotNow() {
+        guard splitModeEnabled else { return }
+        cancelInactivePaneSnapshotRefresh()
+        let levelsData = getLevelsWithParents()
+        inactivePaneLevelsDataSnapshot = levelsData
+        inactivePaneMaxLevelCountSnapshot = max(maxLevelCount, levelsData.count)
+    }
+
+    private func scheduleInactivePaneSnapshotRefresh() {
+        guard isInactiveSplitPane else { return }
+        cancelInactivePaneSnapshotRefresh()
+        let workItem = DispatchWorkItem {
+            guard isInactiveSplitPane else { return }
+            let levelsData = getLevelsWithParents()
+            inactivePaneLevelsDataSnapshot = levelsData
+            inactivePaneMaxLevelCountSnapshot = max(maxLevelCount, levelsData.count)
+        }
+        inactivePaneSyncWorkItem = workItem
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + inactivePaneSyncThrottleInterval,
+            execute: workItem
+        )
+    }
+
+    private func startupActiveCard() -> SceneCard? {
+        if scenario.id.uuidString == lastEditedScenarioID,
+           let restoredID = UUID(uuidString: lastEditedCardID),
+           let restored = findCard(by: restoredID),
+           !restored.isArchived {
+            return restored
+        }
+        return scenario.rootCards.first
+    }
+
+    private func persistLastEditedCard(_ cardID: UUID) {
+        guard let card = findCard(by: cardID), !card.isArchived else { return }
+        lastEditedScenarioID = scenario.id.uuidString
+        lastEditedCardID = cardID.uuidString
     }
 }

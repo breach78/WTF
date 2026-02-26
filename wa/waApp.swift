@@ -7,6 +7,9 @@ extension Notification.Name {
     static let waRedoRequested = Notification.Name("wa.redoRequested")
     static let waToggleFocusModeRequested = Notification.Name("wa.toggleFocusModeRequested")
     static let waOpenReferenceWindowRequested = Notification.Name("wa.openReferenceWindowRequested")
+    static let waCycleSplitPaneRequested = Notification.Name("wa.cycleSplitPaneRequested")
+    static let waSplitPaneActivateRequested = Notification.Name("wa.splitPaneActivateRequested")
+    static let waRequestSplitPaneFocus = Notification.Name("wa.requestSplitPaneFocus")
 }
 
 extension UTType {
@@ -15,14 +18,141 @@ extension UTType {
     }
 }
 
+private struct MainWindowTitleHider: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        NSView()
+    }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        guard let window = view.window else {
+            DispatchQueue.main.async {
+                guard let window = view.window else { return }
+                apply(to: window)
+            }
+            return
+        }
+        apply(to: window)
+    }
+
+    private func apply(to window: NSWindow) {
+        if window.identifier?.rawValue == ReferenceWindowConstants.windowID { return }
+        if window.titleVisibility != .hidden {
+            window.titleVisibility = .hidden
+        }
+        if !window.title.isEmpty {
+            window.title = ""
+        }
+    }
+}
+
+private struct MainWindowSizePersistenceAccessor: NSViewRepresentable {
+    private static let widthKey = "mainWorkspaceWindowWidthV1"
+    private static let heightKey = "mainWorkspaceWindowHeightV1"
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    func makeNSView(context: Context) -> NSView {
+        NSView()
+    }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        context.coordinator.attach(to: view)
+    }
+
+    final class Coordinator {
+        private weak var window: NSWindow?
+        private var observers: [NSObjectProtocol] = []
+        private var didRestoreSize = false
+
+        deinit {
+            removeObservers()
+        }
+
+        func attach(to view: NSView) {
+            guard let attachedWindow = view.window else {
+                DispatchQueue.main.async { [weak self, weak view] in
+                    guard let self, let view else { return }
+                    self.attach(to: view)
+                }
+                return
+            }
+
+            if window !== attachedWindow {
+                removeObservers()
+                window = attachedWindow
+                didRestoreSize = false
+                installObservers(for: attachedWindow)
+            }
+
+            restoreSizeIfNeeded(for: attachedWindow)
+        }
+
+        private func installObservers(for window: NSWindow) {
+            let center = NotificationCenter.default
+            observers.append(
+                center.addObserver(forName: NSWindow.didEndLiveResizeNotification, object: window, queue: .main) { [weak self] _ in
+                    self?.persistSize(from: window)
+                }
+            )
+            observers.append(
+                center.addObserver(forName: NSWindow.didResizeNotification, object: window, queue: .main) { [weak self] _ in
+                    self?.persistSize(from: window)
+                }
+            )
+            observers.append(
+                center.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: .main) { [weak self] _ in
+                    self?.persistSize(from: window)
+                }
+            )
+        }
+
+        private func removeObservers() {
+            for observer in observers {
+                NotificationCenter.default.removeObserver(observer)
+            }
+            observers.removeAll()
+        }
+
+        private func restoreSizeIfNeeded(for window: NSWindow) {
+            guard !didRestoreSize else { return }
+            didRestoreSize = true
+            let defaults = UserDefaults.standard
+            let width = defaults.double(forKey: MainWindowSizePersistenceAccessor.widthKey)
+            let height = defaults.double(forKey: MainWindowSizePersistenceAccessor.heightKey)
+            guard width >= 500, height >= 400 else { return }
+            var frame = window.frame
+            if abs(frame.size.width - width) < 0.5, abs(frame.size.height - height) < 0.5 {
+                return
+            }
+            frame.size = NSSize(width: width, height: height)
+            window.setFrame(frame, display: true)
+        }
+
+        private func persistSize(from window: NSWindow) {
+            guard window.identifier?.rawValue != ReferenceWindowConstants.windowID else { return }
+            guard !window.styleMask.contains(.fullScreen) else { return }
+            let width = window.frame.width
+            let height = window.frame.height
+            guard width >= 500, height >= 400 else { return }
+            let defaults = UserDefaults.standard
+            defaults.set(width, forKey: MainWindowSizePersistenceAccessor.widthKey)
+            defaults.set(height, forKey: MainWindowSizePersistenceAccessor.heightKey)
+        }
+    }
+}
+
 @main
 struct waApp: App {
     @AppStorage("fontSize") private var fontSize: Double = 14.0
     @AppStorage("mainWorkspaceZoomScale") private var mainWorkspaceZoomScale: Double = 1.0
     @AppStorage("focusTypewriterEnabled") private var focusTypewriterEnabled: Bool = false
+    @AppStorage("mainSplitModeEnabled") private var mainSplitModeEnabled: Bool = false
     @AppStorage("appearance") private var appearance: String = "dark"
     @AppStorage("backgroundColorHex") private var backgroundColorHex: String = "F4F2EE"
     @AppStorage("darkBackgroundColorHex") private var darkBackgroundColorHex: String = "111418"
+    @AppStorage("focusModeWindowBackgroundActive") private var focusModeWindowBackgroundActive: Bool = false
     @AppStorage("forceWorkspaceReset") private var forceWorkspaceReset: Bool = false
     @AppStorage("didResetForV2") private var didResetForV2: Bool = false
     
@@ -34,12 +164,14 @@ struct waApp: App {
     @StateObject private var referenceCardStore = ReferenceCardStore()
     @State private var didHideReferenceWindowOnLaunch: Bool = false
 
-    init() {}
+    init() {
+        UserDefaults.standard.set(false, forKey: "TSMLanguageIndicatorEnabled")
+    }
     
     var body: some Scene {
         WindowGroup {
             ZStack {
-                Color.clear
+                Color(nsColor: focusModeWindowBackgroundActive ? .black : resolvedWindowBackgroundColor)
                     .ignoresSafeArea()
                 Group {
                     if let store = store {
@@ -54,6 +186,8 @@ struct waApp: App {
                     }
                 }
             }
+            .background(MainWindowTitleHider())
+            .background(MainWindowSizePersistenceAccessor())
             .onAppear {
                 if !didResetForV2 {
                     store?.flushPendingSaves()
@@ -68,7 +202,7 @@ struct waApp: App {
                     forceWorkspaceReset = false
                 }
                 setupStore()
-                configureWindows()
+                focusModeWindowBackgroundActive = false
                 hideReferenceWindowOnLaunchOnce()
             }
             .onChange(of: forceWorkspaceReset) { _, newValue in
@@ -82,30 +216,11 @@ struct waApp: App {
             .onChange(of: storageBookmark) { _, _ in
                 setupStore()
             }
-            .onChange(of: backgroundColorHex) { _, _ in
-                configureWindows()
-            }
-            .onChange(of: darkBackgroundColorHex) { _, _ in
-                configureWindows()
-            }
-            .onChange(of: appearance) { _, _ in
-                configureWindows()
-            }
-            .onReceive(NotificationCenter.default.publisher(for: NSWindow.didEnterFullScreenNotification)) { _ in
-                configureWindowsOnNextRunLoop()
-            }
-            .onReceive(NotificationCenter.default.publisher(for: NSWindow.didExitFullScreenNotification)) { _ in
-                configureWindowsOnNextRunLoop()
-            }
-            .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeMainNotification)) { _ in
-                configureWindowsOnNextRunLoop()
-            }
             .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
                 store?.flushPendingSaves()
             }
         }
         .windowStyle(.hiddenTitleBar)
-
         Window("레퍼런스 카드", id: ReferenceWindowConstants.windowID) {
             Group {
                 if let store = store {
@@ -121,6 +236,7 @@ struct waApp: App {
             .environmentObject(referenceCardStore)
         }
         .windowResizability(.contentSize)
+        .commandsRemoved()
         .commands {
             CommandGroup(replacing: .undoRedo) {
                 Button("Undo") {
@@ -151,8 +267,11 @@ struct waApp: App {
                 }
                 .keyboardShortcut("F", modifiers: [.command, .shift])
             }
-            CommandMenu("화면") {
+            CommandGroup(before: .windowSize) {
                 Toggle("다크 모드", isOn: darkModeMenuBinding)
+                Divider()
+
+                Toggle("메인 작업창 스플릿 모드", isOn: $mainSplitModeEnabled)
                 Divider()
 
                 Toggle("포커스 모드 타이프라이터", isOn: $focusTypewriterEnabled)
@@ -171,20 +290,22 @@ struct waApp: App {
                 Button("메인 작업창 줌 100%") {
                     mainWorkspaceZoomScale = 1.0
                 }
-            }
-            CommandMenu("편집기") {
-                Button("폰트 작게") {
-                    adjustFontSize(by: -1)
-                }
-                .disabled(fontSize <= 12)
+                Divider()
 
-                Button("폰트 크게") {
-                    adjustFontSize(by: 1)
-                }
-                .disabled(fontSize >= 24)
+                Menu("편집기") {
+                    Button("폰트 작게") {
+                        adjustFontSize(by: -1)
+                    }
+                    .disabled(fontSize <= 12)
 
-                Button("폰트 기본값 (17pt)") {
-                    fontSize = 17
+                    Button("폰트 크게") {
+                        adjustFontSize(by: 1)
+                    }
+                    .disabled(fontSize >= 24)
+
+                    Button("폰트 기본값 (17pt)") {
+                        fontSize = 17
+                    }
                 }
             }
         }
@@ -313,28 +434,6 @@ struct waApp: App {
         }
     }
 
-    private func configureWindows() {
-        let bgColor = resolvedWindowBackgroundColor
-        for window in NSApplication.shared.windows {
-            // Skip Settings / auxiliary windows — keep system default background
-            let isSettingsLike = window.identifier?.rawValue.lowercased().contains("settings") == true
-                || window is NSPanel
-            let isReferenceWindow = window.identifier?.rawValue == ReferenceWindowConstants.windowID
-            if isSettingsLike || isReferenceWindow { continue }
-
-            window.titleVisibility = .hidden
-            window.titlebarAppearsTransparent = true
-            window.styleMask.insert(.fullSizeContentView)
-            window.toolbar = nil
-            window.isOpaque = true
-            window.backgroundColor = bgColor
-            if let view = window.contentView {
-                view.wantsLayer = true
-                view.layer?.backgroundColor = bgColor.cgColor
-            }
-        }
-    }
-
     private func isReferenceWindowFocused() -> Bool {
         NSApp.keyWindow?.identifier?.rawValue == ReferenceWindowConstants.windowID
     }
@@ -367,12 +466,6 @@ struct waApp: App {
             return true
         }
         return true
-    }
-
-    private func configureWindowsOnNextRunLoop() {
-        DispatchQueue.main.async {
-            configureWindows()
-        }
     }
 
     private func resolvedWindowBackgroundHex() -> String {
@@ -614,6 +707,11 @@ struct SettingsView: View {
         GeminiModelOption(value: "gemini-2.5-flash", title: "Gemini 2.5 Flash"),
         GeminiModelOption(value: "gemini-2.0-flash", title: "Gemini 2.0 Flash")
     ]
+    private let oflFontFiles: [String] = [
+        "Sans Mono CJK Final Draft.otf",
+        "Sans Mono CJK Final Draft Bold.otf"
+    ]
+    private let oflLicenseURL = URL(string: "https://openfontlicense.org/open-font-license-official-text/")!
     
     var onUpdateStore: () -> Void
     
@@ -706,6 +804,121 @@ struct SettingsView: View {
         Array(shortcutSections.dropFirst(2))
     }
 
+    private var oflLicenseText: String {
+        """
+        SIL OPEN FONT LICENSE Version 1.1 - 26 February 2007
+
+        PREAMBLE
+        The goals of the Open Font License (OFL) are to stimulate worldwide development
+        of collaborative font projects, to support the font creation efforts of academic
+        and linguistic communities, and to provide a free and open framework in which
+        fonts may be shared and improved in partnership with others.
+
+        The OFL allows the licensed fonts to be used, studied, modified and redistributed
+        freely as long as they are not sold by themselves. The fonts, including any
+        derivative works, can be bundled, embedded, redistributed and/or sold with any
+        software provided that any reserved names are not used by derivative works. The
+        fonts and derivatives, however, cannot be released under any other type of
+        license. The requirement for fonts to remain under this license does not apply
+        to any document created using the fonts or their derivatives.
+
+        DEFINITIONS
+        "Font Software" refers to the set of files released by the Copyright Holder(s)
+        under this license and clearly marked as such. This may include source files,
+        build scripts and documentation.
+
+        "Reserved Font Name" refers to any names specified as such after the copyright
+        statement(s).
+
+        "Original Version" refers to the collection of Font Software components as
+        distributed by the Copyright Holder(s).
+
+        "Modified Version" refers to any derivative made by adding to, deleting, or
+        substituting -- in part or in whole -- any of the components of the Original
+        Version, by changing formats or by porting the Font Software to a new environment.
+
+        "Author" refers to any designer, engineer, programmer, technical writer or other
+        person who contributed to the Font Software.
+
+        PERMISSION & CONDITIONS
+        Permission is hereby granted, free of charge, to any person obtaining a copy
+        of the Font Software, to use, study, copy, merge, embed, modify, redistribute,
+        and sell modified and unmodified copies of the Font Software, subject to the
+        following conditions:
+
+        1) Neither the Font Software nor any of its individual components, in Original
+           or Modified Versions, may be sold by itself.
+
+        2) Original or Modified Versions of the Font Software may be bundled,
+           redistributed and/or sold with any software, provided that each copy contains
+           the above copyright notice and this license. These can be included either as
+           stand-alone text files, human-readable headers or in the appropriate
+           machine-readable metadata fields within text or binary files as long as those
+           fields can be easily viewed by the user.
+
+        3) No Modified Version of the Font Software may use the Reserved Font Name(s)
+           unless explicit written permission is granted by the corresponding Copyright
+           Holder. This restriction only applies to the primary font name as presented
+           to the users.
+
+        4) The name(s) of the Copyright Holder(s) or the Author(s) of the Font Software
+           shall not be used to promote, endorse or advertise any Modified Version,
+           except to acknowledge the contribution(s) of the Copyright Holder(s) and the
+           Author(s) or with their explicit written permission.
+
+        5) The Font Software, modified or unmodified, in part or in whole, must be
+           distributed entirely under this license, and must not be distributed under any
+           other license. The requirement for fonts to remain under this license does not
+           apply to any document created using the Font Software.
+
+        TERMINATION
+        This license becomes null and void if any of the above conditions are not met.
+
+        DISCLAIMER
+        THE FONT SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+        IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF MERCHANTABILITY, FITNESS
+        FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT OF COPYRIGHT, PATENT, TRADEMARK, OR
+        OTHER RIGHT. IN NO EVENT SHALL THE COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM,
+        DAMAGES OR OTHER LIABILITY, INCLUDING ANY GENERAL, SPECIAL, INDIRECT, INCIDENTAL,
+        OR CONSEQUENTIAL DAMAGES, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+        ARISING FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM OTHER
+        DEALINGS IN THE FONT SOFTWARE.
+        """
+    }
+
+    @ViewBuilder
+    private func oflFontLicenseCard() -> some View {
+        settingsCard(title: "폰트 라이선스 (OFL)") {
+            Text("앱에 포함된 아래 폰트 파일은 SIL Open Font License 1.1 조건으로 배포됩니다.")
+                .font(.system(size: 11))
+                .foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(oflFontFiles, id: \.self) { fileName in
+                    Text(fileName)
+                        .font(.system(size: 11, design: .monospaced))
+                        .textSelection(.enabled)
+                }
+            }
+
+            Link("OFL 공식 전문 열기", destination: oflLicenseURL)
+                .font(.system(size: 11))
+
+            DisclosureGroup("라이선스 전문 보기") {
+                ScrollView(.vertical, showsIndicators: true) {
+                    Text(oflLicenseText)
+                        .font(.system(size: 10, design: .monospaced))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(minHeight: 130, maxHeight: 220)
+                .padding(.top, 4)
+            }
+            .font(.system(size: 11))
+        }
+    }
+
     var body: some View {
         TabView(selection: $selectedSettingsTab) {
             threeColumnContent(
@@ -768,6 +981,8 @@ struct SettingsView: View {
                             forceWorkspaceReset = true
                         }
                     }
+
+                    oflFontLicenseCard()
                 },
                 second: {
                     settingsCard(title: "출력 설정") {
@@ -1406,15 +1621,21 @@ struct MainContainerView: View {
     @EnvironmentObject private var store: FileStore
     @Environment(\.openWindow) private var openWindow
     @AppStorage("storageBookmark") private var storageBookmark: Data?
+    @AppStorage("mainSplitModeEnabled") private var mainSplitModeEnabled: Bool = false
+    @AppStorage("lastSelectedScenarioID") private var lastSelectedScenarioID: String = ""
     @State private var selectedScenario: Scenario?
     @State private var editingScenario: Scenario?
     @State private var newTitle: String = ""
-    @State private var columnVisibility: NavigationSplitViewVisibility = .all
+    @State private var isSidebarVisible: Bool = true
+    @State private var sidebarOpenedFromToggle: Bool = false
     @State private var showNewScenarioDialog: Bool = false
     @State private var newScenarioName: String = ""
     @State private var scenarioCreationMode: ScenarioCreationMode = .clean
     @State private var selectedTemplateScenarioID: UUID? = nil
     @State private var pendingAutoHideWorkItem: DispatchWorkItem?
+    @State private var activeSplitPaneID: Int = 2
+    @State private var sidebarEscapeMonitor: Any?
+    @State private var isMainWindowFullscreen: Bool = false
     
     @FocusState private var isNameFocused: Bool
     
@@ -1431,74 +1652,60 @@ struct MainContainerView: View {
         store.scenarios.filter { $0.isTemplate }
     }
 
+    private var sidebarToggleLeadingPadding: CGFloat {
+        isMainWindowFullscreen ? 14 : 86
+    }
+
+    private var sidebarToggleTopPadding: CGFloat {
+        isMainWindowFullscreen ? 14 : -30
+    }
+
     var body: some View {
-        NavigationSplitView(columnVisibility: $columnVisibility) {
-            VStack(spacing: 0) {
-                List(selection: $selectedScenario) {
-                    ForEach(store.scenarios) { scenario in
-                        if editingScenario == scenario {
-                            TextField("제목 입력", text: $newTitle)
-                                .focused($isNameFocused)
-                                .onSubmit {
-                                    finishEditingTitle(scenario)
-                                }
-                                .onAppear {
-                                    isNameFocused = true
-                                }
-                        } else {
-                            ScenarioRow(
-                                scenario: scenario,
-                                onRename: { startEditing(scenario) },
-                                onDelete: { deleteScenario(scenario) },
-                                onMakeTemplate: { makeTemplate(from: scenario) }
-                            )
-                            .tag(scenario)
-                        }
-                    }
-                }
-                
-                VStack(spacing: 0) {
-                    Divider()
-                    Button(action: {
-                        newScenarioName = ""
-                        scenarioCreationMode = .clean
-                        selectedTemplateScenarioID = templateScenarios.first?.id
-                        showNewScenarioDialog = true
-                    }) {
-                        HStack {
-                            Image(systemName: "plus.circle.fill")
-                            Text("새 시나리오 추가").fontWeight(.semibold)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 8)
-                        .background(Color.accentColor)
-                        .foregroundColor(.white)
-                        .cornerRadius(0)
-                    }
-                    .buttonStyle(.plain)
-                    .padding()
-                    
-                    Button(action: openWorkspaceFromSidebar) {
-                        Text(currentWorkspaceName)
-                            .font(.system(size: 10))
-                            .foregroundColor(.secondary)
-                            .lineLimit(1)
-                    }
-                    .buttonStyle(.plain)
-                    .padding(.horizontal, 12)
-                    .padding(.bottom, 10)
-                }
-                .background(Color(NSColor.controlBackgroundColor))
+        HStack(spacing: 0) {
+            if isSidebarVisible {
+                sidebarPanel
+                    .frame(width: 296)
+                    .transition(.move(edge: .leading).combined(with: .opacity))
             }
-            .navigationTitle("내 작업실")
-        } detail: {
-            if let scenario = selectedScenario {
-                ScenarioWriterView(scenario: scenario)
-                    .id(scenario.id) // 시나리오 전환 시 뷰의 모든 상태(@State)를 초기화하여 히스토리 인덱스 오류 방지
-            } else {
-                ContentUnavailableView("시나리오를 선택하세요", systemImage: "pencil.and.outline")
+            Group {
+                if let scenario = selectedScenario {
+                    scenarioDetailView(for: scenario)
+                } else {
+                    ContentUnavailableView("시나리오를 선택하세요", systemImage: "pencil.and.outline")
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .overlay {
+                if isSidebarVisible && sidebarOpenedFromToggle {
+                    Color.black.opacity(0.001)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            closeToggleOpenedSidebar()
+                        }
+                }
             }
         }
+        .overlay(alignment: .topLeading) {
+            if !isSidebarVisible {
+                Button {
+                    withAnimation(.easeOut(duration: 0.18)) {
+                        sidebarOpenedFromToggle = true
+                        isSidebarVisible = true
+                    }
+                } label: {
+                    Image(systemName: "sidebar.left")
+                        .font(.system(size: 14, weight: .semibold))
+                        .padding(10)
+                        .background(.ultraThinMaterial)
+                        .clipShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .padding(.leading, sidebarToggleLeadingPadding)
+                .padding(.top, sidebarToggleTopPadding)
+            }
+        }
+        .animation(.easeOut(duration: 0.18), value: isSidebarVisible)
+        .ignoresSafeArea(.container, edges: [.leading, .trailing, .bottom])
         .sheet(isPresented: $showNewScenarioDialog) {
             VStack(alignment: .leading, spacing: 14) {
                 Text("새 시나리오 만들기")
@@ -1545,11 +1752,140 @@ struct MainContainerView: View {
         }
         .onChange(of: selectedScenario) { _, newValue in
             guard newValue != nil else { return }
+            if let scenario = newValue {
+                lastSelectedScenarioID = scenario.id.uuidString
+            }
+            sidebarOpenedFromToggle = false
             scheduleAutoHideSidebar()
+        }
+        .onAppear {
+            restoreSelectedScenarioIfNeeded()
+            startSidebarEscapeMonitor()
+            refreshMainWindowFullscreenState()
+        }
+        .onChange(of: store.scenarios.map(\.id)) { _, _ in
+            restoreSelectedScenarioIfNeeded()
+        }
+        .onDisappear {
+            stopSidebarEscapeMonitor()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didEnterFullScreenNotification)) { _ in
+            refreshMainWindowFullscreenState()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didExitFullScreenNotification)) { _ in
+            refreshMainWindowFullscreenState()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeMainNotification)) { _ in
+            refreshMainWindowFullscreenState()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
+            refreshMainWindowFullscreenState()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            refreshMainWindowFullscreenState()
         }
         .onReceive(NotificationCenter.default.publisher(for: .waOpenReferenceWindowRequested)) { _ in
             openWindow(id: ReferenceWindowConstants.windowID)
         }
+        .onReceive(NotificationCenter.default.publisher(for: .waCycleSplitPaneRequested)) { _ in
+            guard mainSplitModeEnabled else { return }
+            activeSplitPaneID = (activeSplitPaneID == 1) ? 2 : 1
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .waSplitPaneActivateRequested)) { notification in
+            guard mainSplitModeEnabled else { return }
+            guard let paneID = notification.object as? Int else { return }
+            activeSplitPaneID = (paneID == 1) ? 1 : 2
+        }
+        .onChange(of: mainSplitModeEnabled) { _, enabled in
+            if enabled {
+                if activeSplitPaneID != 1 && activeSplitPaneID != 2 {
+                    activeSplitPaneID = 2
+                }
+                requestSplitPaneFocus(activeSplitPaneID)
+            }
+        }
+    }
+
+    private var sidebarPanel: some View {
+        VStack(spacing: 0) {
+            VStack(spacing: 0) {
+                List(selection: $selectedScenario) {
+                    ForEach(store.scenarios) { scenario in
+                        if editingScenario == scenario {
+                            TextField("제목 입력", text: $newTitle)
+                                .font(.custom("SansMonoCJKFinalDraft", size: 18))
+                                .focused($isNameFocused)
+                                .onSubmit {
+                                    finishEditingTitle(scenario)
+                                }
+                                .onAppear {
+                                    isNameFocused = true
+                                }
+                        } else {
+                            ScenarioRow(
+                                scenario: scenario,
+                                onRename: { startEditing(scenario) },
+                                onDelete: { deleteScenario(scenario) },
+                                onMakeTemplate: { makeTemplate(from: scenario) }
+                            )
+                            .tag(scenario)
+                        }
+                    }
+                }
+                .padding(.top, 26)
+                .background(Color(NSColor.controlBackgroundColor))
+                
+                VStack(spacing: 0) {
+                    Divider()
+                    Button(action: {
+                        newScenarioName = ""
+                        scenarioCreationMode = .clean
+                        selectedTemplateScenarioID = templateScenarios.first?.id
+                        showNewScenarioDialog = true
+                    }) {
+                        HStack {
+                            Image(systemName: "plus.circle.fill")
+                            Text("새 시나리오 추가").fontWeight(.semibold)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                        .background(Color.accentColor)
+                        .foregroundColor(.white)
+                        .cornerRadius(0)
+                    }
+                    .buttonStyle(.plain)
+                    .padding()
+                    
+                    Button(action: openWorkspaceFromSidebar) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "folder.fill")
+                                .font(.system(size: 12, weight: .semibold))
+                            Text(currentWorkspaceName)
+                                .font(.system(size: 13, weight: .semibold))
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 7)
+                        .padding(.horizontal, 10)
+                        .foregroundStyle(.primary)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .fill(Color(NSColor.windowBackgroundColor))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .stroke(Color.secondary.opacity(0.28), lineWidth: 1)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 10)
+                }
+                .background(Color(NSColor.controlBackgroundColor))
+            }
+        }
+        .background(Color(NSColor.controlBackgroundColor))
     }
 
     private func createScenarioFromDialog() {
@@ -1602,11 +1938,60 @@ struct MainContainerView: View {
         pendingAutoHideWorkItem?.cancel()
         let workItem = DispatchWorkItem {
             withAnimation {
-                columnVisibility = .detailOnly
+                isSidebarVisible = false
             }
+            sidebarOpenedFromToggle = false
         }
         pendingAutoHideWorkItem = workItem
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0, execute: workItem)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: workItem)
+    }
+
+    private func closeToggleOpenedSidebar() {
+        guard isSidebarVisible, sidebarOpenedFromToggle else { return }
+        withAnimation(.easeOut(duration: 0.18)) {
+            isSidebarVisible = false
+        }
+        sidebarOpenedFromToggle = false
+    }
+
+    private func startSidebarEscapeMonitor() {
+        guard sidebarEscapeMonitor == nil else { return }
+        sidebarEscapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            guard isSidebarVisible, sidebarOpenedFromToggle else { return event }
+            guard event.keyCode == 53 else { return event } // Esc
+            closeToggleOpenedSidebar()
+            return nil
+        }
+    }
+
+    private func stopSidebarEscapeMonitor() {
+        guard let monitor = sidebarEscapeMonitor else { return }
+        NSEvent.removeMonitor(monitor)
+        sidebarEscapeMonitor = nil
+    }
+
+    private func refreshMainWindowFullscreenState() {
+        if let key = NSApp.keyWindow, isPrimaryWorkspaceWindow(key) {
+            isMainWindowFullscreen = key.styleMask.contains(.fullScreen)
+            return
+        }
+        if let main = NSApp.mainWindow, isPrimaryWorkspaceWindow(main) {
+            isMainWindowFullscreen = main.styleMask.contains(.fullScreen)
+            return
+        }
+        if let fallback = NSApplication.shared.windows.first(where: isPrimaryWorkspaceWindow) {
+            isMainWindowFullscreen = fallback.styleMask.contains(.fullScreen)
+            return
+        }
+        isMainWindowFullscreen = false
+    }
+
+    private func isPrimaryWorkspaceWindow(_ window: NSWindow) -> Bool {
+        if window.identifier?.rawValue == ReferenceWindowConstants.windowID { return false }
+        let identifier = window.identifier?.rawValue.lowercased() ?? ""
+        if identifier.contains("settings") { return false }
+        if window is NSPanel { return false }
+        return window.canBecomeMain
     }
     
     private func startEditing(_ scenario: Scenario) {
@@ -1630,14 +2015,81 @@ struct MainContainerView: View {
         store.saveAll()
         
         withAnimation {
-            columnVisibility = .detailOnly
+            isSidebarVisible = false
         }
+        sidebarOpenedFromToggle = false
     }
 
     private func deleteScenario(_ scenario: Scenario) {
         if selectedScenario == scenario { selectedScenario = nil }
         if editingScenario == scenario { editingScenario = nil }
         store.deleteScenario(scenario)
+    }
+
+    private func requestSplitPaneFocus(_ paneID: Int) {
+        NotificationCenter.default.post(name: .waRequestSplitPaneFocus, object: paneID)
+    }
+
+    private func restoreSelectedScenarioIfNeeded() {
+        guard !store.scenarios.isEmpty else {
+            selectedScenario = nil
+            return
+        }
+
+        if let current = selectedScenario,
+           let matchedCurrent = store.scenarios.first(where: { $0.id == current.id }) {
+            if current !== matchedCurrent {
+                selectedScenario = matchedCurrent
+            }
+            return
+        }
+
+        if let rememberedID = UUID(uuidString: lastSelectedScenarioID),
+           let remembered = store.scenarios.first(where: { $0.id == rememberedID }) {
+            selectedScenario = remembered
+            return
+        }
+
+        selectedScenario = store.scenarios.first
+    }
+
+    @ViewBuilder
+    private func scenarioDetailView(for scenario: Scenario) -> some View {
+        if mainSplitModeEnabled {
+            splitScenarioDetailView(for: scenario)
+        } else {
+            ScenarioWriterView(scenario: scenario)
+                .id(scenario.id)
+        }
+    }
+
+    private func splitScenarioDetailView(for scenario: Scenario) -> some View {
+        HStack(spacing: 0) {
+            ScenarioWriterView(
+                scenario: scenario,
+                showWorkspaceTopToolbar: false,
+                splitModeEnabled: true,
+                splitPaneID: 1
+            )
+            .id("\(scenario.id.uuidString)-split-left")
+
+            Divider()
+                .background(Color.black.opacity(0.20))
+
+            ScenarioWriterView(
+                scenario: scenario,
+                showWorkspaceTopToolbar: true,
+                splitModeEnabled: true,
+                splitPaneID: 2
+            )
+            .id("\(scenario.id.uuidString)-split-right")
+        }
+        .onAppear {
+            requestSplitPaneFocus(activeSplitPaneID)
+        }
+        .onChange(of: activeSplitPaneID) { _, newValue in
+            requestSplitPaneFocus(newValue)
+        }
     }
 }
 
@@ -1650,17 +2102,18 @@ struct ScenarioRow: View {
     var body: some View {
         HStack(spacing: 6) {
             Text(scenario.title.isEmpty ? "제목 없음" : scenario.title)
-                .font(.custom("SansMonoCJKFinalDraft", size: 13))
+                .font(.custom("SansMonoCJKFinalDraft", size: 18))
             if scenario.isTemplate {
                 Text("템플릿")
-                    .font(.system(size: 9, weight: .bold))
+                    .font(.system(size: 12, weight: .bold))
                     .foregroundStyle(.secondary)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
                     .background(Color.secondary.opacity(0.15))
                     .clipShape(Capsule())
             }
         }
+            .padding(.vertical, 2)
             .contextMenu {
                 Button("이름 변경") { onRename() }
                 Button("템플릿으로 만들기") { onMakeTemplate() }
