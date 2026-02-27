@@ -1,6 +1,14 @@
 import SwiftUI
 import AppKit
 
+private final class MainEditorFixedOriginClipView: NSClipView {
+    override func constrainBoundsRect(_ proposedBounds: NSRect) -> NSRect {
+        var constrained = super.constrainBoundsRect(proposedBounds)
+        constrained.origin = .zero
+        return constrained
+    }
+}
+
 extension ScenarioWriterView {
 
     private var mainEditorHorizontalPadding: CGFloat { MainEditorLayoutMetrics.mainEditorHorizontalPadding }
@@ -241,6 +249,21 @@ extension ScenarioWriterView {
         let insets = scrollView.contentInsets
         if abs(insets.top) > 0.01 || abs(insets.left) > 0.01 || abs(insets.bottom) > 0.01 || abs(insets.right) > 0.01 {
             scrollView.contentInsets = NSEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)
+        }
+        if !(scrollView.contentView is MainEditorFixedOriginClipView) {
+            let currentClipView = scrollView.contentView
+            let fixedClipView = MainEditorFixedOriginClipView(frame: currentClipView.frame)
+            fixedClipView.drawsBackground = currentClipView.drawsBackground
+            fixedClipView.backgroundColor = currentClipView.backgroundColor
+            let existingDocumentView = scrollView.documentView
+            scrollView.contentView = fixedClipView
+            if scrollView.documentView !== existingDocumentView {
+                scrollView.documentView = existingDocumentView
+            }
+        }
+        if scrollView.contentView.bounds.origin != .zero {
+            scrollView.contentView.setBoundsOrigin(.zero)
+            scrollView.reflectScrolledClipView(scrollView.contentView)
         }
     }
 
