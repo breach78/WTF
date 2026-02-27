@@ -438,7 +438,7 @@ struct CardItem: View {
         if mainEditingMeasuredBodyHeight > 1 {
             return mainEditingMeasuredBodyHeight
         }
-        return measureMainEditorBodyHeight(text: card.content, width: resolvedMainEditingMeasureWidth())
+        return measureMainEditorBodyHeight(text: card.content, width: mainEditingTextMeasureWidth)
     }
 
     private var mainEditorTextBinding: Binding<String> {
@@ -449,39 +449,9 @@ struct CardItem: View {
                 guard oldValue != newValue else { return }
                 card.content = newValue
                 onContentChange?(oldValue, newValue)
-                let touchesTrailingLineBreakBoundary =
-                    oldValue.hasSuffix("\n") ||
-                    newValue.hasSuffix("\n")
-                let hasInnerVerticalDrift =
-                    (liveMainEditorInnerScrollYOffset().map { abs($0) > 0.5 } ?? false)
-                scheduleMainEditingMeasuredBodyHeightRefresh(
-                    immediate: touchesTrailingLineBreakBoundary || hasInnerVerticalDrift
-                )
+                scheduleMainEditingMeasuredBodyHeightRefresh()
             }
         )
-    }
-
-    private func resolvedMainEditingMeasureWidth() -> CGFloat {
-        let fallbackWidth = mainEditingTextMeasureWidth
-        guard let viewportWidth = liveMainEditorViewportWidth() else { return fallbackWidth }
-        return max(1, min(fallbackWidth, viewportWidth))
-    }
-
-    private func liveMainEditorViewportWidth() -> CGFloat? {
-        guard isEditing else { return nil }
-        guard editorFocus else { return nil }
-        guard let textView = NSApp.keyWindow?.firstResponder as? NSTextView else { return nil }
-        guard textView.string == card.content else { return nil }
-        let viewport = textView.enclosingScrollView?.contentView.bounds.width ?? textView.bounds.width
-        return max(1, viewport)
-    }
-
-    private func liveMainEditorInnerScrollYOffset() -> CGFloat? {
-        guard isEditing else { return nil }
-        guard editorFocus else { return nil }
-        guard let textView = NSApp.keyWindow?.firstResponder as? NSTextView else { return nil }
-        guard textView.string == card.content else { return nil }
-        return textView.enclosingScrollView?.contentView.bounds.origin.y
     }
 
     private func liveMainResponderBodyHeight() -> CGFloat? {
@@ -489,11 +459,6 @@ struct CardItem: View {
         guard editorFocus else { return nil }
         guard let textView = NSApp.keyWindow?.firstResponder as? NSTextView else { return nil }
         guard textView.string == card.content else { return nil }
-        if textView.string.hasSuffix("\n") {
-            // NSTextView's usedRect can transiently under-report the trailing empty line.
-            // Fall back to offscreen measurement for this boundary case.
-            return nil
-        }
         guard let layoutManager = textView.layoutManager,
               let textContainer = textView.textContainer else { return nil }
         layoutManager.ensureLayout(for: textContainer)
@@ -542,7 +507,7 @@ struct CardItem: View {
 
     private func refreshMainEditingMeasuredBodyHeight() {
         let measured = liveMainResponderBodyHeight()
-            ?? measureMainEditorBodyHeight(text: card.content, width: resolvedMainEditingMeasureWidth())
+            ?? measureMainEditorBodyHeight(text: card.content, width: mainEditingTextMeasureWidth)
         mainEditingMeasureLastAt = Date()
         let previous = mainEditingMeasuredBodyHeight
         if abs(previous - measured) > mainEditingMeasureUpdateThreshold {
