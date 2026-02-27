@@ -876,11 +876,6 @@ final class FileStore: ObservableObject {
         return clonedCards
     }
 
-    nonisolated private func readCardContent(id: UUID, scenarioFolder: URL) -> String {
-        let url = cardFileURL(for: id, scenarioFolder: scenarioFolder)
-        return (try? String(contentsOf: url, encoding: .utf8)) ?? ""
-    }
-
     nonisolated private func writeCardContent(id: UUID, content: String, scenarioFolder: URL) {
         let url = cardFileURL(for: id, scenarioFolder: scenarioFolder)
         try? content.write(to: url, atomically: true, encoding: .utf8)
@@ -899,11 +894,6 @@ final class FileStore: ObservableObject {
 
     nonisolated private func cardFileURL(for id: UUID, scenarioFolder: URL) -> URL {
         scenarioFolder.appendingPathComponent("card_\(id.uuidString).txt")
-    }
-
-    func scenarioFolderURL(for scenarioID: UUID) -> URL {
-        let folderName = ensureScenarioFolder(for: scenarioID)
-        return folderURL.appendingPathComponent(folderName)
     }
 
     private func ensureScenarioFolder(for scenarioID: UUID) -> String {

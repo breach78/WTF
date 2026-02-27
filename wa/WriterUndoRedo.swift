@@ -67,14 +67,14 @@ extension ScenarioWriterView {
 
     func restoreScenarioState(_ state: ScenarioState) {
         isApplyingUndo = true
-        scenario.cards = state.cards.map { s in
+        let restoredCards = state.cards.map { s in
             SceneCard(
                 id: s.id,
                 content: s.content,
                 orderIndex: s.orderIndex,
                 createdAt: s.createdAt,
                 parent: nil,
-                scenario: scenario,
+                scenario: nil,
                 category: s.category,
                 isFloating: s.isFloating,
                 isArchived: s.isArchived,
@@ -83,12 +83,19 @@ extension ScenarioWriterView {
             )
         }
         var map: [UUID: SceneCard] = [:]
-        for card in scenario.cards { map[card.id] = card }
+        map.reserveCapacity(restoredCards.count)
+        for card in restoredCards {
+            map[card.id] = card
+        }
         for (idx, s) in state.cards.enumerated() {
             if let pid = s.parentID, let parent = map[pid] {
-                scenario.cards[idx].parent = parent
+                restoredCards[idx].parent = parent
             }
         }
+        for card in restoredCards {
+            card.scenario = scenario
+        }
+        scenario.cards = restoredCards
         scenario.changeCountSinceLastSnapshot = state.changeCount
         scenario.bumpCardsVersion()
         let restoredSelection = Set(state.selectedCardIDs.filter { map[$0] != nil })
@@ -581,7 +588,10 @@ extension ScenarioWriterView {
             focusRedoStack.removeFirst(focusRedoStack.count - maxFocusUndoCount)
         }
         restoreScenarioState(previous)
-        restoreFocusEditingContextAfterUndoRedo(restoredState: previous)
+        DispatchQueue.main.async {
+            guard showFocusMode else { return }
+            restoreFocusEditingContextAfterUndoRedo(restoredState: previous)
+        }
     }
 
     func performFocusRedo() {
@@ -603,7 +613,10 @@ extension ScenarioWriterView {
             focusUndoStack.removeFirst(focusUndoStack.count - maxFocusUndoCount)
         }
         restoreScenarioState(next)
-        restoreFocusEditingContextAfterUndoRedo(restoredState: next)
+        DispatchQueue.main.async {
+            guard showFocusMode else { return }
+            restoreFocusEditingContextAfterUndoRedo(restoredState: next)
+        }
     }
 
     // MARK: - Focus Editing Context Restoration

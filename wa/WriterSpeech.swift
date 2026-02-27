@@ -219,31 +219,57 @@ extension ScenarioWriterView {
     @MainActor
     func stopDictationRecording(discardAudio: Bool) {
         guard let recorder = dictationRecorder else {
-            dictationIsRecording = false
-            dictationTargetParentID = nil
-            dictationIsProcessing = false
+            resetDictationStateForMissingRecorder()
             return
         }
 
+        let stopContext = resolvedStopDictationContext(from: recorder)
+        if discardDictationAudioIfNeeded(stopContext.recordedURL, discardAudio: discardAudio) {
+            return
+        }
+
+        guard let parentID = resolvedProcessingParentID(stopContext.parentID, recordedURL: stopContext.recordedURL) else {
+            return
+        }
+
+        startDictationPostProcessing(parentID: parentID, recordedURL: stopContext.recordedURL)
+    }
+
+    @MainActor
+    func resetDictationStateForMissingRecorder() {
+        dictationIsRecording = false
+        dictationTargetParentID = nil
+        dictationIsProcessing = false
+    }
+
+    @MainActor
+    func resolvedStopDictationContext(from recorder: LiveSpeechDictationRecorder) -> (parentID: UUID?, recordedURL: URL) {
         recorder.stop()
         dictationRecorder = nil
         dictationIsRecording = false
-
         let parentID = dictationTargetParentID ?? activeCardID
         dictationTargetParentID = nil
-        let recordedURL = recorder.outputURL
+        return (parentID, recorder.outputURL)
+    }
 
-        if discardAudio {
-            try? FileManager.default.removeItem(at: recordedURL)
-            return
-        }
+    func discardDictationAudioIfNeeded(_ recordedURL: URL, discardAudio: Bool) -> Bool {
+        guard discardAudio else { return false }
+        try? FileManager.default.removeItem(at: recordedURL)
+        return true
+    }
 
+    @MainActor
+    func resolvedProcessingParentID(_ parentID: UUID?, recordedURL: URL) -> UUID? {
         guard let parentID else {
             try? FileManager.default.removeItem(at: recordedURL)
             setAIStatusError(SpeechDictationError.noActiveCard.localizedDescription)
-            return
+            return nil
         }
+        return parentID
+    }
 
+    @MainActor
+    func startDictationPostProcessing(parentID: UUID, recordedURL: URL) {
         dictationIsProcessing = true
         setAIStatus("받아쓰기를 정리하고 요약하는 중입니다...")
 
@@ -254,27 +280,31 @@ extension ScenarioWriterView {
             }
 
             do {
-                guard findCard(by: parentID) != nil else {
-                    throw SpeechDictationError.parentCardMissing
-                }
-
-                let transcript = try await transcribeDictationAudio(at: recordedURL)
-                let trimmedTranscript = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !trimmedTranscript.isEmpty else {
-                    throw SpeechDictationError.emptyTranscript
-                }
-
-                let summary = try await summarizeDictationTranscript(trimmedTranscript)
-                try insertDictationResultCards(
-                    parentID: parentID,
-                    transcript: trimmedTranscript,
-                    summary: summary
-                )
+                try await processStoppedDictation(parentID: parentID, recordedURL: recordedURL)
                 setAIStatus("받아쓰기 원문 카드와 요약 카드를 추가했습니다.")
             } catch {
                 setAIStatusError(error.localizedDescription)
             }
         }
+    }
+
+    func processStoppedDictation(parentID: UUID, recordedURL: URL) async throws {
+        guard findCard(by: parentID) != nil else {
+            throw SpeechDictationError.parentCardMissing
+        }
+
+        let transcript = try await transcribeDictationAudio(at: recordedURL)
+        let trimmedTranscript = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedTranscript.isEmpty else {
+            throw SpeechDictationError.emptyTranscript
+        }
+
+        let summary = try await summarizeDictationTranscript(trimmedTranscript)
+        try insertDictationResultCards(
+            parentID: parentID,
+            transcript: trimmedTranscript,
+            summary: summary
+        )
     }
 
     func transcribeDictationAudio(at url: URL) async throws -> String {
@@ -374,9 +404,11 @@ extension ScenarioWriterView {
         scenario.cards.append(transcriptCard)
         scenario.cards.append(summaryCard)
         scenario.bumpCardsVersion()
-        store.saveAll()
-        takeSnapshot(force: true)
-        pushUndoState(prevState, actionName: "받아쓰기 요약 추가")
+        commitCardMutation(
+            previousState: prevState,
+            actionName: "받아쓰기 요약 추가",
+            forceSnapshot: true
+        )
 
         selectedCardIDs = [summaryCard.id]
         changeActiveCard(to: summaryCard)

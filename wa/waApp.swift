@@ -18,6 +18,53 @@ extension UTType {
     }
 }
 
+private enum WorkspaceBookmarkService {
+    static func openWorkspaceBookmark(message: String) -> Data? {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.treatsFilePackagesAsDirectories = false
+        panel.allowedContentTypes = [.item]
+        panel.message = message
+
+        guard panel.runModal() == .OK, let chosenURL = panel.url else { return nil }
+        guard chosenURL.pathExtension.lowercased() == "wtf" else { return nil }
+        return try? bookmarkData(forWorkspaceURL: chosenURL)
+    }
+
+    static func createWorkspaceBookmark(message: String?, defaultFileName: String = "workspace.wtf") -> Data? {
+        let panel = NSSavePanel()
+        panel.canCreateDirectories = true
+        panel.allowedContentTypes = [.waWorkspace]
+        panel.nameFieldStringValue = defaultFileName
+        panel.isExtensionHidden = false
+        if let message {
+            panel.message = message
+        }
+
+        guard panel.runModal() == .OK, let chosenURL = panel.url else { return nil }
+        let workspaceURL = chosenURL.pathExtension.lowercased() == "wtf"
+            ? chosenURL
+            : chosenURL.appendingPathExtension("wtf")
+
+        do {
+            try FileManager.default.createDirectory(at: workspaceURL, withIntermediateDirectories: true)
+            return try bookmarkData(forWorkspaceURL: workspaceURL)
+        } catch {
+            return nil
+        }
+    }
+
+    private static func bookmarkData(forWorkspaceURL workspaceURL: URL) throws -> Data {
+        var url = workspaceURL
+        var values = URLResourceValues()
+        values.isPackage = true
+        try? url.setResourceValues(values)
+        return try url.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil)
+    }
+}
+
 private struct MainWindowTitleHider: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView {
         NSView()
@@ -387,50 +434,20 @@ struct waApp: App {
     }
     
     private func createWorkspaceFile() {
-        let panel = NSSavePanel()
-        panel.canCreateDirectories = true
-        panel.allowedContentTypes = [.waWorkspace]
-        panel.nameFieldStringValue = "workspace.wtf"
-        panel.isExtensionHidden = false
-        panel.message = "작업 파일(.wtf)을 선택하거나 새로 만드세요."
-        
-        if panel.runModal() == .OK, let chosenURL = panel.url {
-            var url = chosenURL.pathExtension.lowercased() == "wtf" ? chosenURL : chosenURL.appendingPathExtension("wtf")
-            do {
-                try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
-                var values = URLResourceValues()
-                values.isPackage = true
-                try? url.setResourceValues(values)
-                // 향후 앱 재실행 시에도 접근 가능하도록 북마크 생성
-                let bookmark = try url.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil)
-                storageBookmark = bookmark
-                setupStore()
-            } catch {
-            }
+        if let bookmark = WorkspaceBookmarkService.createWorkspaceBookmark(
+            message: "작업 파일(.wtf)을 선택하거나 새로 만드세요."
+        ) {
+            storageBookmark = bookmark
+            setupStore()
         }
     }
 
     private func openWorkspaceFile() {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = true
-        panel.canChooseDirectories = true
-        panel.allowsMultipleSelection = false
-        panel.treatsFilePackagesAsDirectories = false
-        panel.allowedContentTypes = [.item]
-        panel.message = "기존 작업 파일(.wtf)을 선택하세요."
-        
-        if panel.runModal() == .OK, let chosenURL = panel.url {
-            guard chosenURL.pathExtension.lowercased() == "wtf" else { return }
-            var url = chosenURL
-            do {
-                var values = URLResourceValues()
-                values.isPackage = true
-                try? url.setResourceValues(values)
-                let bookmark = try url.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil)
-                storageBookmark = bookmark
-                setupStore()
-            } catch {
-            }
+        if let bookmark = WorkspaceBookmarkService.openWorkspaceBookmark(
+            message: "기존 작업 파일(.wtf)을 선택하세요."
+        ) {
+            storageBookmark = bookmark
+            setupStore()
         }
     }
 
@@ -483,12 +500,10 @@ struct waApp: App {
     }
 
     private func nsColorFromHex(_ hex: String) -> NSColor? {
-        var hexValue = hex.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        if hexValue.hasPrefix("#") { hexValue.removeFirst() }
-        guard hexValue.count == 6, let intVal = Int(hexValue, radix: 16) else { return nil }
-        let r = CGFloat((intVal >> 16) & 0xFF) / 255.0
-        let g = CGFloat((intVal >> 8) & 0xFF) / 255.0
-        let b = CGFloat(intVal & 0xFF) / 255.0
+        guard let rgb = parseHexRGB(hex) else { return nil }
+        let r = CGFloat(rgb.0)
+        let g = CGFloat(rgb.1)
+        let b = CGFloat(rgb.2)
         return NSColor(srgbRed: r, green: g, blue: b, alpha: 1.0)
     }
 
@@ -1355,13 +1370,8 @@ struct SettingsView: View {
     }
 
     private func colorFromHex(_ hex: String) -> Color? {
-        var hexValue = hex.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        if hexValue.hasPrefix("#") { hexValue.removeFirst() }
-        guard hexValue.count == 6, let intVal = Int(hexValue, radix: 16) else { return nil }
-        let r = Double((intVal >> 16) & 0xFF) / 255.0
-        let g = Double((intVal >> 8) & 0xFF) / 255.0
-        let b = Double(intVal & 0xFF) / 255.0
-        return Color(red: r, green: g, blue: b)
+        guard let rgb = parseHexRGB(hex) else { return nil }
+        return Color(red: rgb.0, green: rgb.1, blue: rgb.2)
     }
 
     private func hexFromColor(_ color: Color) -> String {
@@ -1409,16 +1419,7 @@ struct SettingsView: View {
     }
 
     private func normalizeGeminiModelID(_ raw: String) -> String {
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        let lowered = trimmed.lowercased()
-        switch lowered {
-        case "gemini-3-pro", "gemini-3.0-pro", "gemini-3-pro-latest":
-            return "gemini-3-pro-preview"
-        case "gemini-3-flash-latest":
-            return "gemini-3-flash"
-        default:
-            return trimmed
-        }
+        normalizeGeminiModelIDValue(raw)
     }
 
     private func refreshGeminiAPIKeyStatus() {
@@ -1562,50 +1563,18 @@ struct SettingsView: View {
     }
 
     private func openWorkspaceFile() {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = true
-        panel.canChooseDirectories = true
-        panel.allowsMultipleSelection = false
-        panel.treatsFilePackagesAsDirectories = false
-        panel.allowedContentTypes = [.item]
-        panel.message = "기존 작업 파일(.wtf)을 선택하세요."
-        
-        if panel.runModal() == .OK, let chosenURL = panel.url {
-            guard chosenURL.pathExtension.lowercased() == "wtf" else { return }
-            var url = chosenURL
-            do {
-                var values = URLResourceValues()
-                values.isPackage = true
-                try? url.setResourceValues(values)
-                let bookmark = try url.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil)
-                storageBookmark = bookmark
-                onUpdateStore()
-            } catch {
-                // Logging intentionally muted.
-            }
+        if let bookmark = WorkspaceBookmarkService.openWorkspaceBookmark(
+            message: "기존 작업 파일(.wtf)을 선택하세요."
+        ) {
+            storageBookmark = bookmark
+            onUpdateStore()
         }
     }
 
     private func createWorkspaceFile() {
-        let panel = NSSavePanel()
-        panel.canCreateDirectories = true
-        panel.allowedContentTypes = [.waWorkspace]
-        panel.nameFieldStringValue = "workspace.wtf"
-        panel.isExtensionHidden = false
-        
-        if panel.runModal() == .OK, let chosenURL = panel.url {
-            var url = chosenURL.pathExtension.lowercased() == "wtf" ? chosenURL : chosenURL.appendingPathExtension("wtf")
-            do {
-                try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
-                var values = URLResourceValues()
-                values.isPackage = true
-                try? url.setResourceValues(values)
-                let bookmark = try url.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil)
-                storageBookmark = bookmark
-                onUpdateStore()
-            } catch {
-                // Logging intentionally muted.
-            }
+        if let bookmark = WorkspaceBookmarkService.createWorkspaceBookmark(message: nil) {
+            storageBookmark = bookmark
+            onUpdateStore()
         }
     }
 }
@@ -1908,28 +1877,12 @@ struct MainContainerView: View {
     }
 
     private func openWorkspaceFromSidebar() {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = true
-        panel.canChooseDirectories = true
-        panel.allowsMultipleSelection = false
-        panel.treatsFilePackagesAsDirectories = false
-        panel.allowedContentTypes = [.item]
-        panel.message = "기존 작업 파일(.wtf)을 선택하세요."
-        
-        if panel.runModal() == .OK, let chosenURL = panel.url {
-            guard chosenURL.pathExtension.lowercased() == "wtf" else { return }
-            do {
-                var values = URLResourceValues()
-                values.isPackage = true
-                var url = chosenURL
-                try? url.setResourceValues(values)
-                let bookmark = try url.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil)
-                storageBookmark = bookmark
-                DispatchQueue.main.async {
-                    scheduleAutoHideSidebar()
-                }
-            } catch {
-                // Logging intentionally muted.
+        if let bookmark = WorkspaceBookmarkService.openWorkspaceBookmark(
+            message: "기존 작업 파일(.wtf)을 선택하세요."
+        ) {
+            storageBookmark = bookmark
+            DispatchQueue.main.async {
+                scheduleAutoHideSidebar()
             }
         }
     }

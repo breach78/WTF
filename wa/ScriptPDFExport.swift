@@ -427,8 +427,8 @@ final class ScriptCenteredPDFGenerator {
         }
 
         let attributedString = createAttributedString(for: element)
-        let width = getWidth(for: element.type)
-        let xPos = getXPosition(for: element.type)
+        let width = contentWidth(for: element.type)
+        let xPos = xPosition(for: element.type)
 
         let isTop = abs(cursorY - ScriptExportLayoutConfig.CenteredLayout.marginTop) < 1.0
         let spacing = isTop ? 0.0 : config.centeredParagraphSpacing
@@ -441,7 +441,7 @@ final class ScriptCenteredPDFGenerator {
                 let nextElem = allElements[nextIndex]
                 if nextElem.type == .dialogue || nextElem.type == .parenthetical {
                     let nextStr = createAttributedString(for: nextElem)
-                    blockHeight += calculateHeight(of: nextStr, width: getWidth(for: nextElem.type))
+                    blockHeight += calculateHeight(of: nextStr, width: contentWidth(for: nextElem.type))
                     nextIndex += 1
                 } else {
                     break
@@ -490,11 +490,11 @@ final class ScriptCenteredPDFGenerator {
             return nextSpacing + minimumHeightForCharacterBlock(startingAt: nextIndex, allElements: allElements)
         case .sceneHeading:
             let nextString = createAttributedString(for: nextElement)
-            let nextHeight = calculateHeight(of: nextString, width: getWidth(for: nextElement.type))
+            let nextHeight = calculateHeight(of: nextString, width: contentWidth(for: nextElement.type))
             return nextSpacing + nextHeight
         default:
             let nextString = createAttributedString(for: nextElement)
-            let nextHeight = calculateHeight(of: nextString, width: getWidth(for: nextElement.type))
+            let nextHeight = calculateHeight(of: nextString, width: contentWidth(for: nextElement.type))
             return nextSpacing + min(nextHeight, centeredOneLineHeight)
         }
     }
@@ -510,7 +510,7 @@ final class ScriptCenteredPDFGenerator {
             }
 
             let attrString = createAttributedString(for: element)
-            blockHeight += calculateHeight(of: attrString, width: getWidth(for: element.type))
+            blockHeight += calculateHeight(of: attrString, width: contentWidth(for: element.type))
             index += 1
         }
 
@@ -680,7 +680,7 @@ final class ScriptCenteredPDFGenerator {
         attrStr.draw(in: CGRect(x: x, y: y, width: width, height: height))
     }
 
-    private func getXPosition(for type: ScriptExportElementType) -> CGFloat {
+    private func xPosition(for type: ScriptExportElementType) -> CGFloat {
         switch type {
         case .sceneHeading: return ScriptExportLayoutConfig.CenteredLayout.sceneLeft
         case .action: return ScriptExportLayoutConfig.CenteredLayout.actionLeft
@@ -693,7 +693,7 @@ final class ScriptCenteredPDFGenerator {
         }
     }
 
-    private func getWidth(for type: ScriptExportElementType) -> CGFloat {
+    private func contentWidth(for type: ScriptExportElementType) -> CGFloat {
         switch type {
         case .sceneHeading: return pageWidth - ScriptExportLayoutConfig.CenteredLayout.sceneLeft - ScriptExportLayoutConfig.CenteredLayout.sceneRight
         case .action: return pageWidth - ScriptExportLayoutConfig.CenteredLayout.actionLeft - ScriptExportLayoutConfig.CenteredLayout.actionRight
@@ -805,7 +805,7 @@ final class ScriptKoreanPDFGenerator {
                         attributedString,
                         in: context,
                         width: width,
-                        xPos: getXPosition(for: currentType),
+                        xPos: xPosition(for: currentType),
                         cursorY: &cursorY,
                         pageNumber: &pageNumber
                     )
@@ -826,7 +826,7 @@ final class ScriptKoreanPDFGenerator {
                     cursorY += spacing
                 }
 
-                let xPos: CGFloat = (currentType == .dialogue) ? safetyMargin : getXPosition(for: currentType)
+                let xPos: CGFloat = (currentType == .dialogue) ? safetyMargin : xPosition(for: currentType)
                 let yPos = pageHeight - cursorY - height
                 attributedString.draw(in: CGRect(x: xPos, y: yPos, width: width, height: height))
 
@@ -956,11 +956,11 @@ final class ScriptKoreanPDFGenerator {
 
             let style = createParagraphStyle(alignment: .left)
             let attrStr = NSAttributedString(string: sceneText, attributes: [.font: font, .paragraphStyle: style, .foregroundColor: NSColor.black])
-            return (attrStr, getWidth(for: .sceneHeading), 1, .sceneHeading)
+            return (attrStr, contentWidth(for: .sceneHeading), 1, .sceneHeading)
         }
 
         let attrStr = createAttributedString(for: element)
-        return (attrStr, getWidth(for: element.type), 1, element.type)
+        return (attrStr, contentWidth(for: element.type), 1, element.type)
     }
 
     private func createKoreanDialogueBlock(startIndex: Int, elements: [ScriptExportElement]) -> (NSAttributedString, CGFloat, Int, ScriptExportElementType) {
@@ -1075,7 +1075,7 @@ final class ScriptKoreanPDFGenerator {
         ])
     }
 
-    private func getXPosition(for type: ScriptExportElementType) -> CGFloat {
+    private func xPosition(for type: ScriptExportElementType) -> CGFloat {
         switch type {
         case .sceneHeading: return ScriptExportLayoutConfig.KoreanLayout.sceneLeft
         case .action: return ScriptExportLayoutConfig.KoreanLayout.actionLeft
@@ -1085,7 +1085,7 @@ final class ScriptKoreanPDFGenerator {
         }
     }
 
-    private func getWidth(for type: ScriptExportElementType) -> CGFloat {
+    private func contentWidth(for type: ScriptExportElementType) -> CGFloat {
         switch type {
         case .sceneHeading: return pageWidth - ScriptExportLayoutConfig.KoreanLayout.sceneLeft - ScriptExportLayoutConfig.KoreanLayout.sceneRight
         case .action: return pageWidth - ScriptExportLayoutConfig.KoreanLayout.actionLeft - ScriptExportLayoutConfig.KoreanLayout.actionRight

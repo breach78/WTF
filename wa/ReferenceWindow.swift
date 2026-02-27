@@ -661,14 +661,7 @@ private struct ReferenceCardEditorRow: View {
     }
 
     private func rgbFromHex(_ hex: String) -> (Double, Double, Double)? {
-        let cleaned = hex
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .replacingOccurrences(of: "#", with: "")
-        guard cleaned.count == 6, let value = UInt64(cleaned, radix: 16) else { return nil }
-        let r = Double((value >> 16) & 0xFF) / 255.0
-        let g = Double((value >> 8) & 0xFF) / 255.0
-        let b = Double(value & 0xFF) / 255.0
-        return (r, g, b)
+        parseHexRGB(hex, stripAllHashes: true)
     }
 
     private func liveFocusedBodyHeight(for textView: NSTextView) -> CGFloat? {

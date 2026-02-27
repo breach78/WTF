@@ -57,6 +57,46 @@ final class HexColorCache: @unchecked Sendable {
     }
 }
 
+func parseHexRGB(_ hex: String, stripAllHashes: Bool = false) -> (Double, Double, Double)? {
+    let trimmed = hex.trimmingCharacters(in: .whitespacesAndNewlines)
+    let normalized = stripAllHashes ? trimmed.replacingOccurrences(of: "#", with: "") : trimmed
+    return hexColorCache.rgb(from: normalized)
+}
+
+func normalizeGeminiModelIDValue(_ raw: String) -> String {
+    let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+    let lowered = trimmed.lowercased()
+    switch lowered {
+    case "gemini-3-pro", "gemini-3.0-pro", "gemini-3-pro-latest":
+        return "gemini-3-pro-preview"
+    case "gemini-3-flash-latest":
+        return "gemini-3-flash"
+    default:
+        return trimmed
+    }
+}
+
+enum CaretScrollCoordinator {
+    @discardableResult
+    static func applyVerticalScrollIfNeeded(
+        scrollView: NSScrollView,
+        visibleRect: CGRect,
+        targetY: CGFloat,
+        minY: CGFloat,
+        maxY: CGFloat,
+        deadZone: CGFloat = 1.0,
+        snapToPixel: Bool = false
+    ) -> Bool {
+        let clampedY = min(max(minY, targetY), maxY)
+        let resolvedTargetY = snapToPixel ? round(clampedY) : clampedY
+        guard abs(resolvedTargetY - visibleRect.origin.y) > deadZone else { return false }
+
+        scrollView.contentView.setBoundsOrigin(NSPoint(x: visibleRect.origin.x, y: resolvedTargetY))
+        scrollView.reflectScrolledClipView(scrollView.contentView)
+        return true
+    }
+}
+
 // MARK: - 히스토리 비교를 위한 타입
 
 enum DiffStatus {

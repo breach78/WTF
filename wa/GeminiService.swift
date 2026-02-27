@@ -200,15 +200,7 @@ struct GeminiService {
     }
 
     private static func normalizeModelID(_ raw: String) -> String {
-        let lowered = raw.lowercased()
-        switch lowered {
-        case "gemini-3-pro", "gemini-3.0-pro", "gemini-3-pro-latest":
-            return "gemini-3-pro-preview"
-        case "gemini-3-flash-latest":
-            return "gemini-3-flash"
-        default:
-            return raw
-        }
+        normalizeGeminiModelIDValue(raw)
     }
 
     private static func shouldRetryWithNextVersion(

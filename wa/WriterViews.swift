@@ -11,6 +11,18 @@ struct ScenarioWriterView: View {
         case end
     }
 
+    struct AICandidateTrackingState {
+        var parentID: UUID? = nil
+        var cardIDs: [UUID] = []
+        var action: AICardAction? = nil
+    }
+
+    struct InactivePaneSnapshotState {
+        var levelsData: [LevelData] = []
+        var maxLevelCount: Int = 0
+        var syncWorkItem: DispatchWorkItem? = nil
+    }
+
     @EnvironmentObject var store: FileStore
     @EnvironmentObject var referenceCardStore: ReferenceCardStore
     @ObservedObject var scenario: Scenario
@@ -90,6 +102,7 @@ struct ScenarioWriterView: View {
     @State var historyIndex: Double = 0
     @State var isPreviewingHistory: Bool = false
     @State var previewDiffs: [SnapshotDiff] = []
+    @State var historyPreviewSelectedCardIDs: Set<UUID> = []
     @State var showHistoryBar: Bool = false
     @State var showCheckpointDialog: Bool = false
     @State var newCheckpointName: String = ""
@@ -183,9 +196,7 @@ struct ScenarioWriterView: View {
     @State var aiIsGenerating: Bool = false
     @State var aiStatusMessage: String? = nil
     @State var aiStatusIsError: Bool = false
-    @State var aiCandidateParentID: UUID? = nil
-    @State var aiCandidateCardIDs: [UUID] = []
-    @State var aiCandidateAction: AICardAction? = nil
+    @State var aiCandidateState = AICandidateTrackingState()
     @State var aiChildSummaryLoadingCardIDs: Set<UUID> = []
     @State var dictationRecorder: LiveSpeechDictationRecorder? = nil
     @State var dictationIsRecording: Bool = false
@@ -210,9 +221,7 @@ struct ScenarioWriterView: View {
     @State var historyBarMeasuredHeight: CGFloat = 0
     @State var historyRetentionLastAppliedCount: Int = 0
     @State var caretEnsureBurstWorkItems: [DispatchWorkItem] = []
-    @State var inactivePaneLevelsDataSnapshot: [LevelData] = []
-    @State var inactivePaneMaxLevelCountSnapshot: Int = 0
-    @State var inactivePaneSyncWorkItem: DispatchWorkItem? = nil
+    @State var inactivePaneSnapshotState = InactivePaneSnapshotState()
     @State var scenarioTimestampSuppressionActive: Bool = false
     @FocusState var isNamedSnapshotNoteEditorFocused: Bool
     let focusTypingIdleInterval: TimeInterval = 1.5
@@ -317,266 +326,57 @@ struct ScenarioWriterView: View {
                 activateSplitPaneIfNeeded()
             })
             .onAppear {
-                if activeCardID == nil, let startupCard = startupActiveCard() { changeActiveCard(to: startupCard) }
-                isMainViewFocused = true
-                if scenario.sortedSnapshots.isEmpty { takeSnapshot(force: true) }
-                let snapshotCountBeforeRetention = scenario.snapshots.count
-                applyHistoryRetentionPolicyIfNeeded(force: true)
-                if scenario.snapshots.count < snapshotCountBeforeRetention {
-                    store.saveAll()
-                }
-                historyIndex = Double(max(0, scenario.sortedSnapshots.count - 1))
-                maxLevelCount = max(maxLevelCount, getLevelsWithParents().count)
-                refreshInactivePaneSnapshotNow()
-                updateHistoryKeyMonitor()
-                syncScenarioTimestampSuppressionIfNeeded()
+                handleWorkspaceAppear()
             }
             .onChange(of: showHistoryBar) { _, isShown in
-                updateHistoryKeyMonitor()
-                requestMainCanvasRestoreForHistoryToggle()
-                if isShown {
-                    isSearchFocused = false
-                    isNamedSnapshotSearchFocused = false
-                    isNamedSnapshotNoteEditing = false
-                    isNamedSnapshotNoteEditorFocused = false
-                    syncNamedSnapshotNoteForCurrentSelection(focusEditor: false)
-                } else {
-                    historySelectedNamedSnapshotNoteCardID = nil
-                    snapshotNoteSearchText = ""
-                    isSearchFocused = false
-                    isNamedSnapshotSearchFocused = false
-                    isNamedSnapshotNoteEditing = false
-                    isNamedSnapshotNoteEditorFocused = false
-                }
+                handleHistoryBarVisibilityChange(isShown)
             }
             .onChange(of: Int(historyIndex)) { _, _ in
-                guard showHistoryBar else { return }
-                isNamedSnapshotNoteEditing = false
-                isNamedSnapshotNoteEditorFocused = false
-                syncNamedSnapshotNoteForCurrentSelection(focusEditor: false)
-                let snapshots = scenario.sortedSnapshots
-                let maxIndex = max(0, snapshots.count - 1)
-                let currentIndex = min(max(Int(historyIndex), 0), maxIndex)
-                if currentIndex < maxIndex {
-                    enterPreviewMode(at: currentIndex)
-                } else if isPreviewingHistory || !previewDiffs.isEmpty {
-                    isPreviewingHistory = false
-                    previewDiffs = []
-                }
+                handleHistoryIndexChange()
             }
             .onChange(of: activeCardID) { _, newID in
-                guard acceptsKeyboardInput else { return }
-                synchronizeActiveRelationState(for: newID)
+                handleActiveCardIDChange(newID)
             }
             .onChange(of: isSplitPaneActive) { _, _ in
                 syncScenarioTimestampSuppressionIfNeeded()
             }
             .onChange(of: scenario.cardsVersion) { _, _ in
-                if isInactiveSplitPane {
-                    scheduleInactivePaneSnapshotRefresh()
-                    return
-                }
-                synchronizeActiveRelationState(for: activeCardID)
-                pruneAICandidateTracking()
+                handleScenarioCardsVersionChange()
             }
             .onPreferenceChange(WorkspaceRootSizePreferenceKey.self) { size in
-                let widthChanged = abs(size.width - lastWorkspaceRootSize.width) > 0.5
-                let heightChanged = abs(size.height - lastWorkspaceRootSize.height) > 0.5
-                guard widthChanged || heightChanged else { return }
-                lastWorkspaceRootSize = size
+                handleWorkspaceRootSizePreferenceChange(size)
             }
             .onDisappear {
-                releaseScenarioTimestampSuppressionIfNeeded()
-                cancelInactivePaneSnapshotRefresh()
-                focusModeWindowBackgroundActive = false
-                stopHistoryKeyMonitor()
-                stopFocusModeKeyMonitor()
-                stopFocusModeScrollMonitor()
-                stopFocusModeCaretMonitor()
-                stopMainNavKeyMonitor()
-                stopMainCaretMonitor()
-                stopSplitPaneMouseMonitor()
-                stopDictationRecording(discardAudio: true)
+                handleWorkspaceDisappear()
             }
             .onChange(of: showFocusMode) { _, isOn in
-                focusModeWindowBackgroundActive = isOn
-                FocusMonitorRecorder.shared.record("focus.toggle", reason: "showFocusMode-onChange") {
-                    [
-                        "entering": isOn ? "true" : "false",
-                        "activeCardID": activeCardID?.uuidString ?? "nil",
-                        "editingCardID": editingCardID?.uuidString ?? "nil",
-                        "focusModeEditorCardID": focusModeEditorCardID?.uuidString ?? "nil"
-                    ]
-                }
-                if isOn {
-                    finalizeMainTypingCoalescing(reason: "focus-enter")
-                    resetMainTypingCoalescing()
-                    resetFocusTypingCoalescing()
-                    focusLastCommittedContentByCard = Dictionary(uniqueKeysWithValues: scenario.cards.map { ($0.id, $0.content) })
-                    startFocusModeKeyMonitor()
-                    startFocusModeScrollMonitor()
-                    startFocusModeCaretMonitor()
-                    guard let editingID = editingCardID else { return }
-                    DispatchQueue.main.async {
-                        focusModeEntryScrollTick += 1
-                    }
-                    DispatchQueue.main.async {
-                        guard showFocusMode else { return }
-                        guard editingCardID == editingID else { return }
-                        if let card = findCard(by: editingID) {
-                            beginFocusModeEditing(card, cursorToEnd: false)
-                        } else {
-                            focusModeEditorCardID = editingID
-                        }
-                    }
-                } else {
-                    finalizeFocusTypingCoalescing(reason: "focus-exit")
-                    stopFocusModeKeyMonitor()
-                    stopFocusModeScrollMonitor()
-                    stopFocusModeCaretMonitor()
-                }
+                handleShowFocusModeChange(isOn)
             }
             .onChange(of: focusTypewriterEnabled) { _, isOn in
-                guard showFocusMode else { return }
-                if !isOn {
-                    focusCaretPendingTypewriter = false
-                    focusTypewriterDeferredUntilCompositionEnd = false
-                }
-                requestFocusModeCaretEnsure(typewriter: isOn, delay: 0.0, force: true, reason: "typewriter-toggle")
+                handleFocusTypewriterEnabledChange(isOn)
             }
             .onChange(of: editingCardID) { oldID, newID in
-                if let newID {
-                    persistLastEditedCard(newID)
-                }
-                syncScenarioTimestampSuppressionIfNeeded()
-                guard acceptsKeyboardInput else { return }
-                guard !showFocusMode else { return }
-                guard focusModeEditorCardID == nil else { return }
-                clearMainEditTabArm()
-                if oldID != newID {
-                    finalizeMainTypingCoalescing(reason: newID == nil ? "edit-end" : "typing-card-switch")
-                }
-                if let oldID {
-                    rememberMainCaretLocation(for: oldID)
-                }
-                guard let newID else {
-                    resetMainTypingCoalescing()
-                    pendingMainUndoCaretHint = nil
-                    mainLineSpacingAppliedCardID = nil
-                    mainLineSpacingAppliedValue = -1
-                    mainLineSpacingAppliedResponderID = nil
-                    mainSelectionLastCardID = nil
-                    mainSelectionLastLocation = -1
-                    mainSelectionLastLength = -1
-                    mainSelectionLastTextLength = -1
-                    mainSelectionLastResponderID = nil
-                    mainSelectionActiveEdge = .end
-                    return
-                }
-                mainSelectionLastCardID = nil
-                mainSelectionLastLocation = -1
-                mainSelectionLastLength = -1
-                mainSelectionLastTextLength = -1
-                mainSelectionLastResponderID = nil
-                mainSelectionActiveEdge = .end
-                resetMainTypingCoalescing()
-                if let card = findCard(by: newID) {
-                    mainLastCommittedContentByCard[newID] = card.content
-                }
-                requestMainCaretRestore(for: newID)
-                scheduleMainEditorLineSpacingApplyBurst(for: newID)
-                requestCoalescedMainCaretEnsure(minInterval: mainCaretSelectionEnsureMinInterval, delay: 0.03)
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) {
-                    guard !showFocusMode else { return }
-                    guard editingCardID == newID else { return }
-                    if let textView = NSApp.keyWindow?.firstResponder as? NSTextView {
-                        normalizeMainEditorTextViewOffsetIfNeeded(textView, reason: "edit-change")
-                    }
-                }
+                handleEditingCardIDChange(oldID: oldID, newID: newID)
             }
             .onChange(of: mainCardLineSpacingValue) { _, _ in
-                guard acceptsKeyboardInput else { return }
-                guard !showFocusMode else { return }
-                applyMainEditorLineSpacingIfNeeded(forceApplyToFullText: true)
-                requestCoalescedMainCaretEnsure(minInterval: mainCaretSelectionEnsureMinInterval, delay: 0.0)
+                handleMainCardLineSpacingChange()
             }
             .onChange(of: focusModeEditorCardID) { _, newID in
-                guard showFocusMode else { return }
-                guard let id = newID else { return }
-                if !acceptsKeyboardInput {
-                    if let textView = NSApp.keyWindow?.firstResponder as? NSTextView,
-                       isTextViewInCurrentSplitPane(textView) {
-                        activateSplitPaneIfNeeded()
-                    }
-                    return
-                }
-                FocusMonitorRecorder.shared.record("focus.editor.card.change", reason: "focusModeEditorCardID-onChange") {
-                    [
-                        "focusModeEditorCardID": id.uuidString,
-                        "editingCardID": editingCardID?.uuidString ?? "nil",
-                        "activeCardID": activeCardID?.uuidString ?? "nil"
-                    ]
-                }
-                if let lockedID = focusDeleteSelectionLockedCardID {
-                    if Date() >= focusDeleteSelectionLockUntil {
-                        clearFocusDeleteSelectionLock()
-                    } else if id != lockedID {
-                        return
-                    }
-                }
-                guard id != editingCardID else { return }
-                guard let card = findCard(by: id) else { return }
-                activateFocusModeCardFromClick(card)
+                handleFocusModeEditorCardIDChange(newID)
             }
 
         let commandBound = lifecycleBound
             .onReceive(NotificationCenter.default.publisher(for: .waUndoRequested)) { _ in
-                guard acceptsKeyboardInput else { return }
-                if isPreviewingHistory || showHistoryBar || isSearchFocused { return }
-                if showFocusMode {
-                    performFocusUndo()
-                } else {
-                    if performMainTypingUndo() {
-                        return
-                    }
-                    performUndo()
-                }
+                handleUndoRequestNotification()
             }
             .onReceive(NotificationCenter.default.publisher(for: .waRedoRequested)) { _ in
-                guard acceptsKeyboardInput else { return }
-                if isPreviewingHistory || showHistoryBar || isSearchFocused { return }
-                if showFocusMode {
-                    performFocusRedo()
-                } else {
-                    if performMainTypingRedo() {
-                        return
-                    }
-                    performRedo()
-                }
+                handleRedoRequestNotification()
             }
             .onReceive(NotificationCenter.default.publisher(for: .waToggleFocusModeRequested)) { _ in
-                guard acceptsKeyboardInput else { return }
-                if isPreviewingHistory || showHistoryBar { return }
-                toggleFocusMode()
+                handleToggleFocusModeRequestNotification()
             }
             .onReceive(NotificationCenter.default.publisher(for: .waRequestSplitPaneFocus)) { notification in
-                guard splitModeEnabled else { return }
-                guard let targetPaneID = notification.object as? Int else { return }
-                let shouldActivate = (targetPaneID == splitPaneID)
-                isSplitPaneActive = shouldActivate
-                guard shouldActivate else {
-                    refreshInactivePaneSnapshotNow()
-                    deactivateSplitPaneInput()
-                    syncScenarioTimestampSuppressionIfNeeded()
-                    return
-                }
-                cancelInactivePaneSnapshotRefresh()
-                if activeCardID == nil, let first = scenario.rootCards.first {
-                    changeActiveCard(to: first)
-                }
-                synchronizeActiveRelationState(for: activeCardID)
-                isMainViewFocused = true
-                syncScenarioTimestampSuppressionIfNeeded()
+                handleSplitPaneFocusRequestNotification(notification)
             }
             .onKeyPress(phases: [.down, .repeat]) { press in
                 if !acceptsKeyboardInput { return .handled }
@@ -625,6 +425,294 @@ struct ScenarioWriterView: View {
         return commandBound
     }
 
+    func handleWorkspaceAppear() {
+        if activeCardID == nil, let startupCard = startupActiveCard() { changeActiveCard(to: startupCard) }
+        isMainViewFocused = true
+        if scenario.sortedSnapshots.isEmpty { takeSnapshot(force: true) }
+        let snapshotCountBeforeRetention = scenario.snapshots.count
+        applyHistoryRetentionPolicyIfNeeded(force: true)
+        if scenario.snapshots.count < snapshotCountBeforeRetention {
+            store.saveAll()
+        }
+        historyIndex = Double(max(0, scenario.sortedSnapshots.count - 1))
+        maxLevelCount = max(maxLevelCount, resolvedLevelsWithParents().count)
+        refreshInactivePaneSnapshotNow()
+        updateHistoryKeyMonitor()
+        syncScenarioTimestampSuppressionIfNeeded()
+    }
+
+    func handleHistoryBarVisibilityChange(_ isShown: Bool) {
+        updateHistoryKeyMonitor()
+        requestMainCanvasRestoreForHistoryToggle()
+        historyPreviewSelectedCardIDs = []
+        if isShown {
+            isSearchFocused = false
+            isNamedSnapshotSearchFocused = false
+            isNamedSnapshotNoteEditing = false
+            isNamedSnapshotNoteEditorFocused = false
+            syncNamedSnapshotNoteForCurrentSelection(focusEditor: false)
+        } else {
+            historySelectedNamedSnapshotNoteCardID = nil
+            snapshotNoteSearchText = ""
+            isSearchFocused = false
+            isNamedSnapshotSearchFocused = false
+            isNamedSnapshotNoteEditing = false
+            isNamedSnapshotNoteEditorFocused = false
+        }
+    }
+
+    func handleHistoryIndexChange() {
+        guard showHistoryBar else { return }
+        isNamedSnapshotNoteEditing = false
+        isNamedSnapshotNoteEditorFocused = false
+        syncNamedSnapshotNoteForCurrentSelection(focusEditor: false)
+        historyPreviewSelectedCardIDs = []
+        let snapshots = scenario.sortedSnapshots
+        let maxIndex = max(0, snapshots.count - 1)
+        let currentIndex = min(max(Int(historyIndex), 0), maxIndex)
+        if currentIndex < maxIndex {
+            enterPreviewMode(at: currentIndex)
+        } else if isPreviewingHistory || !previewDiffs.isEmpty {
+            isPreviewingHistory = false
+            previewDiffs = []
+        }
+    }
+
+    func handleActiveCardIDChange(_ newID: UUID?) {
+        guard acceptsKeyboardInput else { return }
+        synchronizeActiveRelationState(for: newID)
+    }
+
+    func handleScenarioCardsVersionChange() {
+        if isInactiveSplitPane {
+            scheduleInactivePaneSnapshotRefresh()
+            return
+        }
+        synchronizeActiveRelationState(for: activeCardID)
+        pruneAICandidateTracking()
+    }
+
+    func handleWorkspaceRootSizePreferenceChange(_ size: CGSize) {
+        let widthChanged = abs(size.width - lastWorkspaceRootSize.width) > 0.5
+        let heightChanged = abs(size.height - lastWorkspaceRootSize.height) > 0.5
+        guard widthChanged || heightChanged else { return }
+        lastWorkspaceRootSize = size
+    }
+
+    func handleWorkspaceDisappear() {
+        releaseScenarioTimestampSuppressionIfNeeded()
+        cancelInactivePaneSnapshotRefresh()
+        focusModeWindowBackgroundActive = false
+        stopHistoryKeyMonitor()
+        stopFocusModeKeyMonitor()
+        stopFocusModeScrollMonitor()
+        stopFocusModeCaretMonitor()
+        stopMainNavKeyMonitor()
+        stopMainCaretMonitor()
+        stopSplitPaneMouseMonitor()
+        stopDictationRecording(discardAudio: true)
+    }
+
+    func handleShowFocusModeChange(_ isOn: Bool) {
+        focusModeWindowBackgroundActive = isOn
+        FocusMonitorRecorder.shared.record("focus.toggle", reason: "showFocusMode-onChange") {
+            [
+                "entering": isOn ? "true" : "false",
+                "activeCardID": activeCardID?.uuidString ?? "nil",
+                "editingCardID": editingCardID?.uuidString ?? "nil",
+                "focusModeEditorCardID": focusModeEditorCardID?.uuidString ?? "nil"
+            ]
+        }
+        if isOn {
+            finalizeMainTypingCoalescing(reason: "focus-enter")
+            resetMainTypingCoalescing()
+            resetFocusTypingCoalescing()
+            focusLastCommittedContentByCard = Dictionary(uniqueKeysWithValues: scenario.cards.map { ($0.id, $0.content) })
+            startFocusModeKeyMonitor()
+            startFocusModeScrollMonitor()
+            startFocusModeCaretMonitor()
+            guard let editingID = editingCardID else { return }
+            DispatchQueue.main.async {
+                focusModeEntryScrollTick += 1
+            }
+            DispatchQueue.main.async {
+                guard showFocusMode else { return }
+                guard editingCardID == editingID else { return }
+                if let card = findCard(by: editingID) {
+                    beginFocusModeEditing(card, cursorToEnd: false)
+                } else {
+                    focusModeEditorCardID = editingID
+                }
+            }
+        } else {
+            finalizeFocusTypingCoalescing(reason: "focus-exit")
+            stopFocusModeKeyMonitor()
+            stopFocusModeScrollMonitor()
+            stopFocusModeCaretMonitor()
+        }
+    }
+
+    func handleFocusTypewriterEnabledChange(_ isOn: Bool) {
+        guard showFocusMode else { return }
+        if !isOn {
+            focusCaretPendingTypewriter = false
+            focusTypewriterDeferredUntilCompositionEnd = false
+        }
+        requestFocusModeCaretEnsure(typewriter: isOn, delay: 0.0, force: true, reason: "typewriter-toggle")
+    }
+
+    func handleEditingCardIDChange(oldID: UUID?, newID: UUID?) {
+        if let newID {
+            persistLastEditedCard(newID)
+        }
+        syncScenarioTimestampSuppressionIfNeeded()
+        guard acceptsKeyboardInput else { return }
+        guard !showFocusMode else { return }
+        guard focusModeEditorCardID == nil else { return }
+        clearMainEditTabArm()
+        if oldID != newID {
+            finalizeMainTypingCoalescing(reason: newID == nil ? "edit-end" : "typing-card-switch")
+        }
+        if let oldID {
+            rememberMainCaretLocation(for: oldID)
+        }
+        guard let newID else {
+            resetMainTypingCoalescing()
+            pendingMainUndoCaretHint = nil
+            mainLineSpacingAppliedCardID = nil
+            mainLineSpacingAppliedValue = -1
+            mainLineSpacingAppliedResponderID = nil
+            mainSelectionLastCardID = nil
+            mainSelectionLastLocation = -1
+            mainSelectionLastLength = -1
+            mainSelectionLastTextLength = -1
+            mainSelectionLastResponderID = nil
+            mainSelectionActiveEdge = .end
+            return
+        }
+        mainSelectionLastCardID = nil
+        mainSelectionLastLocation = -1
+        mainSelectionLastLength = -1
+        mainSelectionLastTextLength = -1
+        mainSelectionLastResponderID = nil
+        mainSelectionActiveEdge = .end
+        resetMainTypingCoalescing()
+        if let card = findCard(by: newID) {
+            mainLastCommittedContentByCard[newID] = card.content
+        }
+        requestMainCaretRestore(for: newID)
+        scheduleMainEditorLineSpacingApplyBurst(for: newID)
+        requestCoalescedMainCaretEnsure(minInterval: mainCaretSelectionEnsureMinInterval, delay: 0.03)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) {
+            guard !showFocusMode else { return }
+            guard editingCardID == newID else { return }
+            if let textView = NSApp.keyWindow?.firstResponder as? NSTextView {
+                normalizeMainEditorTextViewOffsetIfNeeded(textView, reason: "edit-change")
+            }
+        }
+    }
+
+    func handleMainCardLineSpacingChange() {
+        guard acceptsKeyboardInput else { return }
+        guard !showFocusMode else { return }
+        applyMainEditorLineSpacingIfNeeded(forceApplyToFullText: true)
+        requestCoalescedMainCaretEnsure(minInterval: mainCaretSelectionEnsureMinInterval, delay: 0.0)
+    }
+
+    func handleFocusModeEditorCardIDChange(_ newID: UUID?) {
+        guard showFocusMode else { return }
+        guard let id = newID else { return }
+        if !acceptsKeyboardInput {
+            if let textView = NSApp.keyWindow?.firstResponder as? NSTextView,
+               isTextViewInCurrentSplitPane(textView) {
+                activateSplitPaneIfNeeded()
+            }
+            return
+        }
+        FocusMonitorRecorder.shared.record("focus.editor.card.change", reason: "focusModeEditorCardID-onChange") {
+            [
+                "focusModeEditorCardID": id.uuidString,
+                "editingCardID": editingCardID?.uuidString ?? "nil",
+                "activeCardID": activeCardID?.uuidString ?? "nil"
+            ]
+        }
+        if let lockedID = focusDeleteSelectionLockedCardID {
+            if Date() >= focusDeleteSelectionLockUntil {
+                clearFocusDeleteSelectionLock()
+            } else if id != lockedID {
+                return
+            }
+        }
+        guard id != editingCardID else { return }
+        DispatchQueue.main.async {
+            guard showFocusMode else { return }
+            guard focusModeEditorCardID == id else { return }
+            guard id != editingCardID else { return }
+            guard let card = findCard(by: id) else { return }
+            activateFocusModeCardFromClick(card)
+        }
+    }
+
+    func handleUndoRequestNotification() {
+        guard acceptsKeyboardInput else { return }
+        if isPreviewingHistory || showHistoryBar || isSearchFocused { return }
+        DispatchQueue.main.async {
+            guard acceptsKeyboardInput else { return }
+            if isPreviewingHistory || showHistoryBar || isSearchFocused { return }
+            if showFocusMode {
+                performFocusUndo()
+            } else {
+                if performMainTypingUndo() {
+                    return
+                }
+                performUndo()
+            }
+        }
+    }
+
+    func handleRedoRequestNotification() {
+        guard acceptsKeyboardInput else { return }
+        if isPreviewingHistory || showHistoryBar || isSearchFocused { return }
+        DispatchQueue.main.async {
+            guard acceptsKeyboardInput else { return }
+            if isPreviewingHistory || showHistoryBar || isSearchFocused { return }
+            if showFocusMode {
+                performFocusRedo()
+            } else {
+                if performMainTypingRedo() {
+                    return
+                }
+                performRedo()
+            }
+        }
+    }
+
+    func handleToggleFocusModeRequestNotification() {
+        guard acceptsKeyboardInput else { return }
+        if isPreviewingHistory || showHistoryBar { return }
+        toggleFocusMode()
+    }
+
+    func handleSplitPaneFocusRequestNotification(_ notification: Notification) {
+        guard splitModeEnabled else { return }
+        guard let targetPaneID = notification.object as? Int else { return }
+        let shouldActivate = (targetPaneID == splitPaneID)
+        isSplitPaneActive = shouldActivate
+        guard shouldActivate else {
+            refreshInactivePaneSnapshotNow()
+            deactivateSplitPaneInput()
+            syncScenarioTimestampSuppressionIfNeeded()
+            return
+        }
+        cancelInactivePaneSnapshotRefresh()
+        if activeCardID == nil, let first = scenario.rootCards.first {
+            changeActiveCard(to: first)
+        }
+        synchronizeActiveRelationState(for: activeCardID)
+        isMainViewFocused = true
+        syncScenarioTimestampSuppressionIfNeeded()
+    }
+
     // MARK: - Layout
 
     @ViewBuilder
@@ -652,16 +740,19 @@ struct ScenarioWriterView: View {
     func primaryWorkspaceColumn(size: CGSize, availableWidth: CGFloat) -> some View {
         VStack(spacing: 0) {
             ZStack {
+                mainCanvasWithOptionalZoom(size: size, availableWidth: availableWidth)
+                    .opacity(showFocusMode ? 0 : 1)
+                    .allowsHitTesting(!showFocusMode)
+
+                if !showFocusMode, showWorkspaceTopToolbar {
+                    workspaceTopToolbar
+                }
+
                 if showFocusMode {
                     focusModeCanvas(size: size)
                         .ignoresSafeArea(.container, edges: .top)
                         .transition(.opacity)
                         .zIndex(10)
-                } else {
-                    mainCanvasWithOptionalZoom(size: size, availableWidth: availableWidth)
-                    if showWorkspaceTopToolbar {
-                        workspaceTopToolbar
-                    }
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -679,7 +770,7 @@ struct ScenarioWriterView: View {
 
     @ViewBuilder
     func mainCanvasWithOptionalZoom(size: CGSize, availableWidth: CGFloat) -> some View {
-        let shouldApplyZoom = !showFocusMode && !showHistoryBar
+        let shouldApplyZoom = !showHistoryBar
         let scale = shouldApplyZoom ? clampedMainWorkspaceZoomScale : 1.0
         if abs(scale - 1.0) < 0.001 {
             mainCanvas(size: size, availableWidth: availableWidth)
@@ -914,109 +1005,151 @@ struct ScenarioWriterView: View {
     @ViewBuilder
     func mainCanvas(size: CGSize, availableWidth: CGFloat) -> some View {
         ZStack {
-            resolvedBackgroundColor()
-                .ignoresSafeArea()
-                .contentShape(Rectangle())
-                .onTapGesture { if !isPreviewingHistory { deselectAll(); isMainViewFocused = true } }
-
-            ScrollViewReader { hProxy in
-                ScrollView(.horizontal, showsIndicators: false) {
-                    ZStack {
-                        Color.clear
-                            .contentShape(Rectangle())
-                            .onTapGesture {
-                                if !isPreviewingHistory {
-                                    finishEditing()
-                                    selectedCardIDs = []
-                                    isMainViewFocused = true
-                                }
-                            }
-                    HStack(alignment: .top, spacing: 0) {
-                        Spacer().frame(width: availableWidth / 2)
-                        if isPreviewingHistory {
-                            let previewLevels = getPreviewLevels()
-                            ForEach(Array(previewLevels.enumerated()), id: \.offset) { index, diffs in
-                                previewColumn(for: diffs, level: index, screenHeight: size.height)
-                                        .id("preview-col-\(index)")
-                                }
-                            } else {
-                                let levelsData = displayedLevelsData()
-                                let visualMaxLevelCount = displayedMaxLevelCount(for: levelsData)
-                                ForEach(Array(levelsData.enumerated()), id: \.offset) { index, data in
-                                    let filteredCards: [SceneCard] = {
-                                        if index <= 1 || isActiveCardRoot {
-                                            return data.cards
-                                        }
-                                        guard let category = activeCategory else {
-                                            return data.cards
-                                        }
-                                        return data.cards.filter { $0.category == category }
-                                    }()
-                                    if index <= 1 || !filteredCards.isEmpty {
-                                        column(for: filteredCards, level: index, parent: data.parent, screenHeight: size.height)
-                                            .id(index)
-                                    } else {
-                                        Color.clear.frame(width: columnWidth)
-                                    }
-                                }
-                                if visualMaxLevelCount > levelsData.count {
-                                    ForEach(levelsData.count..<visualMaxLevelCount, id: \.self) { _ in
-                                        Color.clear.frame(width: columnWidth)
-                                    }
-                                }
-                        }
-                        Spacer().frame(width: availableWidth / 2)
-                    }
-                    .background(
-                        Color.clear
-                            .contentShape(Rectangle())
-                            .onTapGesture {
-                                if !isPreviewingHistory {
-                                    finishEditing()
-                                    selectedCardIDs = []
-                                    isMainViewFocused = true
-                                }
-                            }
-                    )
-                }
-                }
-                .onChange(of: Int(historyIndex)) { _, _ in
-                    guard acceptsKeyboardInput else { return }
-                    if isPreviewingHistory {
-                        withAnimation(quickEaseAnimation) {
-                            autoScrollToChanges(hProxy: hProxy)
-                        }
-                    }
-                }
-                .onChange(of: activeCardID) { _, newID in
-                    guard acceptsKeyboardInput else { return }
-                    guard let id = newID else { return }
-                    if showFocusMode { return }
-                    if suppressHorizontalAutoScroll { return }
-                    if suppressAutoScrollOnce {
-                        suppressAutoScrollOnce = false
-                        return
-                    }
-                    if !isPreviewingHistory {
-                        scrollToColumnIfNeeded(
-                            targetCardID: id,
-                            proxy: hProxy,
-                            availableWidth: availableWidth
-                        )
-                    }
-                }
-                .onChange(of: pendingMainCanvasRestoreCardID) { _, _ in
-                    guard acceptsKeyboardInput else { return }
-                    restoreMainCanvasPositionIfNeeded(proxy: hProxy, availableWidth: availableWidth)
-                }
-                .onAppear {
-                    if acceptsKeyboardInput {
-                        restoreMainCanvasPositionIfNeeded(proxy: hProxy, availableWidth: availableWidth)
-                    }
-                }
-            }
+            mainCanvasBackgroundLayer
+            mainCanvasScrollContainer(size: size, availableWidth: availableWidth)
         }
         .allowsHitTesting(true)
+    }
+
+    var mainCanvasBackgroundLayer: some View {
+        resolvedBackgroundColor()
+            .ignoresSafeArea()
+            .contentShape(Rectangle())
+            .onTapGesture {
+                if !isPreviewingHistory {
+                    deselectAll()
+                    isMainViewFocused = true
+                }
+            }
+    }
+
+    func mainCanvasScrollContainer(size: CGSize, availableWidth: CGFloat) -> some View {
+        ScrollViewReader { hProxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                mainCanvasScrollableContent(size: size, availableWidth: availableWidth)
+            }
+            .onChange(of: Int(historyIndex)) { _, _ in
+                handleMainCanvasHistoryIndexChange(hProxy: hProxy)
+            }
+            .onChange(of: activeCardID) { _, newID in
+                handleMainCanvasActiveCardChange(newID, hProxy: hProxy, availableWidth: availableWidth)
+            }
+            .onChange(of: pendingMainCanvasRestoreCardID) { _, _ in
+                handleMainCanvasRestoreRequest(hProxy: hProxy, availableWidth: availableWidth)
+            }
+            .onAppear {
+                handleMainCanvasAppear(hProxy: hProxy, availableWidth: availableWidth)
+            }
+        }
+    }
+
+    @ViewBuilder
+    func mainCanvasScrollableContent(size: CGSize, availableWidth: CGFloat) -> some View {
+        ZStack {
+            Color.clear
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    handleMainCanvasInnerTap()
+                }
+            HStack(alignment: .top, spacing: 0) {
+                Spacer().frame(width: availableWidth / 2)
+                if isPreviewingHistory {
+                    let previewLevels = buildPreviewLevels()
+                    ForEach(Array(previewLevels.enumerated()), id: \.offset) { index, diffs in
+                        previewColumn(for: diffs, level: index, screenHeight: size.height)
+                            .id("preview-col-\(index)")
+                    }
+                } else {
+                    mainCanvasLevelColumns(screenHeight: size.height)
+                }
+                Spacer().frame(width: availableWidth / 2)
+            }
+            .background(
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        handleMainCanvasInnerTap()
+                    }
+            )
+        }
+    }
+
+    @ViewBuilder
+    func mainCanvasLevelColumns(screenHeight: CGFloat) -> some View {
+        let levelsData = displayedLevelsData()
+        let visualMaxLevelCount = displayedMaxLevelCount(for: levelsData)
+        ForEach(Array(levelsData.enumerated()), id: \.offset) { index, data in
+            let filteredCards = filteredCardsForMainCanvasColumn(levelIndex: index, cards: data.cards)
+            if index <= 1 || !filteredCards.isEmpty {
+                column(for: filteredCards, level: index, parent: data.parent, screenHeight: screenHeight)
+                    .id(index)
+            } else {
+                Color.clear.frame(width: columnWidth)
+            }
+        }
+        if visualMaxLevelCount > levelsData.count {
+            ForEach(levelsData.count..<visualMaxLevelCount, id: \.self) { _ in
+                Color.clear.frame(width: columnWidth)
+            }
+        }
+    }
+
+    func filteredCardsForMainCanvasColumn(levelIndex: Int, cards: [SceneCard]) -> [SceneCard] {
+        if levelIndex <= 1 || isActiveCardRoot {
+            return cards
+        }
+        guard let category = activeCategory else {
+            return cards
+        }
+        return cards.filter { $0.category == category }
+    }
+
+    func handleMainCanvasInnerTap() {
+        if isPreviewingHistory {
+            historyPreviewSelectedCardIDs = []
+        } else {
+            finishEditing()
+            selectedCardIDs = []
+            isMainViewFocused = true
+        }
+    }
+
+    func handleMainCanvasHistoryIndexChange(hProxy: ScrollViewProxy) {
+        guard acceptsKeyboardInput else { return }
+        if isPreviewingHistory {
+            withAnimation(quickEaseAnimation) {
+                autoScrollToChanges(hProxy: hProxy)
+            }
+        }
+    }
+
+    func handleMainCanvasActiveCardChange(_ newID: UUID?, hProxy: ScrollViewProxy, availableWidth: CGFloat) {
+        guard acceptsKeyboardInput else { return }
+        guard let id = newID else { return }
+        if showFocusMode { return }
+        if suppressHorizontalAutoScroll { return }
+        if suppressAutoScrollOnce {
+            suppressAutoScrollOnce = false
+            return
+        }
+        if !isPreviewingHistory {
+            scrollToColumnIfNeeded(
+                targetCardID: id,
+                proxy: hProxy,
+                availableWidth: availableWidth
+            )
+        }
+    }
+
+    func handleMainCanvasRestoreRequest(hProxy: ScrollViewProxy, availableWidth: CGFloat) {
+        guard acceptsKeyboardInput else { return }
+        restoreMainCanvasPositionIfNeeded(proxy: hProxy, availableWidth: availableWidth)
+    }
+
+    func handleMainCanvasAppear(hProxy: ScrollViewProxy, availableWidth: CGFloat) {
+        if acceptsKeyboardInput {
+            restoreMainCanvasPositionIfNeeded(proxy: hProxy, availableWidth: availableWidth)
+        }
     }
 
     func activateSplitPaneIfNeeded() {
@@ -1089,30 +1222,30 @@ struct ScenarioWriterView: View {
     }
 
     private func displayedLevelsData() -> [LevelData] {
-        if isInactiveSplitPane, !inactivePaneLevelsDataSnapshot.isEmpty {
-            return inactivePaneLevelsDataSnapshot
+        if isInactiveSplitPane, !inactivePaneSnapshotState.levelsData.isEmpty {
+            return inactivePaneSnapshotState.levelsData
         }
-        return getLevelsWithParents()
+        return resolvedLevelsWithParents()
     }
 
     private func displayedMaxLevelCount(for levelsData: [LevelData]) -> Int {
         if isInactiveSplitPane {
-            return max(inactivePaneMaxLevelCountSnapshot, levelsData.count)
+            return max(inactivePaneSnapshotState.maxLevelCount, levelsData.count)
         }
         return maxLevelCount
     }
 
     private func cancelInactivePaneSnapshotRefresh() {
-        inactivePaneSyncWorkItem?.cancel()
-        inactivePaneSyncWorkItem = nil
+        inactivePaneSnapshotState.syncWorkItem?.cancel()
+        inactivePaneSnapshotState.syncWorkItem = nil
     }
 
     private func refreshInactivePaneSnapshotNow() {
         guard splitModeEnabled else { return }
         cancelInactivePaneSnapshotRefresh()
-        let levelsData = getLevelsWithParents()
-        inactivePaneLevelsDataSnapshot = levelsData
-        inactivePaneMaxLevelCountSnapshot = max(maxLevelCount, levelsData.count)
+        let levelsData = resolvedLevelsWithParents()
+        inactivePaneSnapshotState.levelsData = levelsData
+        inactivePaneSnapshotState.maxLevelCount = max(maxLevelCount, levelsData.count)
     }
 
     private func scheduleInactivePaneSnapshotRefresh() {
@@ -1120,11 +1253,11 @@ struct ScenarioWriterView: View {
         cancelInactivePaneSnapshotRefresh()
         let workItem = DispatchWorkItem {
             guard isInactiveSplitPane else { return }
-            let levelsData = getLevelsWithParents()
-            inactivePaneLevelsDataSnapshot = levelsData
-            inactivePaneMaxLevelCountSnapshot = max(maxLevelCount, levelsData.count)
+            let levelsData = resolvedLevelsWithParents()
+            inactivePaneSnapshotState.levelsData = levelsData
+            inactivePaneSnapshotState.maxLevelCount = max(maxLevelCount, levelsData.count)
         }
-        inactivePaneSyncWorkItem = workItem
+        inactivePaneSnapshotState.syncWorkItem = workItem
         DispatchQueue.main.asyncAfter(
             deadline: .now() + inactivePaneSyncThrottleInterval,
             execute: workItem

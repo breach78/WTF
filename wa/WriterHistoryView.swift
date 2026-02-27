@@ -1,13 +1,124 @@
 import SwiftUI
 import AppKit
 
-extension ScenarioWriterView {
-
-    private func snapshotOrderLess(_ lhs: CardSnapshot, _ rhs: CardSnapshot) -> Bool {
+private enum ScenarioHistoryEngine {
+    nonisolated static func snapshotOrderLess(_ lhs: CardSnapshot, _ rhs: CardSnapshot) -> Bool {
         if lhs.orderIndex != rhs.orderIndex {
             return lhs.orderIndex < rhs.orderIndex
         }
         return lhs.cardID.uuidString < rhs.cardID.uuidString
+    }
+
+    static func retentionRule(
+        forAge age: TimeInterval
+    ) -> (tier: ScenarioWriterView.HistoryRetentionTier, interval: TimeInterval) {
+        if age <= 60 * 60 {
+            return (.recentHour, 60)
+        }
+        if age <= 60 * 60 * 24 {
+            return (.recentDay, 60 * 10)
+        }
+        if age <= 60 * 60 * 24 * 7 {
+            return (.recentWeek, 60 * 60)
+        }
+        if age <= 60 * 60 * 24 * 30 {
+            return (.recentMonth, 60 * 60 * 24)
+        }
+        return (.archive, 60 * 60 * 24 * 7)
+    }
+
+    static func sortedCardSnapshots(
+        from state: [UUID: CardSnapshot]
+    ) -> [CardSnapshot] {
+        let byParent = Dictionary(grouping: state.values) { $0.parentID }
+        var ordered: [CardSnapshot] = []
+        var visited = Set<UUID>()
+
+        func appendSubtree(parentID: UUID?) {
+            let children = (byParent[parentID] ?? []).sorted(by: snapshotOrderLess)
+            for snapshot in children {
+                if visited.insert(snapshot.cardID).inserted {
+                    ordered.append(snapshot)
+                    appendSubtree(parentID: snapshot.cardID)
+                }
+            }
+        }
+
+        appendSubtree(parentID: nil)
+
+        let remaining = state.values
+            .filter { !visited.contains($0.cardID) }
+            .sorted(by: snapshotOrderLess)
+        for snapshot in remaining {
+            if visited.insert(snapshot.cardID).inserted {
+                ordered.append(snapshot)
+                appendSubtree(parentID: snapshot.cardID)
+            }
+        }
+
+        return ordered
+    }
+
+    static func buildDeltaPayload(
+        from previousMap: [UUID: CardSnapshot],
+        to currentMap: [UUID: CardSnapshot]
+    ) -> (changed: [CardSnapshot], deleted: [UUID]) {
+        var changed: [CardSnapshot] = []
+        for snapshot in currentMap.values {
+            if previousMap[snapshot.cardID] != snapshot {
+                changed.append(snapshot)
+            }
+        }
+        changed.sort(by: snapshotOrderLess)
+        let deleted = previousMap.keys
+            .filter { currentMap[$0] == nil }
+            .sorted { $0.uuidString < $1.uuidString }
+        return (changed, deleted)
+    }
+
+    static func shouldInsertFullSnapshotCheckpoint(
+        in snapshots: [HistorySnapshot],
+        checkpointInterval: Int
+    ) -> Bool {
+        if snapshots.isEmpty { return true }
+        var trailingDeltaCount = 0
+        for snapshot in snapshots.reversed() {
+            if snapshot.isDelta {
+                trailingDeltaCount += 1
+            } else {
+                break
+            }
+        }
+        return trailingDeltaCount >= checkpointInterval
+    }
+
+    static func applySnapshotState(
+        _ snapshot: HistorySnapshot,
+        to state: inout [UUID: CardSnapshot]
+    ) {
+        if snapshot.isDelta {
+            for deletedID in snapshot.deletedCardIDs {
+                state.removeValue(forKey: deletedID)
+            }
+            for changed in snapshot.cardSnapshots {
+                state[changed.cardID] = changed
+            }
+            return
+        }
+        state.removeAll(keepingCapacity: true)
+        for cardSnapshot in snapshot.cardSnapshots {
+            state[cardSnapshot.cardID] = cardSnapshot
+        }
+        for deletedID in snapshot.deletedCardIDs {
+            state.removeValue(forKey: deletedID)
+        }
+    }
+}
+
+extension ScenarioWriterView {
+
+    private func snapshotOrderLess(_ lhs: CardSnapshot, _ rhs: CardSnapshot) -> Bool {
+        ScenarioHistoryEngine.snapshotOrderLess(lhs, rhs)
     }
 
     private func snapshotDiffOrderLess(_ lhs: SnapshotDiff, _ rhs: SnapshotDiff) -> Bool {
@@ -22,7 +133,21 @@ extension ScenarioWriterView {
                     VStack(spacing: 12) {
                         Color.clear.frame(height: screenHeight * 0.4)
                         ForEach(diffs) { diff in
-                            PreviewCardItem(diff: diff).id("preview-card-\(diff.id)")
+                            PreviewCardItem(
+                                diff: diff,
+                                isSelected: historyPreviewSelectedCardIDs.contains(diff.id),
+                                isMultiSelected: historyPreviewSelectedCardIDs.count > 1 && historyPreviewSelectedCardIDs.contains(diff.id),
+                                onSelect: {
+                                    selectHistoryPreviewCard(diff.id)
+                                },
+                                onCopyCards: {
+                                    copyHistoryPreviewCardsToClipboard(fallbackID: diff.id)
+                                },
+                                onCopyContents: {
+                                    copyHistoryPreviewContentsToClipboard(fallbackID: diff.id)
+                                }
+                            )
+                            .id("preview-card-\(diff.id)")
                         }
                         Color.clear.frame(height: screenHeight * 0.6)
                     }
@@ -40,8 +165,81 @@ extension ScenarioWriterView {
         .frame(width: columnWidth)
     }
 
+    func selectHistoryPreviewCard(_ diffID: UUID) {
+        guard isPreviewingHistory else { return }
+        guard previewDiffs.contains(where: { $0.id == diffID }) else { return }
+
+        let isCommandPressed = NSEvent.modifierFlags.contains(.command)
+        if isCommandPressed {
+            if historyPreviewSelectedCardIDs.contains(diffID) {
+                historyPreviewSelectedCardIDs.remove(diffID)
+            } else {
+                historyPreviewSelectedCardIDs.insert(diffID)
+            }
+        } else {
+            historyPreviewSelectedCardIDs = [diffID]
+        }
+        isMainViewFocused = true
+    }
+
+    func copyHistoryPreviewCardsToClipboard(fallbackID: UUID? = nil) {
+        let targetIDs = resolvedHistoryPreviewCopyTargetIDs(fallbackID: fallbackID)
+        guard !targetIDs.isEmpty else { return }
+
+        let diffMap = historyPreviewDiffMap()
+        let orderedDiffs = targetIDs
+            .compactMap { diffMap[$0] }
+            .sorted(by: snapshotDiffOrderLess)
+        let roots = orderedDiffs.map { diff in
+            CardTreeClipboardNode(
+                content: diff.snapshot.content,
+                colorHex: nil,
+                isAICandidate: false,
+                children: []
+            )
+        }
+        guard !roots.isEmpty else { return }
+
+        let payload = CardTreeClipboardPayload(roots: roots)
+        guard persistCardTreePayloadToClipboard(payload) else { return }
+        clearCutCardTreeBuffer()
+    }
+
+    func copyHistoryPreviewContentsToClipboard(fallbackID: UUID? = nil) {
+        let targetIDs = resolvedHistoryPreviewCopyTargetIDs(fallbackID: fallbackID)
+        guard !targetIDs.isEmpty else { return }
+
+        let diffMap = historyPreviewDiffMap()
+        let orderedDiffs = targetIDs
+            .compactMap { diffMap[$0] }
+            .sorted(by: snapshotDiffOrderLess)
+        let text = orderedDiffs
+            .map { $0.snapshot.content }
+            .joined(separator: "\n\n")
+
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+    }
+
+    func resolvedHistoryPreviewCopyTargetIDs(fallbackID: UUID?) -> Set<UUID> {
+        let diffMap = historyPreviewDiffMap()
+        guard !diffMap.isEmpty else { return [] }
+
+        var targetIDs = historyPreviewSelectedCardIDs.filter { diffMap[$0] != nil }
+        if let fallbackID, diffMap[fallbackID] != nil {
+            if targetIDs.isEmpty || !targetIDs.contains(fallbackID) {
+                targetIDs = [fallbackID]
+            }
+        }
+        return targetIDs
+    }
+
+    func historyPreviewDiffMap() -> [UUID: SnapshotDiff] {
+        Dictionary(uniqueKeysWithValues: previewDiffs.map { ($0.id, $0) })
+    }
+
     func autoScrollToChanges(hProxy: ScrollViewProxy) {
-        let previewLevels = getPreviewLevels()
+        let previewLevels = buildPreviewLevels()
         for (idx, diffs) in previewLevels.enumerated() {
             if diffs.contains(where: { $0.status != .none }) {
                 hProxy.scrollTo("preview-col-\(idx)", anchor: .center)
@@ -50,7 +248,7 @@ extension ScenarioWriterView {
         }
     }
 
-    func getPreviewLevels() -> [[SnapshotDiff]] {
+    func buildPreviewLevels() -> [[SnapshotDiff]] {
         let orderedDiffs = previewDiffs.filter { !$0.snapshot.isFloating }
         let byParent = Dictionary(grouping: orderedDiffs) { $0.snapshot.parentID }
         let roots = (byParent[nil] ?? []).sorted(by: snapshotDiffOrderLess)
@@ -560,7 +758,7 @@ extension ScenarioWriterView {
                     LazyVStack(spacing: 8) {
                         let allCards = scenario.cards.sorted { $0.createdAt > $1.createdAt }
                         let filteredTimeline = allCards.filter { matchesSearch($0) }
-                        ForEach(filteredTimeline) { card in timelineRow(card, proxy: proxy) }
+                        ForEach(filteredTimeline) { card in timelineRow(card) }
                         if filteredTimeline.isEmpty {
                             ContentUnavailableView(searchText.isEmpty ? "카드가 없습니다" : "'\(searchText)' 검색 결과 없음", systemImage: searchText.isEmpty ? "tray" : "magnifyingglass").foregroundStyle(appearance == "light" ? .black.opacity(0.3) : .white.opacity(0.5)).scaleEffect(0.7).padding(.top, 40)
                         }
@@ -754,6 +952,18 @@ extension ScenarioWriterView {
             }
             if isNamedSnapshotNoteEditing && isNamedSnapshotNoteEditorFocused {
                 return event
+            }
+            let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            let isCommandOnly =
+                flags.contains(.command) &&
+                !flags.contains(.option) &&
+                !flags.contains(.control) &&
+                !flags.contains(.shift)
+            let normalized = (event.charactersIgnoringModifiers ?? "").lowercased()
+            let isCopyShortcut = normalized == "c" || normalized == "ㅊ" || keyCode == 8
+            if isPreviewingHistory && isCommandOnly && isCopyShortcut {
+                copyHistoryPreviewCardsToClipboard()
+                return nil
             }
             if keyCode == 123 || keyCode == 124 { // left/right arrows
                 DispatchQueue.main.async {
@@ -1153,33 +1363,13 @@ extension ScenarioWriterView {
     }
 
     func historyRetentionRule(forAge age: TimeInterval) -> (tier: HistoryRetentionTier, interval: TimeInterval) {
-        if age <= 60 * 60 {
-            return (.recentHour, 60)
-        }
-        if age <= 60 * 60 * 24 {
-            return (.recentDay, 60 * 10)
-        }
-        if age <= 60 * 60 * 24 * 7 {
-            return (.recentWeek, 60 * 60)
-        }
-        if age <= 60 * 60 * 24 * 30 {
-            return (.recentMonth, 60 * 60 * 24)
-        }
-        return (.archive, 60 * 60 * 24 * 7)
+        ScenarioHistoryEngine.retentionRule(forAge: age)
     }
 
     func rebuildHistorySnapshots(from snapshots: [HistorySnapshot], keeping keptIndices: [Int]) -> [HistorySnapshot] {
         guard !keptIndices.isEmpty else { return snapshots }
         let keepSet = Set(keptIndices)
-
-        var statesByIndex: [Int: [UUID: CardSnapshot]] = [:]
-        var rollingState: [UUID: CardSnapshot] = [:]
-        for index in snapshots.indices {
-            applySnapshotState(snapshots[index], to: &rollingState)
-            if keepSet.contains(index) {
-                statesByIndex[index] = rollingState
-            }
-        }
+        let statesByIndex = historyStatesByIndex(from: snapshots, keepSet: keepSet)
 
         var rebuilt: [HistorySnapshot] = []
         var previousState: [UUID: CardSnapshot]? = nil
@@ -1190,28 +1380,17 @@ extension ScenarioWriterView {
             guard let currentState = statesByIndex[index] else { continue }
             let original = snapshots[index]
             let promoted = isSnapshotPromoted(original)
-            let shouldForceFull =
-                rebuilt.isEmpty ||
-                index == latestIndex ||
-                promoted ||
-                !original.isDelta ||
-                trailingDeltaCount >= deltaSnapshotFullCheckpointInterval
+            let shouldForceFull = shouldForceFullHistorySnapshot(
+                rebuiltIsEmpty: rebuilt.isEmpty,
+                index: index,
+                latestIndex: latestIndex,
+                promoted: promoted,
+                isDeltaSnapshot: original.isDelta,
+                trailingDeltaCount: trailingDeltaCount
+            )
 
             if shouldForceFull || previousState == nil {
-                rebuilt.append(
-                    HistorySnapshot(
-                        id: original.id,
-                        timestamp: original.timestamp,
-                        name: original.name,
-                        scenarioID: original.scenarioID,
-                        cardSnapshots: sortedCardSnapshots(from: currentState),
-                        isDelta: false,
-                        deletedCardIDs: [],
-                        isPromoted: promoted,
-                        promotionReason: original.promotionReason,
-                        noteCardID: original.noteCardID
-                    )
-                )
+                rebuilt.append(fullHistorySnapshot(from: original, state: currentState, promoted: promoted))
                 previousState = currentState
                 trailingDeltaCount = 0
                 continue
@@ -1220,61 +1399,111 @@ extension ScenarioWriterView {
             let delta = buildDeltaPayload(from: previousState ?? [:], to: currentState)
             if delta.changed.isEmpty && delta.deleted.isEmpty {
                 if index == latestIndex || promoted {
-                    rebuilt.append(
-                        HistorySnapshot(
-                            id: original.id,
-                            timestamp: original.timestamp,
-                            name: original.name,
-                            scenarioID: original.scenarioID,
-                            cardSnapshots: sortedCardSnapshots(from: currentState),
-                            isDelta: false,
-                            deletedCardIDs: [],
-                            isPromoted: promoted,
-                            promotionReason: original.promotionReason,
-                            noteCardID: original.noteCardID
-                        )
-                    )
+                    rebuilt.append(fullHistorySnapshot(from: original, state: currentState, promoted: promoted))
                     previousState = currentState
                     trailingDeltaCount = 0
                 }
                 continue
             }
 
-            rebuilt.append(
-                HistorySnapshot(
-                    id: original.id,
-                    timestamp: original.timestamp,
-                    name: original.name,
-                    scenarioID: original.scenarioID,
-                    cardSnapshots: delta.changed,
-                    isDelta: true,
-                    deletedCardIDs: delta.deleted,
-                    isPromoted: promoted,
-                    promotionReason: original.promotionReason,
-                    noteCardID: original.noteCardID
-                )
-            )
+            rebuilt.append(deltaHistorySnapshot(from: original, delta: delta, promoted: promoted))
             previousState = currentState
             trailingDeltaCount += 1
         }
 
-        if rebuilt.isEmpty, let latestState = statesByIndex[latestIndex], let latest = snapshots.last {
-            return [
-                HistorySnapshot(
-                    id: latest.id,
-                    timestamp: latest.timestamp,
-                    name: latest.name,
-                    scenarioID: latest.scenarioID,
-                    cardSnapshots: sortedCardSnapshots(from: latestState),
-                    isDelta: false,
-                    deletedCardIDs: [],
-                    isPromoted: isSnapshotPromoted(latest),
-                    promotionReason: latest.promotionReason,
-                    noteCardID: latest.noteCardID
-                )
-            ]
+        if rebuilt.isEmpty,
+           let fallback = fallbackLatestRebuiltHistorySnapshot(statesByIndex: statesByIndex, snapshots: snapshots, latestIndex: latestIndex) {
+            return [fallback]
         }
         return rebuilt
+    }
+
+    func historyStatesByIndex(
+        from snapshots: [HistorySnapshot],
+        keepSet: Set<Int>
+    ) -> [Int: [UUID: CardSnapshot]] {
+        var statesByIndex: [Int: [UUID: CardSnapshot]] = [:]
+        var rollingState: [UUID: CardSnapshot] = [:]
+        for index in snapshots.indices {
+            applySnapshotState(snapshots[index], to: &rollingState)
+            if keepSet.contains(index) {
+                statesByIndex[index] = rollingState
+            }
+        }
+        return statesByIndex
+    }
+
+    func shouldForceFullHistorySnapshot(
+        rebuiltIsEmpty: Bool,
+        index: Int,
+        latestIndex: Int,
+        promoted: Bool,
+        isDeltaSnapshot: Bool,
+        trailingDeltaCount: Int
+    ) -> Bool {
+        rebuiltIsEmpty ||
+        index == latestIndex ||
+        promoted ||
+        !isDeltaSnapshot ||
+        trailingDeltaCount >= deltaSnapshotFullCheckpointInterval
+    }
+
+    func fullHistorySnapshot(
+        from original: HistorySnapshot,
+        state: [UUID: CardSnapshot],
+        promoted: Bool
+    ) -> HistorySnapshot {
+        HistorySnapshot(
+            id: original.id,
+            timestamp: original.timestamp,
+            name: original.name,
+            scenarioID: original.scenarioID,
+            cardSnapshots: sortedCardSnapshots(from: state),
+            isDelta: false,
+            deletedCardIDs: [],
+            isPromoted: promoted,
+            promotionReason: original.promotionReason,
+            noteCardID: original.noteCardID
+        )
+    }
+
+    func deltaHistorySnapshot(
+        from original: HistorySnapshot,
+        delta: (changed: [CardSnapshot], deleted: [UUID]),
+        promoted: Bool
+    ) -> HistorySnapshot {
+        HistorySnapshot(
+            id: original.id,
+            timestamp: original.timestamp,
+            name: original.name,
+            scenarioID: original.scenarioID,
+            cardSnapshots: delta.changed,
+            isDelta: true,
+            deletedCardIDs: delta.deleted,
+            isPromoted: promoted,
+            promotionReason: original.promotionReason,
+            noteCardID: original.noteCardID
+        )
+    }
+
+    func fallbackLatestRebuiltHistorySnapshot(
+        statesByIndex: [Int: [UUID: CardSnapshot]],
+        snapshots: [HistorySnapshot],
+        latestIndex: Int
+    ) -> HistorySnapshot? {
+        guard let latestState = statesByIndex[latestIndex], let latest = snapshots.last else { return nil }
+        return HistorySnapshot(
+            id: latest.id,
+            timestamp: latest.timestamp,
+            name: latest.name,
+            scenarioID: latest.scenarioID,
+            cardSnapshots: sortedCardSnapshots(from: latestState),
+            isDelta: false,
+            deletedCardIDs: [],
+            isPromoted: isSnapshotPromoted(latest),
+            promotionReason: latest.promotionReason,
+            noteCardID: latest.noteCardID
+        )
     }
 
     func isSnapshotPromoted(_ snapshot: HistorySnapshot) -> Bool {
@@ -1282,68 +1511,21 @@ extension ScenarioWriterView {
     }
 
     func sortedCardSnapshots(from state: [UUID: CardSnapshot]) -> [CardSnapshot] {
-        let byParent = Dictionary(grouping: state.values) { $0.parentID }
-        var ordered: [CardSnapshot] = []
-        var visited = Set<UUID>()
-
-        func appendSubtree(parentID: UUID?) {
-            let children = (byParent[parentID] ?? []).sorted(by: snapshotOrderLess)
-            for snapshot in children {
-                if visited.insert(snapshot.cardID).inserted {
-                    ordered.append(snapshot)
-                    appendSubtree(parentID: snapshot.cardID)
-                }
-            }
-        }
-
-        appendSubtree(parentID: nil)
-
-        let remaining = state.values
-            .filter { !visited.contains($0.cardID) }
-            .sorted(by: snapshotOrderLess)
-        for snapshot in remaining {
-            if visited.insert(snapshot.cardID).inserted {
-                ordered.append(snapshot)
-                appendSubtree(parentID: snapshot.cardID)
-            }
-        }
-
-        return ordered
+        ScenarioHistoryEngine.sortedCardSnapshots(from: state)
     }
 
     func buildDeltaPayload(
         from previousMap: [UUID: CardSnapshot],
         to currentMap: [UUID: CardSnapshot]
     ) -> (changed: [CardSnapshot], deleted: [UUID]) {
-        var changed: [CardSnapshot] = []
-        for snapshot in currentMap.values {
-            if previousMap[snapshot.cardID] != snapshot {
-                changed.append(snapshot)
-            }
-        }
-        changed.sort {
-            if $0.orderIndex != $1.orderIndex {
-                return $0.orderIndex < $1.orderIndex
-            }
-            return $0.cardID.uuidString < $1.cardID.uuidString
-        }
-        let deleted = previousMap.keys
-            .filter { currentMap[$0] == nil }
-            .sorted { $0.uuidString < $1.uuidString }
-        return (changed, deleted)
+        ScenarioHistoryEngine.buildDeltaPayload(from: previousMap, to: currentMap)
     }
 
     func shouldInsertFullSnapshotCheckpoint(in snapshots: [HistorySnapshot]) -> Bool {
-        if snapshots.isEmpty { return true }
-        var trailingDeltaCount = 0
-        for snapshot in snapshots.reversed() {
-            if snapshot.isDelta {
-                trailingDeltaCount += 1
-            } else {
-                break
-            }
-        }
-        return trailingDeltaCount >= deltaSnapshotFullCheckpointInterval
+        ScenarioHistoryEngine.shouldInsertFullSnapshotCheckpoint(
+            in: snapshots,
+            checkpointInterval: deltaSnapshotFullCheckpointInterval
+        )
     }
 
     func nextSnapshotTimestamp() -> Date {
@@ -1356,22 +1538,7 @@ extension ScenarioWriterView {
     }
 
     func applySnapshotState(_ snapshot: HistorySnapshot, to state: inout [UUID: CardSnapshot]) {
-        if snapshot.isDelta {
-            for deletedID in snapshot.deletedCardIDs {
-                state.removeValue(forKey: deletedID)
-            }
-            for changed in snapshot.cardSnapshots {
-                state[changed.cardID] = changed
-            }
-            return
-        }
-        state.removeAll(keepingCapacity: true)
-        for cardSnapshot in snapshot.cardSnapshots {
-            state[cardSnapshot.cardID] = cardSnapshot
-        }
-        for deletedID in snapshot.deletedCardIDs {
-            state.removeValue(forKey: deletedID)
-        }
+        ScenarioHistoryEngine.applySnapshotState(snapshot, to: &state)
     }
 
     func resolvedCardSnapshotMap(
@@ -1435,11 +1602,17 @@ extension ScenarioWriterView {
             }
         }
         for snap in prevCardSnaps { if !currentIDs.contains(snap.cardID) { diffs.append(SnapshotDiff(id: snap.cardID, snapshot: snap, status: .deleted)) } }
+        historyPreviewSelectedCardIDs = []
         self.previewDiffs = diffs
         if index < snapshots.count - 1 { isPreviewingHistory = true } else { exitPreviewMode() }
     }
 
-    func exitPreviewMode() { isPreviewingHistory = false; previewDiffs = []; historyIndex = Double(max(0, scenario.sortedSnapshots.count - 1)) }
+    func exitPreviewMode() {
+        isPreviewingHistory = false
+        previewDiffs = []
+        historyPreviewSelectedCardIDs = []
+        historyIndex = Double(max(0, scenario.sortedSnapshots.count - 1))
+    }
 
     func restoreToSelectedPoint() {
         let snapshots = scenario.sortedSnapshots; let index = Int(historyIndex); guard index >= 0 && index < snapshots.count else { return }

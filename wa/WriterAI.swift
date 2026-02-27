@@ -191,22 +191,45 @@ extension ScenarioWriterView {
         aiChatInput = ""
         aiChatMessages.append(AIChatMessage(role: "user", text: text))
         
-        requestAIChatResponse(userText: text)
+        requestAIChatResponse()
     }
 
-    func requestAIChatResponse(userText: String) {
+    func requestAIChatResponse() {
+        let clampedContext = buildAIChatContext()
+        let chatHistory = buildAIChatHistory()
+        let prompt = buildAIChatPrompt(context: clampedContext, history: chatHistory)
+
+        isAIChatLoading = true
+        setAIStatus(nil)
+
+        Task { @MainActor in
+            defer { isAIChatLoading = false }
+            do {
+                let apiKey = try loadGeminiAPIKeyForChat()
+                let response = try await requestGeminiChatResponse(prompt: prompt, apiKey: apiKey)
+                aiChatMessages.append(AIChatMessage(role: "model", text: response))
+            } catch {
+                setAIStatusError(error.localizedDescription)
+                aiChatMessages.append(AIChatMessage(role: "model", text: "오류가 발생했습니다: \(error.localizedDescription)"))
+            }
+        }
+    }
+
+    func buildAIChatContext() -> String {
         let allCards = scenario.cards.filter { !$0.isArchived && !$0.isFloating }.sorted {
             if $0.orderIndex != $1.orderIndex { return $0.orderIndex < $1.orderIndex }
             return $0.createdAt < $1.createdAt
         }
-        
+
         var contextStr = ""
         for card in allCards {
             contextStr += "[\(card.category ?? "미분류")] \(card.content)\n"
         }
-        
-        let clampedContext = clampedAIText(contextStr, maxLength: 10000, preserveLineBreak: true)
-        
+
+        return clampedAIText(contextStr, maxLength: 10000, preserveLineBreak: true)
+    }
+
+    func buildAIChatHistory() -> String {
         var chatHistory = ""
         let recentMessages = Array(aiChatMessages.suffix(20))
         for msg in recentMessages {
@@ -214,46 +237,41 @@ extension ScenarioWriterView {
             let compactText = clampedAIText(msg.text, maxLength: 600, preserveLineBreak: true)
             chatHistory += "\(roleName): \(compactText)\n\n"
         }
-        chatHistory = clampedAIText(chatHistory, maxLength: 6000, preserveLineBreak: true)
-        
-        let prompt = """
+
+        return clampedAIText(chatHistory, maxLength: 6000, preserveLineBreak: true)
+    }
+
+    func buildAIChatPrompt(context: String, history: String) -> String {
+        """
         당신은 이 시나리오를 함께 쓰는 전문 보조 작가다. 
         아래는 현재 메인 작업창에 존재하는 모든 시나리오 카드들(플롯 및 노트 라인)의 내용이다.
         이 맥락을 완벽하게 숙지하고 사용자의 질문에 답해야 한다.
         
         [현재 시나리오 내용 시작]
-        \(clampedContext)
+        \(context)
         [현재 시나리오 내용 끝]
         
         [지금까지의 대화 기록]
-        \(chatHistory)
+        \(history)
         
         위 시나리오 맥락과 지금까지의 대화를 바탕으로, 사용자의 마지막 질문에 한국어로 친절하게 답변하라. 
         마크다운을 적절히 사용하여 가독성 있게 작성하라. JSON 형식을 사용하지 말고 순수 텍스트(마크다운 포함)로만 출력할 것.
         """
-        
-        isAIChatLoading = true
-        setAIStatus(nil)
-        
-        Task { @MainActor in
-            defer { isAIChatLoading = false }
-            do {
-                guard let apiKey = try KeychainStore.loadGeminiAPIKey() else {
-                    throw GeminiServiceError.missingAPIKey
-                }
-                
-                let response = try await GeminiService.generateText(
-                    prompt: prompt,
-                    model: currentGeminiModel(),
-                    apiKey: apiKey
-                )
-                
-                aiChatMessages.append(AIChatMessage(role: "model", text: response))
-            } catch {
-                setAIStatusError(error.localizedDescription)
-                aiChatMessages.append(AIChatMessage(role: "model", text: "오류가 발생했습니다: \(error.localizedDescription)"))
-            }
+    }
+
+    func loadGeminiAPIKeyForChat() throws -> String {
+        guard let apiKey = try KeychainStore.loadGeminiAPIKey() else {
+            throw GeminiServiceError.missingAPIKey
         }
+        return apiKey
+    }
+
+    func requestGeminiChatResponse(prompt: String, apiKey: String) async throws -> String {
+        try await GeminiService.generateText(
+            prompt: prompt,
+            model: currentGeminiModel(),
+            apiKey: apiKey
+        )
     }
 
     // MARK: - Timeline AI Controls
@@ -525,8 +543,8 @@ extension ScenarioWriterView {
             return
         }
 
-        if !aiCandidateCardIDs.isEmpty {
-            for candidateID in aiCandidateCardIDs {
+        if !aiCandidateState.cardIDs.isEmpty {
+            for candidateID in aiCandidateState.cardIDs {
                 findCard(by: candidateID)?.isAICandidate = false
             }
         }
@@ -559,13 +577,15 @@ extension ScenarioWriterView {
         }
 
         scenario.bumpCardsVersion()
-        store.saveAll()
-        takeSnapshot(force: true)
-        pushUndoState(prevState, actionName: "AI \(action.title)")
+        commitCardMutation(
+            previousState: prevState,
+            actionName: "AI \(action.title)",
+            forceSnapshot: true
+        )
 
-        aiCandidateParentID = parent.id
-        aiCandidateCardIDs = newIDs
-        aiCandidateAction = action
+        aiCandidateState.parentID = parent.id
+        aiCandidateState.cardIDs = newIDs
+        aiCandidateState.action = action
 
         if let firstID = newIDs.first,
            let firstCard = findCard(by: firstID) {
@@ -585,12 +605,12 @@ extension ScenarioWriterView {
         finishEditing()
         pruneAICandidateTracking()
 
-        guard let parentID = aiCandidateParentID,
+        guard let parentID = aiCandidateState.parentID,
               let parentCard = findCard(by: parentID) else {
             setAIStatusError("적용할 AI 후보 그룹이 없습니다.")
             return
         }
-        guard let action = aiCandidateAction else {
+        guard let action = aiCandidateState.action else {
             setAIStatusError("AI 후보 작업 타입을 확인할 수 확인 할 수 없습니다. 다시 생성해 주세요.")
             return
         }
@@ -621,7 +641,7 @@ extension ScenarioWriterView {
             selectedCandidate.isAICandidate = false
         }
 
-        for candidateID in aiCandidateCardIDs where candidateID != selectedID {
+        for candidateID in aiCandidateState.cardIDs where candidateID != selectedID {
             if let candidate = findCard(by: candidateID) {
                 candidate.isAICandidate = false
                 candidate.isArchived = true
@@ -638,14 +658,15 @@ extension ScenarioWriterView {
         }
 
         scenario.bumpCardsVersion()
+        commitCardMutation(
+            previousState: prevState,
+            actionName: "AI \(action.title) 적용",
+            forceSnapshot: true
+        )
 
-        store.saveAll()
-        takeSnapshot(force: true)
-        pushUndoState(prevState, actionName: "AI \(action.title) 적용")
-
-        aiCandidateParentID = nil
-        aiCandidateCardIDs = []
-        aiCandidateAction = nil
+        aiCandidateState.parentID = nil
+        aiCandidateState.cardIDs = []
+        aiCandidateState.action = nil
 
         switch action {
         case .elaborate, .alternative, .summary:
@@ -661,21 +682,12 @@ extension ScenarioWriterView {
     }
 
     func normalizeGeminiModelID(_ raw: String) -> String {
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        let lowered = trimmed.lowercased()
-        switch lowered {
-        case "gemini-3-pro", "gemini-3.0-pro", "gemini-3-pro-latest":
-            return "gemini-3-pro-preview"
-        case "gemini-3-flash-latest":
-            return "gemini-3-flash"
-        default:
-            return trimmed
-        }
+        normalizeGeminiModelIDValue(raw)
     }
 
     func selectedAICandidateCard() -> SceneCard? {
-        guard let parentID = aiCandidateParentID else { return nil }
-        let candidates = aiCandidateCardIDs.compactMap { id -> SceneCard? in
+        guard let parentID = aiCandidateState.parentID else { return nil }
+        let candidates = aiCandidateState.cardIDs.compactMap { id -> SceneCard? in
             guard let card = findCard(by: id), !card.isArchived else { return nil }
             guard card.parent?.id == parentID else { return nil }
             return card
@@ -695,25 +707,25 @@ extension ScenarioWriterView {
     }
 
     func pruneAICandidateTracking() {
-        if let parentID = aiCandidateParentID, findCard(by: parentID) == nil {
-            aiCandidateParentID = nil
-            aiCandidateCardIDs = []
-            aiCandidateAction = nil
+        if let parentID = aiCandidateState.parentID, findCard(by: parentID) == nil {
+            aiCandidateState.parentID = nil
+            aiCandidateState.cardIDs = []
+            aiCandidateState.action = nil
             clearStaleAICandidateVisualFlags()
             return
         }
 
-        if let parentID = aiCandidateParentID {
-            aiCandidateCardIDs = aiCandidateCardIDs.filter { id in
+        if let parentID = aiCandidateState.parentID {
+            aiCandidateState.cardIDs = aiCandidateState.cardIDs.filter { id in
                 guard let card = findCard(by: id) else { return false }
                 guard !card.isArchived else { return false }
                 return card.parent?.id == parentID
             }
         }
 
-        if aiCandidateCardIDs.isEmpty {
-            aiCandidateParentID = nil
-            aiCandidateAction = nil
+        if aiCandidateState.cardIDs.isEmpty {
+            aiCandidateState.parentID = nil
+            aiCandidateState.action = nil
         }
 
         clearStaleAICandidateVisualFlags()
@@ -727,24 +739,53 @@ extension ScenarioWriterView {
         options: Set<AIGenerationOption>
     ) -> String {
         let sortedOptions = sortedAIGenerationOptions(options)
-        let allLevels = getAllLevels()
-        let levelIndex = allLevels.firstIndex { level in
+        let levelIndex = resolvedAILevelIndex(for: card)
+        let optionLines = aiPromptOptionLines(from: sortedOptions)
+        let context = buildAIPromptContext(for: card, levelIndex: levelIndex)
+        return renderAIPrompt(
+            for: card,
+            action: action,
+            optionLines: optionLines,
+            context: context
+        )
+    }
+
+    struct AIPromptContext {
+        let currentCardContent: String
+        let parentThemeContext: String
+        let deepeningPathContext: String
+        let noteFoundation: String
+        let noteFlowContext: String
+        let storyFlowContext: String
+        let childrenContext: String
+    }
+
+    func resolvedAILevelIndex(for card: SceneCard) -> Int? {
+        resolvedAllLevels().firstIndex { level in
             level.contains(where: { $0.id == card.id })
         }
+    }
 
-        let pathCards = ancestorPathCards(for: card)
-        let storyFlow = aiColumnFlow(levelIndex: levelIndex, category: "플롯", upToOrder: card.orderIndex)
-        let noteFlow = aiColumnFlow(levelIndex: levelIndex, category: "노트", upToOrder: card.orderIndex)
-        let existingChildren = card.children.sorted {
+    func sortedAIPromptChildren(of card: SceneCard) -> [SceneCard] {
+        card.children.sorted {
             if $0.orderIndex != $1.orderIndex {
                 return $0.orderIndex < $1.orderIndex
             }
             return $0.createdAt < $1.createdAt
         }
+    }
 
-        let optionLines = sortedOptions
+    func aiPromptOptionLines(from sortedOptions: [AIGenerationOption]) -> String {
+        sortedOptions
             .map { "- \($0.title): \($0.promptInstruction)" }
             .joined(separator: "\n")
+    }
+
+    func buildAIPromptContext(for card: SceneCard, levelIndex: Int?) -> AIPromptContext {
+        let pathCards = ancestorPathCards(for: card)
+        let storyFlow = aiColumnFlow(levelIndex: levelIndex, category: "플롯", upToOrder: card.orderIndex)
+        let noteFlow = aiColumnFlow(levelIndex: levelIndex, category: "노트", upToOrder: card.orderIndex)
+        let existingChildren = sortedAIPromptChildren(of: card)
 
         let currentCardContent = clampedAIText(card.content, maxLength: 1400, preserveLineBreak: true)
         let parentThemeContext = parentThemeAnchors(from: pathCards)
@@ -754,7 +795,24 @@ extension ScenarioWriterView {
         let storyFlowContext = adaptiveAICardList(storyFlow, maxCards: 12, maxLength: 280)
         let childrenContext = adaptiveAICardList(existingChildren, maxCards: 8, maxLength: 220)
 
-        return """
+        return AIPromptContext(
+            currentCardContent: currentCardContent,
+            parentThemeContext: parentThemeContext,
+            deepeningPathContext: deepeningPathContext,
+            noteFoundation: noteFoundation,
+            noteFlowContext: noteFlowContext,
+            storyFlowContext: storyFlowContext,
+            childrenContext: childrenContext
+        )
+    }
+
+    func renderAIPrompt(
+        for card: SceneCard,
+        action: AICardAction,
+        optionLines: String,
+        context: AIPromptContext
+    ) -> String {
+        """
         당신은 영화 시나리오 공동 집필 파트너다.
         반드시 한국어로 작성하고, JSON 외의 어떤 텍스트도 출력하지 않는다.
 
@@ -776,27 +834,27 @@ extension ScenarioWriterView {
         - markdown, 코드블록, 설명문 금지.
 
         [부모 라인 주제 앵커]
-        \(parentThemeContext)
+        \(context.parentThemeContext)
 
         [부모-자식 심화 경로 (좌->우)]
-        \(deepeningPathContext)
+        \(context.deepeningPathContext)
 
         [노트 라인 핵심 의도 앵커]
-        \(noteFoundation)
+        \(context.noteFoundation)
 
         [현재 열 노트 흐름 (상->하, 현재까지)]
-        \(noteFlowContext)
+        \(context.noteFlowContext)
 
         [현재 열 스토리 흐름 (상->하, 플롯 라인, 현재까지)]
-        \(storyFlowContext)
+        \(context.storyFlowContext)
 
         [현재 카드]
         카테고리: \(card.category ?? "미분류")
         내용:
-        \(currentCardContent)
+        \(context.currentCardContent)
 
         [이미 존재하는 같은 부모의 자식 카드]
-        \(childrenContext)
+        \(context.childrenContext)
 
         [응답 작성 규칙]
         - 노트 라인에서 제시된 기획의도/캐릭터 설정/연출의도를 반영하되, 직접 복붙하지 말고 장면 행동으로 변환한다.
@@ -822,10 +880,19 @@ extension ScenarioWriterView {
     }
 
     func buildAISummaryPrompt(for card: SceneCard) -> String {
-        let allLevels = getAllLevels()
-        let levelIndex = allLevels.firstIndex { level in
-            level.contains(where: { $0.id == card.id })
-        }
+        let levelIndex = resolvedAILevelIndex(for: card)
+        let context = buildAISummaryPromptContext(for: card, levelIndex: levelIndex)
+        return renderAISummaryPrompt(context: context)
+    }
+
+    struct AISummaryPromptContext {
+        let articleText: String
+        let pathContext: String
+        let plotContext: String
+        let noteContext: String
+    }
+
+    func buildAISummaryPromptContext(for card: SceneCard, levelIndex: Int?) -> AISummaryPromptContext {
         let pathCards = ancestorPathCards(for: card)
         let plotFlow = aiColumnFlow(levelIndex: levelIndex, category: "플롯", upToOrder: card.orderIndex)
         let noteFlow = aiColumnFlow(levelIndex: levelIndex, category: "노트", upToOrder: card.orderIndex)
@@ -835,20 +902,29 @@ extension ScenarioWriterView {
         let plotContext = adaptiveAICardList(plotFlow, maxCards: 8, maxLength: 220)
         let noteContext = adaptiveAICardList(noteFlow, maxCards: 8, maxLength: 220)
 
-        return """
+        return AISummaryPromptContext(
+            articleText: articleText,
+            pathContext: pathContext,
+            plotContext: plotContext,
+            noteContext: noteContext
+        )
+    }
+
+    func renderAISummaryPrompt(context: AISummaryPromptContext) -> String {
+        """
         아래 텍스트를 대상으로 작업하라.
 
         [Article]
-        \(articleText)
+        \(context.articleText)
 
         [맥락: 문서 심화 경로]
-        \(pathContext)
+        \(context.pathContext)
 
         [맥락: 현재 열 플롯 흐름]
-        \(plotContext)
+        \(context.plotContext)
 
         [맥락: 현재 열 노트 흐름]
-        \(noteContext)
+        \(context.noteContext)
 
         아래 지시를 정확히 따른다:
         You will generate increasingly concise, entity-dense summaries of the above Article or webpage. Repeat the following 2 steps 5 times.
@@ -887,7 +963,7 @@ extension ScenarioWriterView {
 
     func aiColumnFlow(levelIndex: Int?, category: String?, upToOrder: Int) -> [SceneCard] {
         guard let levelIndex,
-              let levelCards = getAllLevels()[safe: levelIndex] else {
+              let levelCards = resolvedAllLevels()[safe: levelIndex] else {
             return []
         }
         return levelCards
@@ -1150,7 +1226,7 @@ extension ScenarioWriterView {
     }
 
     func clearStaleAICandidateVisualFlags() {
-        let activeSet = Set(aiCandidateCardIDs)
+        let activeSet = Set(aiCandidateState.cardIDs)
         for card in scenario.cards where card.isAICandidate {
             if activeSet.contains(card.id) && !card.isArchived {
                 continue

@@ -74,31 +74,61 @@ extension ScenarioWriterView {
     // MARK: - Color Utilities
 
     func rgbFromHex(_ hex: String) -> (Double, Double, Double)? {
-        hexColorCache.rgb(from: hex)
+        parseHexRGB(hex)
     }
 
-    func mix(base: (Double, Double, Double), overlay: (Double, Double, Double), amount: Double) -> (Double, Double, Double) {
-        let r = base.0 * (1.0 - amount) + overlay.0 * amount
-        let g = base.1 * (1.0 - amount) + overlay.1 * amount
-        let b = base.2 * (1.0 - amount) + overlay.2 * amount
-        return (r, g, b)
+    enum MutationUndoMode {
+        case main
+        case focusAware
+        case none
     }
 
-    func blendColor(base: Color, overlay: Color, amount: Double) -> Color {
-        let b = NSColor(base).usingColorSpace(.deviceRGB) ?? NSColor(base)
-        let o = NSColor(overlay).usingColorSpace(.deviceRGB) ?? NSColor(overlay)
-        let r = b.redComponent * (1.0 - amount) + o.redComponent * amount
-        let g = b.greenComponent * (1.0 - amount) + o.greenComponent * amount
-        let bch = b.blueComponent * (1.0 - amount) + o.blueComponent * amount
-        return Color(red: r, green: g, blue: bch)
+    func persistCardMutation(forceSnapshot: Bool = false, immediateSave: Bool = false) {
+        store.saveAll(immediate: immediateSave)
+        takeSnapshot(force: forceSnapshot)
+    }
+
+    func commitCardMutation(
+        previousState: ScenarioState,
+        actionName: String,
+        forceSnapshot: Bool = false,
+        immediateSave: Bool = false,
+        undoMode: MutationUndoMode = .main
+    ) {
+        persistCardMutation(forceSnapshot: forceSnapshot, immediateSave: immediateSave)
+        switch undoMode {
+        case .main:
+            pushUndoState(previousState, actionName: actionName)
+        case .focusAware:
+            if showFocusMode {
+                pushFocusUndoState(previousState, actionName: actionName)
+            } else {
+                pushUndoState(previousState, actionName: actionName)
+            }
+        case .none:
+            break
+        }
     }
 
     // MARK: - Timeline & Column View Builders
 
+    func beginCardEditing(_ card: SceneCard) {
+        finishEditing()
+        changeActiveCard(to: card)
+        editingCardID = card.id
+        editingStartContent = card.content
+        editingStartState = captureScenarioState()
+        editingIsNewCard = false
+        selectedCardIDs = [card.id]
+    }
+
     @ViewBuilder
-    func timelineRow(_ card: SceneCard, proxy: ScrollViewProxy) -> some View {
+    func timelineRow(_ card: SceneCard) -> some View {
         let isNamedNote = isNamedSnapshotNoteCard(card)
-        let isAICandidate = aiCandidateCardIDs.contains(card.id) || card.isAICandidate
+        let isAICandidate = aiCandidateState.cardIDs.contains(card.id) || card.isAICandidate
+        let isTimelineSelected = selectedCardIDs.contains(card.id)
+        let isTimelineMultiSelected = selectedCardIDs.count > 1 && isTimelineSelected
+        let isTimelineEmptyCard = card.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         CardItem(
             card: card,
             isActive: activeCardID == card.id,
@@ -118,13 +148,7 @@ extension ScenarioWriterView {
             },
             onDoubleClick: {
                 if openHistoryFromNamedSnapshotNoteCard(card) { return }
-                finishEditing()
-                changeActiveCard(to: card)
-                editingCardID = card.id
-                editingStartContent = card.content
-                editingStartState = captureScenarioState()
-                editingIsNewCard = false
-                selectedCardIDs = [card.id]
+                beginCardEditing(card)
             },
             onEndEdit: { finishEditing() },
             onContentChange: nil,
@@ -133,7 +157,26 @@ extension ScenarioWriterView {
             onSummarizeChildren: nil,
             isSummarizingChildren: false,
             onDelete: { performDelete(card) },
-            onHardDelete: { performHardDelete(card) }
+            onHardDelete: { performHardDelete(card) },
+            showsEmptyCardBulkDeleteMenuOnly: isTimelineEmptyCard,
+            onBulkDeleteEmptyCards: isTimelineEmptyCard ? { performHardDeleteAllTimelineEmptyLeafCards() } : nil
+        )
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(
+                    isTimelineSelected
+                    ? Color.accentColor.opacity(isTimelineMultiSelected ? 0.26 : 0.16)
+                    : Color.clear
+                )
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .stroke(
+                    isTimelineSelected
+                    ? Color.accentColor.opacity(isTimelineMultiSelected ? 0.95 : 0.70)
+                    : Color.clear,
+                    lineWidth: isTimelineMultiSelected ? 2 : 1
+                )
         )
         .id("timeline-\(card.id)")
         .onDrag { NSItemProvider(object: card.id.uuidString as NSString) }
@@ -310,7 +353,7 @@ extension ScenarioWriterView {
 
     @ViewBuilder
     func cardRow(_ card: SceneCard, proxy: ScrollViewProxy) -> some View {
-        let isAICandidate = aiCandidateCardIDs.contains(card.id) || card.isAICandidate
+        let isAICandidate = aiCandidateState.cardIDs.contains(card.id) || card.isAICandidate
         let canCreateUpperCard = canCreateUpperCardFromSelection(contextCard: card)
         let canSummarizeChildren = canSummarizeDirectChildren(for: card)
         CardItem(
@@ -328,13 +371,7 @@ extension ScenarioWriterView {
             measuredWidth: mainCardWidths[card.id],
             onSelect: { handleCardTap(card) },
             onDoubleClick: {
-                finishEditing()
-                changeActiveCard(to: card)
-                editingCardID = card.id
-                editingStartContent = card.content
-                editingStartState = captureScenarioState()
-                editingIsNewCard = false
-                selectedCardIDs = [card.id]
+                beginCardEditing(card)
             },
             onEndEdit: { finishEditing() },
             onContentChange: { oldValue, newValue in
@@ -430,11 +467,12 @@ extension ScenarioWriterView {
 
         normalizeAffectedParents(oldParents: oldParents, destinationParent: destinationParent)
 
-        store.saveAll()
-        takeSnapshot()
         selectedCardIDs = Set(movingRoots.map { $0.id })
         changeActiveCard(to: draggedCard)
-        pushUndoState(prevState, actionName: "카드 이동")
+        commitCardMutation(
+            previousState: prevState,
+            actionName: "카드 이동"
+        )
     }
 
     func movableRoots(from cards: [SceneCard]) -> [SceneCard] {
@@ -458,7 +496,7 @@ extension ScenarioWriterView {
     }
 
     func buildCanvasRank() -> [UUID: (Int, Int)] {
-        let levels = getAllLevels()
+        let levels = resolvedAllLevels()
         var rank: [UUID: (Int, Int)] = Dictionary(minimumCapacity: scenario.cards.count)
         for (levelIndex, cards) in levels.enumerated() {
             for (index, card) in cards.enumerated() {
@@ -466,15 +504,6 @@ extension ScenarioWriterView {
             }
         }
         return rank
-    }
-
-    func isBeforeInCanvas(_ lhs: SceneCard, _ rhs: SceneCard) -> Bool {
-        let rank = buildCanvasRank()
-        let l = rank[lhs.id] ?? (Int.max, Int.max)
-        let r = rank[rhs.id] ?? (Int.max, Int.max)
-        if l.0 != r.0 { return l.0 < r.0 }
-        if l.1 != r.1 { return l.1 < r.1 }
-        return lhs.createdAt < rhs.createdAt
     }
 
     func resolveDestination(_ target: DropTarget) -> (parent: SceneCard?, index: Int) {
@@ -571,10 +600,11 @@ extension ScenarioWriterView {
         if oldParent?.id != card.parent?.id { normalizeIndices(parent: oldParent) }
 
         card.updateDescendantsCategory(card.parent?.category)
-        store.saveAll()
-        takeSnapshot()
         changeActiveCard(to: card)
-        pushUndoState(prevState, actionName: "카드 이동")
+        commitCardMutation(
+            previousState: prevState,
+            actionName: "카드 이동"
+        )
     }
 
     func targetIDFrom(_ target: DropTarget) -> UUID? {
@@ -589,13 +619,13 @@ extension ScenarioWriterView {
         while let p = curr { if p.id == card.id { return true }; curr = p.parent }; return false
     }
 
-    func getLevelsWithParents() -> [LevelData] {
+    func resolvedLevelsWithParents() -> [LevelData] {
         let levels = scenario.allLevels
         return levels.map { cards in
             LevelData(cards: cards, parent: cards.first?.parent)
         }
     }
-    func getAllLevels() -> [[SceneCard]] {
+    func resolvedAllLevels() -> [[SceneCard]] {
         scenario.allLevels
     }
 
@@ -607,7 +637,7 @@ extension ScenarioWriterView {
         animated: Bool = true
     ) {
         if !acceptsKeyboardInput && !force { return }
-        let levels = getAllLevels(); guard let targetLevel = levels.firstIndex(where: { $0.contains(where: { $0.id == targetCardID }) }) else { return }
+        let levels = resolvedAllLevels(); guard let targetLevel = levels.firstIndex(where: { $0.contains(where: { $0.id == targetCardID }) }) else { return }
         let hOffset = (columnWidth / 2) / availableWidth; let hAnchor = UnitPoint(x: 0.5 - hOffset, y: 0.4)
         let performScroll: (Int) -> Void = { level in
             if animated {
@@ -658,7 +688,7 @@ extension ScenarioWriterView {
 
         let siblings = card.parent?.children ?? scenario.rootCards
         let siblingIDs = Set(siblings.map { $0.id }).filter { $0 != card.id }
-        let descendantIDs = getAllDescendants(of: card)
+        let descendantIDs = descendantIDSet(of: card)
 
         if activeAncestorIDs != ancestors { activeAncestorIDs = ancestors }
         if activeSiblingIDs != siblingIDs { activeSiblingIDs = siblingIDs }
@@ -694,7 +724,7 @@ extension ScenarioWriterView {
             card.parent?.lastSelectedChildID = card.id
             synchronizeActiveRelationState(for: card.id)
             if shouldFocusMain { isMainViewFocused = true }
-            let levelCount = getLevelsWithParents().count
+            let levelCount = resolvedLevelsWithParents().count
             if levelCount > maxLevelCount { maxLevelCount = levelCount }
         }
         if deferToMainAsync || !Thread.isMainThread {
@@ -713,8 +743,13 @@ extension ScenarioWriterView {
         finishEditing()
     }
 
-    func getAllDescendants(of card: SceneCard) -> Set<UUID> {
-        var ids: Set<UUID> = []; for child in card.children { ids.insert(child.id); ids.formUnion(getAllDescendants(of: child)) }; return ids
+    func descendantIDSet(of card: SceneCard) -> Set<UUID> {
+        var ids: Set<UUID> = []
+        for child in card.children {
+            ids.insert(child.id)
+            ids.formUnion(descendantIDSet(of: child))
+        }
+        return ids
     }
 
     // MARK: - Finish Editing
@@ -742,81 +777,202 @@ extension ScenarioWriterView {
         editingStartState = nil
         pendingNewCardPrevState = nil
         let apply = {
-            if let card = findCard(by: id) {
-                while card.content.hasSuffix("\n") { card.content.removeLast() }
-                if card.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    let prevState = captureScenarioState()
-                    if !card.children.isEmpty {
-                        if !card.content.isEmpty {
-                            createArchivedCopy(from: card)
-                        }
-                        card.content = ""
-                        store.saveAll()
-                        takeSnapshot(force: true)
-                        if inFocusMode {
-                            pushFocusUndoState(prevState, actionName: "카드 삭제")
-                        } else {
-                            pushUndoState(prevState, actionName: "카드 삭제")
-                        }
-                    } else {
-                        if activeCardID == id {
-                            suppressAutoScrollOnce = true
-                            suppressHorizontalAutoScroll = true
-                            let levelsBefore = getAllLevels()
-                            let levelMap = levelsBefore.enumerated().reduce(into: [UUID: Int]()) { acc, entry in
-                                for c in entry.element { acc[c.id] = entry.offset }
-                            }
-                            let next = nextFocusAfterRemoval(
-                                removedIDs: [card.id],
-                                levelMap: levelMap,
-                                levels: levelsBefore,
-                                preferredAnchorID: card.id
-                            )
-                            if let n = next {
-                                changeActiveCard(to: n)
-                            } else {
-                                activeCardID = nil
-                                activeAncestorIDs = []
-                                activeDescendantIDs = []
-                                activeSiblingIDs = []
-                            }
-                        }
-                        card.isArchived = true
-                        scenario.bumpCardsVersion()
-                        store.saveAll()
-                        takeSnapshot(force: true)
-                        if inFocusMode {
-                            pushFocusUndoState(prevState, actionName: "카드 삭제")
-                        } else {
-                            pushUndoState(prevState, actionName: "카드 삭제")
-                        }
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { suppressHorizontalAutoScroll = false }
-                    }
-                } else {
-                    if !isApplyingUndo {
-                        if !inFocusMode {
-                            if wasNewCard, let prev = newCardPrevState {
-                                pushUndoState(prev, actionName: "카드 추가")
-                            } else if let prev = startState, startContent != card.content {
-                                pushUndoState(prev, actionName: "텍스트 편집")
-                            }
-                        }
-                    }
-                    if inFocusMode {
-                        focusLastCommittedContentByCard[id] = card.content
-                    }
-                    store.saveAll()
-                    takeSnapshot()
-                }
-            }
-            if !skipMainFocusRestore {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { isMainViewFocused = true }
-            }
+            commitFinishedEditingIfNeeded(
+                id: id,
+                inFocusMode: inFocusMode,
+                startContent: startContent,
+                startState: startState,
+                wasNewCard: wasNewCard,
+                newCardPrevState: newCardPrevState
+            )
+            restoreMainFocusAfterFinishEditingIfNeeded(skipMainFocusRestore: skipMainFocusRestore)
         }
         if Thread.isMainThread {
             apply()
         } else {
             DispatchQueue.main.async { apply() }
+        }
+    }
+
+    func commitFinishedEditingIfNeeded(
+        id: UUID,
+        inFocusMode: Bool,
+        startContent: String,
+        startState: ScenarioState?,
+        wasNewCard: Bool,
+        newCardPrevState: ScenarioState?
+    ) {
+        guard let card = findCard(by: id) else { return }
+        normalizeEditingCardContent(card)
+        if card.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            commitEmptyEditingCard(
+                card,
+                id: id,
+                inFocusMode: inFocusMode,
+                wasNewCard: wasNewCard
+            )
+        } else {
+            commitNonEmptyEditingCard(
+                card,
+                id: id,
+                inFocusMode: inFocusMode,
+                startContent: startContent,
+                startState: startState,
+                wasNewCard: wasNewCard,
+                newCardPrevState: newCardPrevState
+            )
+        }
+    }
+
+    func normalizeEditingCardContent(_ card: SceneCard) {
+        while card.content.hasSuffix("\n") {
+            card.content.removeLast()
+        }
+    }
+
+    func commitEmptyEditingCard(
+        _ card: SceneCard,
+        id: UUID,
+        inFocusMode: Bool,
+        wasNewCard: Bool
+    ) {
+        let prevState = captureScenarioState()
+        let focusColumnCardsBeforeRemoval = inFocusMode ? focusedColumnCards() : []
+        if !card.children.isEmpty {
+            if !card.content.isEmpty {
+                createArchivedCopy(from: card)
+            }
+            card.content = ""
+            persistCardMutation(forceSnapshot: true)
+            pushCardDeleteUndoState(prevState: prevState, inFocusMode: inFocusMode)
+            return
+        }
+
+        if activeCardID == id {
+            suppressAutoScrollOnce = true
+            suppressHorizontalAutoScroll = true
+            let next: SceneCard? = {
+                if wasNewCard,
+                   let previousID = lastActiveCardID,
+                   previousID != card.id,
+                   let previous = findCard(by: previousID),
+                   !previous.isArchived {
+                    return previous
+                }
+                if inFocusMode {
+                    return nextFocusAfterFocusModeEmptyCardRemoval(
+                        removedCard: card,
+                        focusColumnCardsBeforeRemoval: focusColumnCardsBeforeRemoval
+                    )
+                }
+                return nextFocusAfterMainModeEmptyCardRemoval(removedCard: card)
+            }()
+            if let n = next {
+                selectedCardIDs = [n.id]
+                changeActiveCard(to: n)
+            } else {
+                selectedCardIDs = []
+                activeCardID = nil
+                synchronizeActiveRelationState(for: nil)
+            }
+        }
+
+        card.isArchived = true
+        scenario.bumpCardsVersion()
+        persistCardMutation(forceSnapshot: true)
+        pushCardDeleteUndoState(prevState: prevState, inFocusMode: inFocusMode)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { suppressHorizontalAutoScroll = false }
+    }
+
+    func nextFocusAfterMainModeEmptyCardRemoval(removedCard: SceneCard) -> SceneCard? {
+        let siblings = removedCard.parent?.sortedChildren ?? scenario.rootCards
+        if let index = siblings.firstIndex(where: { $0.id == removedCard.id }) {
+            if index > 0 {
+                for i in stride(from: index - 1, through: 0, by: -1) {
+                    let candidate = siblings[i]
+                    if candidate.id != removedCard.id && !candidate.isArchived {
+                        return candidate
+                    }
+                }
+            }
+            if index + 1 < siblings.count {
+                for i in (index + 1)..<siblings.count {
+                    let candidate = siblings[i]
+                    if candidate.id != removedCard.id && !candidate.isArchived {
+                        return candidate
+                    }
+                }
+            }
+        }
+        if let parent = removedCard.parent, !parent.isArchived {
+            return parent
+        }
+        return scenario.rootCards.first { $0.id != removedCard.id && !$0.isArchived }
+    }
+
+    func nextFocusAfterFocusModeEmptyCardRemoval(
+        removedCard: SceneCard,
+        focusColumnCardsBeforeRemoval: [SceneCard]
+    ) -> SceneCard? {
+        if let index = focusColumnCardsBeforeRemoval.firstIndex(where: { $0.id == removedCard.id }) {
+            if index > 0 {
+                for i in stride(from: index - 1, through: 0, by: -1) {
+                    let candidate = focusColumnCardsBeforeRemoval[i]
+                    if candidate.id != removedCard.id && !candidate.isArchived {
+                        return candidate
+                    }
+                }
+            }
+            if index + 1 < focusColumnCardsBeforeRemoval.count {
+                for i in (index + 1)..<focusColumnCardsBeforeRemoval.count {
+                    let candidate = focusColumnCardsBeforeRemoval[i]
+                    if candidate.id != removedCard.id && !candidate.isArchived {
+                        return candidate
+                    }
+                }
+            }
+        }
+        if let parent = removedCard.parent, !parent.isArchived {
+            return parent
+        }
+        return nil
+    }
+
+    func pushCardDeleteUndoState(prevState: ScenarioState, inFocusMode: Bool) {
+        if inFocusMode {
+            pushFocusUndoState(prevState, actionName: "카드 삭제")
+        } else {
+            pushUndoState(prevState, actionName: "카드 삭제")
+        }
+    }
+
+    func commitNonEmptyEditingCard(
+        _ card: SceneCard,
+        id: UUID,
+        inFocusMode: Bool,
+        startContent: String,
+        startState: ScenarioState?,
+        wasNewCard: Bool,
+        newCardPrevState: ScenarioState?
+    ) {
+        if !isApplyingUndo {
+            if !inFocusMode {
+                if wasNewCard, let prev = newCardPrevState {
+                    pushUndoState(prev, actionName: "카드 추가")
+                } else if let prev = startState, startContent != card.content {
+                    pushUndoState(prev, actionName: "텍스트 편집")
+                }
+            }
+        }
+        if inFocusMode {
+            focusLastCommittedContentByCard[id] = card.content
+        }
+        persistCardMutation()
+    }
+
+    func restoreMainFocusAfterFinishEditingIfNeeded(skipMainFocusRestore: Bool) {
+        if !skipMainFocusRestore {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { isMainViewFocused = true }
         }
     }
 
@@ -831,13 +987,31 @@ extension ScenarioWriterView {
         selectedCardIDs = []
     }
 
-    func getExportText() -> String {
+    func buildExportText() -> String {
         guard let activeID = activeCardID else { return "" }
-        let levels = getLevelsWithParents(); var target: [SceneCard] = []
-        for (idx, data) in levels.enumerated() { if data.cards.contains(where: { $0.id == activeID }) { target = (idx <= 1 || isActiveCardRoot) ? data.cards : data.cards.filter { $0.category == activeCategory }; break } }
+        let levels = resolvedLevelsWithParents()
+        var target: [SceneCard] = []
+        for (idx, data) in levels.enumerated() {
+            guard data.cards.contains(where: { $0.id == activeID }) else { continue }
+            target = (idx <= 1 || isActiveCardRoot)
+                ? data.cards
+                : data.cards.filter { $0.category == activeCategory }
+            break
+        }
         return target.map { $0.content }.joined(separator: "\n\n")
     }
-    func exportToClipboard() { let txt = getExportText(); if txt.isEmpty { exportMessage = "출력할 내용이 없습니다." } else { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(txt, forType: .string); exportMessage = "클립보드에 복사되었습니다." }; showExportAlert = true }
+
+    func exportToClipboard() {
+        let txt = buildExportText()
+        if txt.isEmpty {
+            exportMessage = "출력할 내용이 없습니다."
+        } else {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(txt, forType: .string)
+            exportMessage = "클립보드에 복사되었습니다."
+        }
+        showExportAlert = true
+    }
     
     func copySelectedCardTreeToClipboard() {
         let roots = copySourceRootCards()
@@ -889,15 +1063,15 @@ extension ScenarioWriterView {
 
         normalizeIndices(parent: destinationParent)
         scenario.bumpCardsVersion()
-        store.saveAll()
-        takeSnapshot()
-
         selectedCardIDs = Set(newRootCards.map { $0.id })
         if let first = newRootCards.first {
             changeActiveCard(to: first)
         }
 
-        pushUndoState(prevState, actionName: "카드 붙여넣기")
+        commitCardMutation(
+            previousState: prevState,
+            actionName: "카드 붙여넣기"
+        )
     }
 
     func copySourceRootCards() -> [SceneCard] {
@@ -1006,7 +1180,22 @@ extension ScenarioWriterView {
         return nil
     }
 
-    func exportToFile() { let txt = getExportText(); if txt.isEmpty { exportMessage = "출력할 내용이 없습니다."; showExportAlert = true; return }; let panel = NSSavePanel(); panel.allowedContentTypes = [.plainText]; panel.nameFieldStringValue = "\(scenario.title)_출력.txt"; panel.begin { res in if res == .OK, let url = panel.url { try? txt.write(to: url, atomically: true, encoding: .utf8) } } }
+    func exportToFile() {
+        let txt = buildExportText()
+        if txt.isEmpty {
+            exportMessage = "출력할 내용이 없습니다."
+            showExportAlert = true
+            return
+        }
+
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.plainText]
+        panel.nameFieldStringValue = "\(scenario.title)_출력.txt"
+        panel.begin { res in
+            guard res == .OK, let url = panel.url else { return }
+            try? txt.write(to: url, atomically: true, encoding: .utf8)
+        }
+    }
     func exportToCenteredPDF() {
         exportToPDF(format: .centered, defaultName: "\(scenario.title)_중앙정렬식.pdf")
     }
@@ -1014,7 +1203,7 @@ extension ScenarioWriterView {
         exportToPDF(format: .korean, defaultName: "\(scenario.title)_한국식.pdf")
     }
     func exportToPDF(format: ScriptExportFormatType, defaultName: String) {
-        let txt = getExportText()
+        let txt = buildExportText()
         if txt.isEmpty {
             exportMessage = "출력할 내용이 없습니다."
             showExportAlert = true
@@ -1095,20 +1284,7 @@ extension ScenarioWriterView {
             openSearch()
         }
     }
-    func addFloatingCard() {
-        let prevState = captureScenarioState()
-        suppressMainFocusRestoreAfterFinishEditing = true
-        finishEditing()
-        let new = SceneCard(orderIndex: 0, scenario: scenario, isFloating: true)
-        scenario.cards.append(new)
-        scenario.bumpCardsVersion()
-        store.saveAll()
-        changeActiveCard(to: new, shouldFocusMain: false)
-        editingCardID = new.id
-        editingStartContent = new.content
-        editingIsNewCard = true
-        pendingNewCardPrevState = prevState
-    }
+
     func addCard(at level: Int, parent: SceneCard?) {
         let prevState = captureScenarioState()
         if showFocusMode {
@@ -1180,8 +1356,6 @@ extension ScenarioWriterView {
         normalizeIndices(parent: newParent)
 
         scenario.bumpCardsVersion()
-        store.saveAll()
-        takeSnapshot()
         keyboardRangeSelectionAnchorCardID = nil
         selectedCardIDs = [newParent.id]
         changeActiveCard(to: newParent, shouldFocusMain: false)
@@ -1194,7 +1368,10 @@ extension ScenarioWriterView {
         requestMainCaretRestore(for: newParent.id)
         requestCoalescedMainCaretEnsure(minInterval: mainCaretSelectionEnsureMinInterval, delay: 0.0)
         isMainViewFocused = true
-        pushUndoState(prevState, actionName: "새 상위 카드 만들기")
+        commitCardMutation(
+            previousState: prevState,
+            actionName: "새 상위 카드 만들기"
+        )
     }
 
     func canSummarizeDirectChildren(for parentCard: SceneCard) -> Bool {
@@ -1260,9 +1437,11 @@ extension ScenarioWriterView {
                 }
 
                 scenario.bumpCardsVersion()
-                store.saveAll()
-                takeSnapshot(force: true)
-                pushUndoState(prevState, actionName: "하위 카드 요약")
+                commitCardMutation(
+                    previousState: prevState,
+                    actionName: "하위 카드 요약",
+                    forceSnapshot: true
+                )
 
                 selectedCardIDs = [latestParent.id]
                 changeActiveCard(to: latestParent, shouldFocusMain: false)
@@ -1460,14 +1639,16 @@ extension ScenarioWriterView {
                 createArchivedCopy(from: card)
             }
             card.content = ""
-            store.saveAll()
-            takeSnapshot(force: true)
             isMainViewFocused = true
-            pushUndoState(prevState, actionName: "카드 삭제")
+            commitCardMutation(
+                previousState: prevState,
+                actionName: "카드 삭제",
+                forceSnapshot: true
+            )
             return
         }
 
-        let levelsBefore = getAllLevels()
+        let levelsBefore = resolvedAllLevels()
         let levelMap = levelsBefore.enumerated().reduce(into: [UUID: Int]()) { acc, entry in
             for c in entry.element { acc[c.id] = entry.offset }
         }
@@ -1479,8 +1660,6 @@ extension ScenarioWriterView {
         )
         card.isArchived = true
         scenario.bumpCardsVersion()
-        store.saveAll()
-        takeSnapshot(force: true)
         if let n = next {
             suppressAutoScrollOnce = true
             suppressHorizontalAutoScroll = true
@@ -1489,35 +1668,22 @@ extension ScenarioWriterView {
             activeCardID = nil; activeAncestorIDs = []; activeDescendantIDs = []; activeSiblingIDs = []
         }
         isMainViewFocused = true
-        pushUndoState(prevState, actionName: "카드 삭제")
+        commitCardMutation(
+            previousState: prevState,
+            actionName: "카드 삭제",
+            forceSnapshot: true
+        )
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { suppressHorizontalAutoScroll = false }
     }
 
     func performHardDelete(_ card: SceneCard) {
         finishEditing()
-        let selected = selectedCardsForDeletion()
-        let shouldDeleteSelectionBatch =
-            selected.count > 1 &&
-            selectedCardIDs.contains(card.id)
-
-        var idsToRemove: Set<UUID> = []
-        if shouldDeleteSelectionBatch {
-            for selectedCard in selected {
-                idsToRemove.formUnion(subtreeIDs(of: selectedCard))
-            }
-        } else {
-            idsToRemove = subtreeIDs(of: card)
-        }
+        let idsToRemove = resolvedHardDeleteIDs(targetCard: card)
         guard !idsToRemove.isEmpty else { return }
 
         let prevState = captureScenarioState()
-        let levelsBefore = getAllLevels()
-        let levelMap = levelsBefore.enumerated().reduce(into: [UUID: Int]()) { acc, entry in
-            let (levelIndex, cards) = entry
-            for item in cards {
-                acc[item.id] = levelIndex
-            }
-        }
+        let levelsBefore = resolvedAllLevels()
+        let levelMap = buildLevelMap(from: levelsBefore)
         let preferredAnchorID = activeCardID ?? editingCardID ?? card.id
         let nextCandidate = nextFocusAfterRemoval(
             removedIDs: idsToRemove,
@@ -1526,6 +1692,76 @@ extension ScenarioWriterView {
             preferredAnchorID: preferredAnchorID
         )
 
+        applyHardDeleteMutations(idsToRemove)
+        applyHardDeleteSelectionState(idsToRemove, nextCandidate: nextCandidate)
+        applyHardDeleteEditorAndHistoryState(idsToRemove)
+
+        clearFocusDeleteSelectionLock()
+        isMainViewFocused = true
+        commitCardMutation(
+            previousState: prevState,
+            actionName: "카드 완전 삭제",
+            forceSnapshot: true,
+            immediateSave: true,
+            undoMode: .focusAware
+        )
+    }
+
+    func performHardDeleteAllTimelineEmptyLeafCards() {
+        finishEditing()
+
+        let idsToRemove: Set<UUID> = Set(
+            scenario.cards.compactMap { card in
+                guard card.children.isEmpty else { return nil }
+                let isEmpty = card.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                return isEmpty ? card.id : nil
+            }
+        )
+        guard !idsToRemove.isEmpty else { return }
+
+        let prevState = captureScenarioState()
+        let levelsBefore = resolvedAllLevels()
+        let levelMap = buildLevelMap(from: levelsBefore)
+        let preferredAnchorID = activeCardID ?? editingCardID
+        let nextCandidate = nextFocusAfterRemoval(
+            removedIDs: idsToRemove,
+            levelMap: levelMap,
+            levels: levelsBefore,
+            preferredAnchorID: preferredAnchorID
+        )
+
+        applyHardDeleteMutations(idsToRemove)
+        applyHardDeleteSelectionState(idsToRemove, nextCandidate: nextCandidate)
+        applyHardDeleteEditorAndHistoryState(idsToRemove)
+
+        clearFocusDeleteSelectionLock()
+        isMainViewFocused = true
+        commitCardMutation(
+            previousState: prevState,
+            actionName: "내용 없음 카드 전체 삭제",
+            forceSnapshot: true,
+            immediateSave: true,
+            undoMode: .focusAware
+        )
+    }
+
+    func resolvedHardDeleteIDs(targetCard card: SceneCard) -> Set<UUID> {
+        let selected = selectedCardsForDeletion()
+        let shouldDeleteSelectionBatch =
+            selected.count > 1 &&
+            selectedCardIDs.contains(card.id)
+
+        if shouldDeleteSelectionBatch {
+            var idsToRemove: Set<UUID> = []
+            for selectedCard in selected {
+                idsToRemove.formUnion(subtreeIDs(of: selectedCard))
+            }
+            return idsToRemove
+        }
+        return subtreeIDs(of: card)
+    }
+
+    func applyHardDeleteMutations(_ idsToRemove: Set<UUID>) {
         scenario.cards.removeAll { idsToRemove.contains($0.id) }
         for snapshot in scenario.snapshots {
             snapshot.cardSnapshots.removeAll { snap in
@@ -1539,7 +1775,9 @@ extension ScenarioWriterView {
         scenario.invalidateSnapshotCache()
         scenario.bumpCardsVersion()
         scenario.changeCountSinceLastSnapshot = 0
+    }
 
+    func applyHardDeleteSelectionState(_ idsToRemove: Set<UUID>, nextCandidate: SceneCard?) {
         selectedCardIDs.subtract(idsToRemove)
         if let activeID = activeCardID, idsToRemove.contains(activeID) {
             if let next = nextCandidate {
@@ -1547,11 +1785,15 @@ extension ScenarioWriterView {
                 changeActiveCard(to: next, shouldFocusMain: false)
             } else {
                 activeCardID = nil
-                activeAncestorIDs = []
-                activeDescendantIDs = []
-                activeSiblingIDs = []
+                synchronizeActiveRelationState(for: nil)
             }
         }
+        if selectedCardIDs.isEmpty, let activeID = activeCardID {
+            selectedCardIDs = [activeID]
+        }
+    }
+
+    func applyHardDeleteEditorAndHistoryState(_ idsToRemove: Set<UUID>) {
         if let editingID = editingCardID, idsToRemove.contains(editingID) {
             editingCardID = nil
             focusModeEditorCardID = nil
@@ -1561,30 +1803,6 @@ extension ScenarioWriterView {
             historySelectedNamedSnapshotNoteCardID = nil
             isNamedSnapshotNoteEditing = false
         }
-        if selectedCardIDs.isEmpty, let activeID = activeCardID {
-            selectedCardIDs = [activeID]
-        }
-
-        clearFocusDeleteSelectionLock()
-        store.saveAll(immediate: true)
-        takeSnapshot(force: true)
-        isMainViewFocused = true
-        if showFocusMode {
-            pushFocusUndoState(prevState, actionName: "카드 완전 삭제")
-        } else {
-            pushUndoState(prevState, actionName: "카드 완전 삭제")
-        }
-    }
-
-    func nearestCardAfterRemoval(of card: SceneCard) -> SceneCard? {
-        let parent = card.parent
-        let siblings = parent?.sortedChildren ?? scenario.rootCards
-        if let idx = siblings.firstIndex(where: { $0.id == card.id }) {
-            if idx > 0 { return siblings[idx - 1] }
-            if idx < siblings.count - 1 { return siblings[idx + 1] }
-        }
-        if let parent = parent { return parent }
-        return nil
     }
 
     func armFocusDeleteSelectionLock(targetCardID: UUID, duration: TimeInterval = 0.60) {
@@ -1638,23 +1856,72 @@ extension ScenarioWriterView {
         guard !selected.isEmpty else { return }
         let focusColumnCardsBeforeDelete = showFocusMode ? focusedColumnCards() : []
 
-        if showFocusMode {
-            finalizeFocusTypingCoalescing(reason: "focus-delete-selection")
-            focusCaretEnsureWorkItem?.cancel()
-            focusCaretEnsureWorkItem = nil
-            focusCaretPendingTypewriter = false
-            focusTypewriterDeferredUntilCompositionEnd = false
-            clearFocusDeleteSelectionLock()
-        }
+        prepareFocusModeForDeleteSelectionIfNeeded()
         let prevState = captureScenarioState()
-        var idsToRemove: Set<UUID> = []
-        let levelsBefore = getAllLevels()
+        let levelsBefore = resolvedAllLevels()
+        let levelMap = buildLevelMap(from: levelsBefore)
+        let deleteOutcome = resolveDeleteSelectionOutcome(from: selected)
+        let idsToRemove = deleteOutcome.idsToRemove
+        let didChangeContent = deleteOutcome.didChangeContent
+
+        let activeWasRemoved = activeCardID.map { idsToRemove.contains($0) } ?? false
+        let editingWasRemoved = editingCardID.map { idsToRemove.contains($0) } ?? false
+        let removalAnchorID = resolveRemovalAnchorID(selected: selected, idsToRemove: idsToRemove)
+        let nextCandidate = resolveNextCandidateAfterDelete(
+            activeWasRemoved: activeWasRemoved,
+            editingWasRemoved: editingWasRemoved,
+            removedIDs: idsToRemove,
+            removalAnchorID: removalAnchorID,
+            focusColumnCardsBeforeDelete: focusColumnCardsBeforeDelete,
+            levelsBefore: levelsBefore,
+            levelMap: levelMap
+        )
+
+        applyPreMutationFocusTransitionForDelete(
+            nextCandidate: nextCandidate,
+            activeWasRemoved: activeWasRemoved,
+            editingWasRemoved: editingWasRemoved
+        )
+
+        archiveRemovedCards(idsToRemove)
+        persistDeleteSelectionChangesIfNeeded(didChangeContent: didChangeContent, idsToRemove: idsToRemove)
+        updateSelectionAfterDelete(
+            removedIDs: idsToRemove,
+            activeWasRemoved: activeWasRemoved,
+            nextCandidate: nextCandidate
+        )
+        scheduleFocusModeCaretAfterDelete(nextCandidate: nextCandidate)
+
+        isMainViewFocused = true
+        if showFocusMode {
+            pushFocusUndoState(prevState, actionName: "카드 삭제")
+        } else {
+            pushUndoState(prevState, actionName: "카드 삭제")
+        }
+    }
+
+    func prepareFocusModeForDeleteSelectionIfNeeded() {
+        guard showFocusMode else { return }
+        finalizeFocusTypingCoalescing(reason: "focus-delete-selection")
+        focusCaretEnsureWorkItem?.cancel()
+        focusCaretEnsureWorkItem = nil
+        focusCaretPendingTypewriter = false
+        focusTypewriterDeferredUntilCompositionEnd = false
+        clearFocusDeleteSelectionLock()
+    }
+
+    func buildLevelMap(from levels: [[SceneCard]]) -> [UUID: Int] {
         var levelMap: [UUID: Int] = [:]
-        for (levelIndex, cards) in levelsBefore.enumerated() {
+        for (levelIndex, cards) in levels.enumerated() {
             for card in cards {
                 levelMap[card.id] = levelIndex
             }
         }
+        return levelMap
+    }
+
+    func resolveDeleteSelectionOutcome(from selected: [SceneCard]) -> (idsToRemove: Set<UUID>, didChangeContent: Bool) {
+        var idsToRemove: Set<UUID> = []
         var didChangeContent = false
         let isMultiSelection = selected.count > 1
 
@@ -1664,89 +1931,111 @@ extension ScenarioWriterView {
             } else {
                 idsToRemove.formUnion(subtreeIDs(of: card))
             }
-        } else {
-            for card in selected {
-                if card.children.isEmpty {
-                    idsToRemove.insert(card.id)
-                } else {
-                    if !card.content.isEmpty {
-                        createArchivedCopy(from: card)
-                    }
-                    card.content = ""
-                    didChangeContent = true
-                }
-            }
+            return (idsToRemove, didChangeContent)
         }
 
-        let activeWasRemoved = activeCardID.map { idsToRemove.contains($0) } ?? false
-        let editingWasRemoved = editingCardID.map { idsToRemove.contains($0) } ?? false
-        let removalAnchorID: UUID? = {
-            if let active = activeCardID, idsToRemove.contains(active) {
-                return active
-            }
-            if let editing = editingCardID, idsToRemove.contains(editing) {
-                return editing
-            }
-            return selected.first?.id
-        }()
-        let nextCandidate: SceneCard? = {
-            guard activeWasRemoved || editingWasRemoved else { return nil }
-            if showFocusMode,
-               let removalAnchorID,
-               let fromSiblingGroup = nextFocusFromSiblingGroupAfterRemoval(
-                removedIDs: idsToRemove,
-                anchorID: removalAnchorID
-               ) {
-                return fromSiblingGroup
-            }
-            if showFocusMode,
-               let fromColumn = nextFocusFromColumnAfterRemoval(
-                removedIDs: idsToRemove,
-                columnCards: focusColumnCardsBeforeDelete,
-                preferredAnchorID: removalAnchorID
-               ) {
-                return fromColumn
-            }
-            return nextFocusAfterRemoval(
-                removedIDs: idsToRemove,
-                levelMap: levelMap,
-                levels: levelsBefore,
-                preferredAnchorID: removalAnchorID
-            )
-        }()
-        if showFocusMode && (activeWasRemoved || editingWasRemoved) {
-            if let next = nextCandidate {
-                // Pre-switch in the same column before model mutation to avoid transient empty/black frame.
-                armFocusDeleteSelectionLock(targetCardID: next.id)
-                suppressFocusModeScrollOnce = true
-                selectedCardIDs = [next.id]
-                changeActiveCard(to: next, shouldFocusMain: false, deferToMainAsync: false, force: true)
-                editingCardID = next.id
-                editingStartContent = next.content
-                editingStartState = captureScenarioState()
-                editingIsNewCard = false
-                focusModeEditorCardID = next.id
-                focusLastCommittedContentByCard[next.id] = next.content
+        for card in selected {
+            if card.children.isEmpty {
+                idsToRemove.insert(card.id)
             } else {
-                editingCardID = nil
-                focusModeEditorCardID = nil
-                clearFocusDeleteSelectionLock()
+                if !card.content.isEmpty {
+                    createArchivedCopy(from: card)
+                }
+                card.content = ""
+                didChangeContent = true
             }
         }
+        return (idsToRemove, didChangeContent)
+    }
 
-        if !idsToRemove.isEmpty {
-            for card in scenario.cards where idsToRemove.contains(card.id) {
-                card.isArchived = true
-            }
-            scenario.bumpCardsVersion()
+    func resolveRemovalAnchorID(selected: [SceneCard], idsToRemove: Set<UUID>) -> UUID? {
+        if let active = activeCardID, idsToRemove.contains(active) {
+            return active
         }
-
-        if didChangeContent || !idsToRemove.isEmpty {
-            store.saveAll()
-            takeSnapshot(force: true)
+        if let editing = editingCardID, idsToRemove.contains(editing) {
+            return editing
         }
+        return selected.first?.id
+    }
 
-        selectedCardIDs.subtract(idsToRemove)
+    func resolveNextCandidateAfterDelete(
+        activeWasRemoved: Bool,
+        editingWasRemoved: Bool,
+        removedIDs: Set<UUID>,
+        removalAnchorID: UUID?,
+        focusColumnCardsBeforeDelete: [SceneCard],
+        levelsBefore: [[SceneCard]],
+        levelMap: [UUID: Int]
+    ) -> SceneCard? {
+        guard activeWasRemoved || editingWasRemoved else { return nil }
+        if showFocusMode,
+           let removalAnchorID,
+           let fromSiblingGroup = nextFocusFromSiblingGroupAfterRemoval(
+            removedIDs: removedIDs,
+            anchorID: removalAnchorID
+           ) {
+            return fromSiblingGroup
+        }
+        if showFocusMode,
+           let fromColumn = nextFocusFromColumnAfterRemoval(
+            removedIDs: removedIDs,
+            columnCards: focusColumnCardsBeforeDelete,
+            preferredAnchorID: removalAnchorID
+           ) {
+            return fromColumn
+        }
+        return nextFocusAfterRemoval(
+            removedIDs: removedIDs,
+            levelMap: levelMap,
+            levels: levelsBefore,
+            preferredAnchorID: removalAnchorID
+        )
+    }
+
+    func applyPreMutationFocusTransitionForDelete(
+        nextCandidate: SceneCard?,
+        activeWasRemoved: Bool,
+        editingWasRemoved: Bool
+    ) {
+        guard showFocusMode && (activeWasRemoved || editingWasRemoved) else { return }
+        if let next = nextCandidate {
+            // Pre-switch in the same column before model mutation to avoid transient empty/black frame.
+            armFocusDeleteSelectionLock(targetCardID: next.id)
+            suppressFocusModeScrollOnce = true
+            selectedCardIDs = [next.id]
+            changeActiveCard(to: next, shouldFocusMain: false, deferToMainAsync: false, force: true)
+            editingCardID = next.id
+            editingStartContent = next.content
+            editingStartState = captureScenarioState()
+            editingIsNewCard = false
+            focusModeEditorCardID = next.id
+            focusLastCommittedContentByCard[next.id] = next.content
+        } else {
+            editingCardID = nil
+            focusModeEditorCardID = nil
+            clearFocusDeleteSelectionLock()
+        }
+    }
+
+    func archiveRemovedCards(_ idsToRemove: Set<UUID>) {
+        guard !idsToRemove.isEmpty else { return }
+        for card in scenario.cards where idsToRemove.contains(card.id) {
+            card.isArchived = true
+        }
+        scenario.bumpCardsVersion()
+    }
+
+    func persistDeleteSelectionChangesIfNeeded(didChangeContent: Bool, idsToRemove: Set<UUID>) {
+        guard didChangeContent || !idsToRemove.isEmpty else { return }
+        persistCardMutation(forceSnapshot: true)
+    }
+
+    func updateSelectionAfterDelete(
+        removedIDs: Set<UUID>,
+        activeWasRemoved: Bool,
+        nextCandidate: SceneCard?
+    ) {
+        selectedCardIDs.subtract(removedIDs)
         if activeWasRemoved {
             if let next = nextCandidate {
                 if !showFocusMode {
@@ -1766,24 +2055,18 @@ extension ScenarioWriterView {
                     focusModeEditorCardID = nil
                 }
             }
-        } else if selectedCardIDs.isEmpty, let activeID = activeCardID, !idsToRemove.contains(activeID) {
+        } else if selectedCardIDs.isEmpty, let activeID = activeCardID, !removedIDs.contains(activeID) {
             selectedCardIDs = [activeID]
         }
+    }
 
-        if showFocusMode, let next = nextCandidate {
-            focusModeCaretRequestID += 1
-            let requestID = focusModeCaretRequestID
-            applyFocusModeCaretWithRetry(expectedCardID: next.id, location: 0, retries: 10, requestID: requestID)
-            DispatchQueue.main.async {
-                requestFocusModeCaretEnsure(typewriter: false, delay: 0.0, force: true)
-            }
-        }
-
-        isMainViewFocused = true
-        if showFocusMode {
-            pushFocusUndoState(prevState, actionName: "카드 삭제")
-        } else {
-            pushUndoState(prevState, actionName: "카드 삭제")
+    func scheduleFocusModeCaretAfterDelete(nextCandidate: SceneCard?) {
+        guard showFocusMode, let next = nextCandidate else { return }
+        focusModeCaretRequestID += 1
+        let requestID = focusModeCaretRequestID
+        applyFocusModeCaretWithRetry(expectedCardID: next.id, location: 0, retries: 10, requestID: requestID)
+        DispatchQueue.main.async {
+            requestFocusModeCaretEnsure(typewriter: false, delay: 0.0, force: true)
         }
     }
 
@@ -1924,8 +2207,9 @@ extension ScenarioWriterView {
     func setCardColor(_ card: SceneCard, hex: String?) {
         let prevState = captureScenarioState()
         card.colorHex = hex
-        store.saveAll()
-        takeSnapshot()
-        pushUndoState(prevState, actionName: "카드 색상")
+        commitCardMutation(
+            previousState: prevState,
+            actionName: "카드 색상"
+        )
     }
 }

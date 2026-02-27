@@ -78,6 +78,11 @@ struct DropSpacer: View {
 
 struct PreviewCardItem: View {
     let diff: SnapshotDiff
+    let isSelected: Bool
+    let isMultiSelected: Bool
+    var onSelect: () -> Void
+    var onCopyCards: () -> Void
+    var onCopyContents: () -> Void
     @AppStorage("fontSize") private var fontSize: Double = 14.0
     @AppStorage("appearance") private var appearance: String = "dark"
 
@@ -99,6 +104,16 @@ struct PreviewCardItem: View {
         }
     }
 
+    private var selectionFillColor: Color {
+        guard isSelected else { return .clear }
+        return Color.accentColor.opacity(isMultiSelected ? 0.24 : 0.14)
+    }
+
+    private var selectionStrokeColor: Color {
+        guard isSelected else { return .clear }
+        return Color.accentColor.opacity(isMultiSelected ? 0.95 : 0.75)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             if diff.status != .none {
@@ -106,8 +121,22 @@ struct PreviewCardItem: View {
             }
             Text(diff.snapshot.content.isEmpty ? "내용 없음" : diff.snapshot.content).font(.custom("SansMonoCJKFinalDraft", size: fontSize)).lineSpacing(1.4).padding(12).frame(maxWidth: .infinity, alignment: .leading).strikethrough(diff.status == .deleted).opacity(diff.status == .deleted ? 0.6 : 1.0)
         }
-        .background(statusColor).cornerRadius(4).overlay(RoundedRectangle(cornerRadius: 4).stroke(statusStrokeColor, lineWidth: diff.status == .none ? 1 : 2))
-        .contextMenu { Button("내용 복사") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(diff.snapshot.content, forType: .string) } }
+        .background(statusColor)
+        .cornerRadius(4)
+        .overlay(RoundedRectangle(cornerRadius: 4).stroke(statusStrokeColor, lineWidth: diff.status == .none ? 1 : 2))
+        .overlay(RoundedRectangle(cornerRadius: 4).fill(selectionFillColor))
+        .overlay(
+            RoundedRectangle(cornerRadius: 4)
+                .stroke(selectionStrokeColor, lineWidth: isSelected ? (isMultiSelected ? 2 : 1) : 0)
+        )
+        .contentShape(Rectangle())
+        .onTapGesture {
+            onSelect()
+        }
+        .contextMenu {
+            Button("카드 복사") { onCopyCards() }
+            Button("내용 복사") { onCopyContents() }
+        }
     }
 
     private var statusLabel: String { switch diff.status { case .added: return "NEW"; case .modified: return "EDITED"; case .deleted: return "삭제됨"; case .none: return "" } }
@@ -273,8 +302,11 @@ struct FocusModeCardEditor: View {
         .onPreferenceChange(FocusModeCardWidthPreferenceKey.self) { value in
             let normalizedWidth = max(0, round(value * 2) / 2)
             guard abs(measuredCardWidth - normalizedWidth) > 0.25 else { return }
-            measuredCardWidth = normalizedWidth
-            refreshMeasuredHeights()
+            DispatchQueue.main.async {
+                guard abs(measuredCardWidth - normalizedWidth) > 0.25 else { return }
+                measuredCardWidth = normalizedWidth
+                refreshMeasuredHeights()
+            }
         }
         .onAppear {
             refreshMeasuredHeights()
@@ -317,6 +349,8 @@ struct CardItem: View {
     var isSummarizingChildren: Bool = false
     var onDelete: (() -> Void)? = nil
     var onHardDelete: (() -> Void)? = nil
+    var showsEmptyCardBulkDeleteMenuOnly: Bool = false
+    var onBulkDeleteEmptyCards: (() -> Void)? = nil
     @State private var mainEditingMeasuredBodyHeight: CGFloat = 0
     @State private var mainEditingMeasureWorkItem: DispatchWorkItem? = nil
     @State private var mainEditingMeasureLastAt: Date = .distantPast
@@ -609,34 +643,40 @@ struct CardItem: View {
             }
         }
         .contextMenu {
-            if let onReferenceCard {
-                Button("레퍼런스 카드로") { onReferenceCard() }
+            if showsEmptyCardBulkDeleteMenuOnly {
+                if let onBulkDeleteEmptyCards {
+                    Button("내용 없음 카드 전체 삭제", role: .destructive) { onBulkDeleteEmptyCards() }
+                }
+            } else {
+                if let onReferenceCard {
+                    Button("레퍼런스 카드로") { onReferenceCard() }
+                    Divider()
+                }
+                if let onCreateUpperCardFromSelection {
+                    Button("새 상위 카드 만들기") { onCreateUpperCardFromSelection() }
+                    Divider()
+                }
+                if let onSummarizeChildren {
+                    Button("하위 카드 요약") { onSummarizeChildren() }
+                    Divider()
+                }
+                if let onDelete {
+                    Button("삭제", role: .destructive) { onDelete() }
+                }
+                if onDelete != nil {
+                    Divider()
+                }
+                Button("기본") { onColorChange?(nil) }
                 Divider()
-            }
-            if let onCreateUpperCardFromSelection {
-                Button("새 상위 카드 만들기") { onCreateUpperCardFromSelection() }
-                Divider()
-            }
-            if let onSummarizeChildren {
-                Button("하위 카드 요약") { onSummarizeChildren() }
-                Divider()
-            }
-            if let onDelete {
-                Button("삭제", role: .destructive) { onDelete() }
-            }
-            if onDelete != nil {
-                Divider()
-            }
-            Button("기본") { onColorChange?(nil) }
-            Divider()
-            Button("연보라") { onColorChange?("E7D5FF") }
-            Button("하늘") { onColorChange?("CFE8FF") }
-            Button("민트") { onColorChange?("CFF2E8") }
-            Button("살구") { onColorChange?("FFE1CC") }
-            Button("연노랑") { onColorChange?("FFF3C4") }
-            if let onHardDelete {
-                Divider()
-                Button("완전 삭제 (모든 곳)", role: .destructive) { onHardDelete() }
+                Button("연보라") { onColorChange?("E7D5FF") }
+                Button("하늘") { onColorChange?("CFE8FF") }
+                Button("민트") { onColorChange?("CFF2E8") }
+                Button("살구") { onColorChange?("FFE1CC") }
+                Button("연노랑") { onColorChange?("FFF3C4") }
+                if let onHardDelete {
+                    Divider()
+                    Button("완전 삭제 (모든 곳)", role: .destructive) { onHardDelete() }
+                }
             }
         }
     }
@@ -660,7 +700,7 @@ struct CardItem: View {
     }
 
     private func rgbFromHex(_ hex: String) -> (r: Double, g: Double, b: Double)? {
-        guard let rgb = hexColorCache.rgb(from: hex) else { return nil }
+        guard let rgb = parseHexRGB(hex) else { return nil }
         return (r: rgb.0, g: rgb.1, b: rgb.2)
     }
 
