@@ -20,7 +20,8 @@ extension ScenarioWriterView {
         let isTimelineSearchTyping = !showHistoryBar && isSearchFocused
         let isHistorySearchTyping = showHistoryBar && isNamedSnapshotSearchFocused
         let isHistoryNoteTyping = showHistoryBar && isNamedSnapshotNoteEditing && isNamedSnapshotNoteEditorFocused
-        let isTyping = isMainEditorTyping || isTimelineSearchTyping || isHistorySearchTyping || isHistoryNoteTyping
+        let isAIChatTyping = !showHistoryBar && showAIChat && isAIChatInputFocused
+        let isTyping = isMainEditorTyping || isTimelineSearchTyping || isHistorySearchTyping || isHistoryNoteTyping || isAIChatTyping
         if let handled = handleDownPhaseShortcuts(
             press,
             isMainEditorTyping: isMainEditorTyping,
@@ -37,6 +38,21 @@ extension ScenarioWriterView {
             if isTyping { return .ignored }
             // Do not let history mode keystrokes mutate live scenario state.
             return .handled
+        }
+
+        if isAIChatTyping {
+            if press.phase == .down &&
+                press.key == .return &&
+                !press.modifiers.contains(.command) &&
+                !press.modifiers.contains(.option) &&
+                !press.modifiers.contains(.control) &&
+                !press.modifiers.contains(.shift) {
+                DispatchQueue.main.async {
+                    sendAIChatMessage()
+                }
+                return .handled
+            }
+            return .ignored
         }
 
         if isTyping {
@@ -732,6 +748,9 @@ extension ScenarioWriterView {
                     toggleSearch()
                 }
                 return nil
+            }
+            if showAIChat && isAIChatInputFocused {
+                return event
             }
             if editingCardID != nil || isSearchFocused { return event }
             if event.modifierFlags.contains(.command) || event.modifierFlags.contains(.option) || event.modifierFlags.contains(.control) {

@@ -695,7 +695,7 @@ struct SettingsView: View {
     @AppStorage("mainCardLineSpacingValueV2") private var mainCardLineSpacingValue: Double = 5.0
     @AppStorage("mainCardVerticalGap") private var mainCardVerticalGap: Double = 0.0
     @AppStorage("focusModeLineSpacingValueTemp") private var focusModeLineSpacingValue: Double = 4.5
-    @AppStorage("geminiModelID") private var geminiModelID: String = "gemini-3-pro-preview"
+    @AppStorage("geminiModelID") private var geminiModelID: String = "gemini-3.1-pro-preview"
     @AppStorage("whisperInstallRootPath") private var whisperInstallRootPathStorage: String = ""
     @AppStorage("whisperCLIPath") private var whisperCLIPathStorage: String = ""
     @AppStorage("whisperModelPath") private var whisperModelPathStorage: String = ""
@@ -705,7 +705,7 @@ struct SettingsView: View {
     @State private var aiSettingsStatusMessage: String? = nil
     @State private var aiSettingsStatusIsError: Bool = false
     @State private var selectedColorThemePreset: ColorThemePreset = .warmPaper
-    @State private var selectedGeminiModelOption: String = "gemini-3-pro-preview"
+    @State private var selectedGeminiModelOption: String = "gemini-3.1-pro-preview"
     @State private var whisperInstallRootInput: String = ""
     @State private var whisperCLIPathInput: String = ""
     @State private var whisperModelPathInput: String = ""
@@ -716,6 +716,7 @@ struct SettingsView: View {
 
     private let customGeminiModelToken = "__custom__"
     private let geminiModelOptions: [GeminiModelOption] = [
+        GeminiModelOption(value: "gemini-3.1-pro-preview", title: "Gemini 3.1 Pro (Preview)"),
         GeminiModelOption(value: "gemini-3-pro-preview", title: "Gemini 3 Pro (Preview)"),
         GeminiModelOption(value: "gemini-3-flash", title: "Gemini 3 Flash"),
         GeminiModelOption(value: "gemini-2.5-pro", title: "Gemini 2.5 Pro"),
@@ -1042,13 +1043,13 @@ struct SettingsView: View {
                             geminiModelID = newValue
                         }
 
-                        TextField("예: gemini-3-pro-preview", text: $geminiModelID)
+                        TextField("예: gemini-3.1-pro-preview", text: $geminiModelID)
                             .textFieldStyle(.roundedBorder)
                             .onChange(of: geminiModelID) { _, _ in
                                 syncGeminiModelOptionSelection()
                             }
 
-                        Text("Gemini 3 Pro의 API 모델 ID는 gemini-3-pro-preview 입니다. 404가 뜨면 상단 메뉴에서 다른 모델을 선택하세요.")
+                        Text("Gemini 3.1 Pro의 API 모델 ID는 gemini-3.1-pro-preview 입니다. 404가 뜨면 상단 메뉴에서 다른 모델을 선택하세요.")
                             .font(.system(size: 11))
                             .foregroundColor(.secondary)
                             .lineLimit(2)

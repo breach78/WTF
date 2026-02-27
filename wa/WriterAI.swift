@@ -1,51 +1,1522 @@
 import SwiftUI
+import SQLite3
 
-struct AIChatMessage: Identifiable {
-    let id = UUID()
+struct AIChatMessage: Identifiable, Codable, Sendable {
+    let id: UUID
     let role: String // "user" or "model"
     let text: String
+
+    init(id: UUID = UUID(), role: String, text: String) {
+        self.id = id
+        self.role = role
+        self.text = text
+    }
+}
+
+enum AIChatThreadMode: String, CaseIterable, Codable, Sendable {
+    case discussion = "논의"
+    case structure = "구조 점검"
+    case rewrite = "수정"
+}
+
+enum AIChatScopeType: String, CaseIterable, Codable, Sendable {
+    case selectedCards = "선택 카드"
+    case multiSelection = "다중 선택"
+    case parentAndChildren = "부모+자식"
+    case plotLine = "플롯 전체"
+    case noteLine = "노트 전체"
+
+    var normalizedForCurrentUI: AIChatScopeType {
+        switch self {
+        case .multiSelection, .parentAndChildren:
+            return .selectedCards
+        case .selectedCards, .plotLine, .noteLine:
+            return self
+        }
+    }
+}
+
+struct AIChatThreadScope: Codable, Sendable {
+    var type: AIChatScopeType = .selectedCards
+    var cardIDs: [UUID] = []
+    var includeChildrenDepth: Int = 1
+}
+
+struct AIChatThread: Identifiable, Codable, Sendable {
+    let id: UUID
+    var title: String
+    var mode: AIChatThreadMode
+    var scope: AIChatThreadScope
+    var messages: [AIChatMessage]
+    var rollingSummary: String
+    var decisionLog: [String]
+    var unresolvedQuestions: [String]
+    var tokenUsage: AIChatTokenUsage? = nil
+    var updatedAt: Date
+}
+
+private struct AIChatThreadStorePayload: Codable, Sendable {
+    var threads: [AIChatThread]
+    var activeThreadID: UUID?
+}
+
+private struct AIChatMessageSnapshot: Sendable {
+    let role: String
+    let text: String
+}
+
+struct AIChatCardSnapshot: Sendable {
+    let id: UUID
+    let parentID: UUID?
+    let category: String
+    let content: String
+    let orderIndex: Int
+    let createdAt: Date
+    let isArchived: Bool
+    let isFloating: Bool
+}
+
+struct AICardDigest: Sendable {
+    let cardID: UUID
+    let contentHash: Int
+    let shortSummary: String
+    let keyFacts: [String]
+    let updatedAt: Date
+}
+
+struct AIEmbeddingRecord: Codable, Sendable {
+    let cardID: UUID
+    var contentHash: Int
+    var vector: [Float]
+    var updatedAt: Date
+}
+
+struct AIChatTokenUsage: Codable, Sendable {
+    var promptTokens: Int
+    var outputTokens: Int
+    var totalTokens: Int
+
+    static let zero = AIChatTokenUsage(promptTokens: 0, outputTokens: 0, totalTokens: 0)
+
+    mutating func add(_ usage: AIChatTokenUsage) {
+        promptTokens += usage.promptTokens
+        outputTokens += usage.outputTokens
+        totalTokens += usage.totalTokens
+    }
+}
+
+private struct AIEmbeddingIndexPayload: Codable, Sendable {
+    var model: String
+    var records: [AIEmbeddingRecord]
+    var updatedAt: Date
+}
+
+struct AIChatContextPreview: Sendable {
+    let scopeLabel: String
+    let scopedContext: String
+    let ragContext: String
+    let globalPlotSummary: String
+    let globalNoteSummary: String
+    let rollingSummary: String
+    let historySummary: String
+}
+
+private struct AIChatPromptBuildResult: Sendable {
+    let prompt: String
+    let updatedDigestCache: [UUID: AICardDigest]
+    let rollingSummary: String
+    let contextPreview: AIChatContextPreview
+}
+
+private struct AIChatResponseResult: Sendable {
+    let text: String
+    let usage: AIChatTokenUsage
+}
+
+private enum AIChatPromptBuilder {
+    private static let maxScopedContextLength = 1200
+    private static let maxRAGContextLength = 900
+    private static let maxGlobalLaneSummaryLength = 500
+    private static let maxHistorySummaryLength = 700
+    private static let maxRollingSummaryLength = 520
+    private static let maxQuestionLength = 600
+    private static let maxCardSummaryLength = 140
+    private static let maxKeyFactLength = 44
+    private static let maxHistoryMessages = 10
+    private static let maxRAGCards = 8
+
+    static func buildPrompt(
+        allCards: [AIChatCardSnapshot],
+        scopedCards: [AIChatCardSnapshot],
+        scopeLabel: String,
+        history: [AIChatMessageSnapshot],
+        lastUserMessage: String,
+        previousRollingSummary: String,
+        digestCache: [UUID: AICardDigest],
+        refreshRollingSummary: Bool,
+        semanticRAGContext: String? = nil
+    ) -> AIChatPromptBuildResult {
+        var resolvedDigestCache = digestCache
+        let visibleCards = allCards.filter { !$0.isArchived && !$0.isFloating }
+        for card in visibleCards {
+            resolvedDigestCache[card.id] = buildDigest(for: card, cached: resolvedDigestCache[card.id])
+        }
+
+        let scopedContext = buildScopedContext(from: scopedCards, digests: resolvedDigestCache)
+        let globalPlotSummary = buildGlobalLaneSummary(from: visibleCards, digests: resolvedDigestCache, category: "플롯")
+        let globalNoteSummary = buildGlobalLaneSummary(from: visibleCards, digests: resolvedDigestCache, category: "노트")
+        let historySummary = buildHistorySummary(from: history)
+        let rollingSummary: String
+        if refreshRollingSummary {
+            rollingSummary = buildRollingSummary(previous: previousRollingSummary, history: history)
+        } else {
+            let preserved = previousRollingSummary.trimmingCharacters(in: .whitespacesAndNewlines)
+            rollingSummary = preserved.isEmpty
+                ? buildRollingSummary(previous: previousRollingSummary, history: history)
+                : preserved
+        }
+        let compactQuestion = clamp(lastUserMessage, maxLength: maxQuestionLength, preserveLineBreak: true)
+        let ragContext = semanticRAGContext ?? buildRAGContext(
+            query: lastUserMessage,
+            allCards: visibleCards,
+            scopedCards: scopedCards,
+            digests: resolvedDigestCache
+        )
+
+        let prompt = """
+        AI 시나리오 컨설턴트 시스템 프롬프트
+
+        [역할 및 정체성 (Role & Identity)]
+        당신은 업계 최고 수준의 시나리오 컨설턴트이자 크리에이티브 파트너(Dramaturge)다.
+        목표는 작가가 스스로도 깨닫지 못한 이야기의 잠재력을 끌어내고, 뻔한 전개를 경계하며, 작품의 밀도를 영화적 완성도까지 끌어올리는 것이다.
+        예의 바르되 비평에는 타협이 없고, 막힌 벽을 부술 수 있는 예리한 통찰을 제공한다.
+
+        [컨텍스트 인지 및 작동 방식 (Context Processing)]
+        - 카드 시스템 이해: 작가는 플롯, 노트, 캐릭터 등이 담긴 여러 장의 카드를 제공한다.
+        - 거시와 미시의 교차: 전체 카드의 큰 흐름과 주제를 항상 배경에서 파악하고, 선택 카드(들)의 세부 변화가 전체 스토리라인에 미치는 영향을 계산해 답한다.
+        - 질문 맞춤형 응답: 작가가 묻지 않은 모든 것을 늘어놓지 않고, 질문 의도에 맞는 깊이만 간결하고 임팩트 있게 제시한다.
+
+        [핵심 덕목 및 스킬셋 (Core Virtues & Skillset)]
+        - 핵심 관통: 곁가지를 걷어내고 이 씬/플롯이 진짜 말하고자 하는 바를 짚는다.
+        - 클리셰 파괴와 반전: 뻔한 A->B 대신, 예상은 빗나가되 논리적으로 맞아떨어지는 C 경로를 제안한다.
+        - 갈등과 텐션 극대화: 캐릭터를 더 깊은 딜레마로 밀어 넣고, 씬의 긴장감을 폭발시킬 변수를 찾는다.
+        - 영감의 촉매제: 막혔을 때 정답 주입 대신, 사고를 확장시키는 도발적 What if 질문을 던진다.
+        - 시청각적 상상력: 텍스트를 넘어 화면의 이미지, 사운드, 공간 무드까지 함께 제안한다.
+
+        [대화 태도 (Tone & Manner)]
+        - 작가의 창작물에 깊은 애정과 존중을 가진다.
+        - 영혼 없는 칭찬은 피하고, 좋은 점은 왜 작동하는지 분석하며, 아쉬운 점은 대안과 함께 날카롭게 지적한다.
+        - 동료 전문가와 회의실에서 아이디어를 핑퐁하는 듯 지적이고 에너제틱한 톤을 유지한다.
+
+        [실시간 프로젝트 컨텍스트]
+        [현재 스레드 범위]
+        \(scopeLabel)
+
+        [현재 턴 핵심 컨텍스트]
+        \(scopedContext)
+
+        [질문 연관 카드(RAG)]
+        \(ragContext)
+
+        [전역 플롯 라인 요약]
+        \(globalPlotSummary)
+
+        [전역 노트 라인 요약]
+        \(globalNoteSummary)
+
+        [스레드 롤링 요약]
+        \(rollingSummary)
+
+        [최근 대화 요약]
+        \(historySummary)
+
+        [사용자의 마지막 질문]
+        \(compactQuestion)
+
+        [응답 규칙]
+        - 반드시 한국어로 답한다.
+        - 질문에 대한 본문 답변만 출력한다.
+        - 결과는 핵심만 간략하게 제시한다. 장황한 설명은 금지한다.
+        - 사용자가 길이를 명시하지 않으면 기본 분량은 3~6문장으로 제한한다.
+        - 제목/섹션 번호/군더더기 설명은 작가가 명시적으로 요청한 경우에만 사용한다.
+        - 문장은 중간에 끊지 말고 완결된 형태로 마무리한다.
+        - 플롯 라인, 노트 라인, 캐릭터 설정 간 일관성을 우선한다.
+        - 코드블록/JSON은 사용하지 않는다.
+        """
+
+        let preview = AIChatContextPreview(
+            scopeLabel: scopeLabel,
+            scopedContext: scopedContext,
+            ragContext: ragContext,
+            globalPlotSummary: globalPlotSummary,
+            globalNoteSummary: globalNoteSummary,
+            rollingSummary: rollingSummary,
+            historySummary: historySummary
+        )
+
+        return AIChatPromptBuildResult(
+            prompt: prompt,
+            updatedDigestCache: resolvedDigestCache,
+            rollingSummary: rollingSummary,
+            contextPreview: preview
+        )
+    }
+
+    private static func buildDigest(for card: AIChatCardSnapshot, cached: AICardDigest?) -> AICardDigest {
+        let normalizedContent = card.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        let hash = normalizedContent.hashValue
+        if let cached, cached.contentHash == hash {
+            return cached
+        }
+        let summary = clamp(normalizedContent, maxLength: maxCardSummaryLength, preserveLineBreak: false)
+        let keyFacts = extractKeyFacts(from: normalizedContent)
+        return AICardDigest(
+            cardID: card.id,
+            contentHash: hash,
+            shortSummary: summary,
+            keyFacts: keyFacts,
+            updatedAt: Date()
+        )
+    }
+
+    private static func buildScopedContext(
+        from scopedCards: [AIChatCardSnapshot],
+        digests: [UUID: AICardDigest]
+    ) -> String {
+        let orderedCards = scopedCards
+            .filter { !$0.isArchived && !$0.isFloating }
+            .sorted {
+                if $0.orderIndex != $1.orderIndex { return $0.orderIndex < $1.orderIndex }
+                return $0.createdAt < $1.createdAt
+            }
+        if orderedCards.isEmpty { return "(범위 내 카드 없음)" }
+
+        var lines: [String] = []
+        var lengthBudget = 0
+        for card in orderedCards {
+            guard let digest = digests[card.id] else { continue }
+            let facts = digest.keyFacts.prefix(3).joined(separator: " / ")
+            let line = facts.isEmpty
+                ? "[\(card.category)] \(digest.shortSummary)"
+                : "[\(card.category)] \(digest.shortSummary) | \(facts)"
+            let nextLength = lengthBudget + line.count + 1
+            if nextLength > maxScopedContextLength { break }
+            lines.append(line)
+            lengthBudget = nextLength
+        }
+
+        if lines.isEmpty { return "(범위 내 카드 없음)" }
+        if lines.count < orderedCards.count { lines.append("... (범위 컨텍스트 생략)") }
+        return lines.joined(separator: "\n")
+    }
+
+    private static func buildGlobalLaneSummary(
+        from cards: [AIChatCardSnapshot],
+        digests: [UUID: AICardDigest],
+        category: String
+    ) -> String {
+        let laneCards = cards
+            .filter { $0.category == category }
+            .sorted {
+                if $0.orderIndex != $1.orderIndex { return $0.orderIndex < $1.orderIndex }
+                return $0.createdAt < $1.createdAt
+            }
+        if laneCards.isEmpty { return "(해당 라인 없음)" }
+
+        var lines: [String] = []
+        var lengthBudget = 0
+        for card in laneCards {
+            guard let digest = digests[card.id] else { continue }
+            let line = "- \(digest.shortSummary)"
+            let nextLength = lengthBudget + line.count + 1
+            if nextLength > maxGlobalLaneSummaryLength { break }
+            lines.append(line)
+            lengthBudget = nextLength
+        }
+
+        if lines.isEmpty { return "(해당 라인 없음)" }
+        if lines.count < laneCards.count { lines.append("... (일부 생략)") }
+        return lines.joined(separator: "\n")
+    }
+
+    private static func buildRAGContext(
+        query: String,
+        allCards: [AIChatCardSnapshot],
+        scopedCards: [AIChatCardSnapshot],
+        digests: [UUID: AICardDigest]
+    ) -> String {
+        let compactQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !compactQuery.isEmpty else { return "(질문이 비어 있어 RAG를 생략함)" }
+
+        let queryTokens = ragTokens(from: compactQuery)
+        guard !queryTokens.isEmpty else { return "(질문 토큰 부족으로 RAG를 생략함)" }
+
+        let candidateCards = allCards.filter { !$0.isArchived && !$0.isFloating }
+        guard !candidateCards.isEmpty else { return "(검색 가능한 카드 없음)" }
+
+        typealias RAGDoc = (card: AIChatCardSnapshot, tf: [String: Int])
+        var docs: [RAGDoc] = []
+        var documentFrequency: [String: Int] = [:]
+
+        for card in candidateCards {
+            let compactCardText = clamp("\(card.category) \(card.content)", maxLength: 900, preserveLineBreak: false)
+            let tokens = ragTokens(from: compactCardText)
+            let tf = termFrequency(tokens)
+            guard !tf.isEmpty else { continue }
+            docs.append((card: card, tf: tf))
+            for term in tf.keys {
+                documentFrequency[term, default: 0] += 1
+            }
+        }
+
+        guard !docs.isEmpty else { return "(질문과 비교할 카드 벡터가 없음)" }
+
+        let totalDocs = Double(docs.count)
+        func idf(_ term: String) -> Double {
+            let df = Double(documentFrequency[term] ?? 0)
+            return log((1.0 + totalDocs) / (1.0 + df)) + 1.0
+        }
+
+        let queryTF = termFrequency(queryTokens)
+        var queryVector: [String: Double] = [:]
+        var queryNormSquared: Double = 0
+        for (term, count) in queryTF {
+            let weight = (1.0 + log(Double(count))) * idf(term)
+            queryVector[term] = weight
+            queryNormSquared += weight * weight
+        }
+
+        let queryNorm = sqrt(queryNormSquared)
+        guard queryNorm > 0 else { return "(질문 벡터가 비어 있음)" }
+
+        let scopedIDSet = Set(scopedCards.map(\.id))
+        var scored: [(card: AIChatCardSnapshot, score: Double)] = []
+        scored.reserveCapacity(docs.count)
+
+        for doc in docs {
+            var dot: Double = 0
+            var docNormSquared: Double = 0
+
+            for (term, count) in doc.tf {
+                let docWeight = (1.0 + log(Double(count))) * idf(term)
+                docNormSquared += docWeight * docWeight
+                if let queryWeight = queryVector[term] {
+                    dot += queryWeight * docWeight
+                }
+            }
+
+            guard docNormSquared > 0 else { continue }
+            var score = dot / (queryNorm * sqrt(docNormSquared))
+            if score <= 0 { continue }
+
+            if scopedIDSet.contains(doc.card.id) {
+                score += 0.08
+            }
+            scored.append((card: doc.card, score: score))
+        }
+
+        guard !scored.isEmpty else { return "(질문과 강하게 연결된 카드 없음)" }
+
+        scored.sort { lhs, rhs in
+            if lhs.score != rhs.score { return lhs.score > rhs.score }
+            if lhs.card.orderIndex != rhs.card.orderIndex { return lhs.card.orderIndex < rhs.card.orderIndex }
+            return lhs.card.createdAt < rhs.card.createdAt
+        }
+
+        let topCards = Array(scored.prefix(maxRAGCards))
+        var lines: [String] = []
+        var lengthBudget = 0
+        for item in topCards {
+            guard let digest = digests[item.card.id] else { continue }
+            let marker = scopedIDSet.contains(item.card.id) ? "선택 연관" : "질문 연관"
+            let facts = digest.keyFacts.prefix(2).joined(separator: " / ")
+            let scoreText = String(format: "%.2f", min(max(item.score, 0), 0.99))
+            let line = facts.isEmpty
+                ? "[\(marker)][\(item.card.category)] \(digest.shortSummary) (유사도 \(scoreText))"
+                : "[\(marker)][\(item.card.category)] \(digest.shortSummary) | \(facts) (유사도 \(scoreText))"
+            let nextLength = lengthBudget + line.count + 1
+            if nextLength > maxRAGContextLength { break }
+            lines.append(line)
+            lengthBudget = nextLength
+        }
+
+        if lines.isEmpty { return "(질문과 강하게 연결된 카드 없음)" }
+        if lines.count < topCards.count { lines.append("... (RAG 결과 일부 생략)") }
+        return lines.joined(separator: "\n")
+    }
+
+    private static func ragTokens(from text: String) -> [String] {
+        let allowed = text.lowercased().unicodeScalars.map { scalar -> Character in
+            if CharacterSet.alphanumerics.contains(scalar) || (scalar.value >= 0xAC00 && scalar.value <= 0xD7A3) {
+                return Character(scalar)
+            }
+            return " "
+        }
+        let normalized = String(allowed)
+        let words = normalized.split(whereSeparator: { $0.isWhitespace }).map(String.init)
+        var tokens: [String] = []
+        tokens.reserveCapacity(words.count * 2)
+
+        for word in words {
+            let trimmed = word.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard trimmed.count >= 2 else { continue }
+            tokens.append(trimmed)
+            if containsHangul(trimmed) {
+                tokens.append(contentsOf: hangulBigrams(trimmed))
+            }
+        }
+
+        return tokens
+    }
+
+    private static func containsHangul(_ text: String) -> Bool {
+        text.unicodeScalars.contains { scalar in
+            scalar.value >= 0xAC00 && scalar.value <= 0xD7A3
+        }
+    }
+
+    private static func hangulBigrams(_ text: String) -> [String] {
+        let chars = Array(text)
+        guard chars.count >= 2 else { return [] }
+        var grams: [String] = []
+        grams.reserveCapacity(chars.count - 1)
+        for index in 0..<(chars.count - 1) {
+            let gram = String(chars[index...index + 1])
+            grams.append(gram)
+        }
+        return grams
+    }
+
+    private static func termFrequency(_ tokens: [String]) -> [String: Int] {
+        var tf: [String: Int] = [:]
+        tf.reserveCapacity(tokens.count)
+        for token in tokens {
+            tf[token, default: 0] += 1
+        }
+        return tf
+    }
+
+    private static func buildHistorySummary(from history: [AIChatMessageSnapshot]) -> String {
+        let recentMessages = Array(history.suffix(maxHistoryMessages))
+        if recentMessages.isEmpty { return "(대화 없음)" }
+
+        var lines: [String] = []
+        var lengthBudget = 0
+        for msg in recentMessages {
+            let roleName = msg.role == "user" ? "사용자" : "AI"
+            let compactText = clamp(msg.text, maxLength: 260, preserveLineBreak: true)
+            let line = "\(roleName): \(compactText)"
+            let nextLength = lengthBudget + line.count + 2
+            if nextLength > maxHistorySummaryLength { break }
+            lines.append(line)
+            lengthBudget = nextLength
+        }
+        if lines.isEmpty { return "(대화 없음)" }
+        if lines.count < recentMessages.count { lines.insert("... (이전 대화 생략)", at: 0) }
+        return lines.joined(separator: "\n\n")
+    }
+
+    private static func buildRollingSummary(previous: String, history: [AIChatMessageSnapshot]) -> String {
+        let compactPrevious = clamp(previous, maxLength: 320, preserveLineBreak: true)
+        let latest = buildHistorySummary(from: Array(history.suffix(6)))
+        let merged = [compactPrevious, latest]
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty && $0 != "(대화 없음)" }
+            .joined(separator: "\n")
+        if merged.isEmpty { return "(요약 없음)" }
+        return clamp(merged, maxLength: maxRollingSummaryLength, preserveLineBreak: true)
+    }
+
+    private static func extractKeyFacts(from text: String) -> [String] {
+        let normalized = text.replacingOccurrences(of: "\n", with: ". ")
+        let separators = CharacterSet(charactersIn: ".!?;")
+        let chunks = normalized.components(separatedBy: separators)
+        var facts: [String] = []
+        for chunk in chunks {
+            let trimmed = chunk.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard trimmed.count >= 6 else { continue }
+            facts.append(clamp(trimmed, maxLength: maxKeyFactLength, preserveLineBreak: false))
+            if facts.count >= 4 { break }
+        }
+        if facts.isEmpty {
+            let fallback = clamp(text, maxLength: maxKeyFactLength, preserveLineBreak: false)
+            if fallback != "(비어 있음)" {
+                facts = [fallback]
+            }
+        }
+        return facts
+    }
+
+    private static func clamp(_ text: String, maxLength: Int, preserveLineBreak: Bool) -> String {
+        var normalized = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !preserveLineBreak {
+            normalized = normalized.replacingOccurrences(of: "\n", with: " / ")
+        }
+        normalized = normalized.replacingOccurrences(of: "\t", with: " ")
+        if normalized.isEmpty { return "(비어 있음)" }
+        if normalized.count <= maxLength { return normalized }
+        let index = normalized.index(normalized.startIndex, offsetBy: maxLength)
+        return String(normalized[..<index]) + "..."
+    }
+}
+
+private actor AIVectorSQLiteStore {
+    static let shared = AIVectorSQLiteStore()
+
+    struct Document: Sendable {
+        let cardID: UUID
+        let contentHash: Int
+        let category: String
+        let orderIndex: Int
+        let updatedAt: Date
+        let vector: [Float]
+        let searchText: String
+        let tokenTF: [String: Int]
+    }
+
+    enum StoreError: Error {
+        case openFailed(String)
+        case sqlite(String)
+    }
+
+    private var transientDestructor: sqlite3_destructor_type {
+        unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+    }
+
+    func syncIndex(
+        dbURL: URL,
+        documents: [Document],
+        validCardIDs: Set<UUID>
+    ) throws {
+        try FileManager.default.createDirectory(
+            at: dbURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        let db = try openDatabase(at: dbURL)
+        defer { sqlite3_close(db) }
+
+        try exec(sql: "PRAGMA journal_mode=WAL;", db: db)
+        try exec(sql: "PRAGMA synchronous=NORMAL;", db: db)
+        try exec(sql: "PRAGMA temp_store=MEMORY;", db: db)
+        try createSchema(db: db)
+
+        try exec(sql: "BEGIN IMMEDIATE TRANSACTION;", db: db)
+        do {
+            let upsertSQL = """
+            INSERT INTO embeddings(card_id, content_hash, category, order_index, updated_at, vector, search_text)
+            VALUES(?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(card_id) DO UPDATE SET
+                content_hash = excluded.content_hash,
+                category = excluded.category,
+                order_index = excluded.order_index,
+                updated_at = excluded.updated_at,
+                vector = excluded.vector,
+                search_text = excluded.search_text;
+            """
+            let deleteTokenSQL = "DELETE FROM token_index WHERE card_id = ?;"
+            let insertTokenSQL = """
+            INSERT INTO token_index(token, card_id, tf)
+            VALUES(?, ?, ?)
+            ON CONFLICT(token, card_id) DO UPDATE SET tf = excluded.tf;
+            """
+            let deleteEmbeddingSQL = "DELETE FROM embeddings WHERE card_id = ?;"
+            let selectIDsSQL = "SELECT card_id FROM embeddings;"
+
+            let upsertStmt = try prepare(sql: upsertSQL, db: db)
+            defer { sqlite3_finalize(upsertStmt) }
+            let deleteTokenStmt = try prepare(sql: deleteTokenSQL, db: db)
+            defer { sqlite3_finalize(deleteTokenStmt) }
+            let insertTokenStmt = try prepare(sql: insertTokenSQL, db: db)
+            defer { sqlite3_finalize(insertTokenStmt) }
+            let deleteEmbeddingStmt = try prepare(sql: deleteEmbeddingSQL, db: db)
+            defer { sqlite3_finalize(deleteEmbeddingStmt) }
+            let selectIDsStmt = try prepare(sql: selectIDsSQL, db: db)
+            defer { sqlite3_finalize(selectIDsStmt) }
+
+            for doc in documents where !doc.vector.isEmpty {
+                sqlite3_reset(upsertStmt)
+                sqlite3_clear_bindings(upsertStmt)
+
+                let vectorData = doc.vector.withUnsafeBufferPointer { pointer -> Data in
+                    guard let baseAddress = pointer.baseAddress else { return Data() }
+                    return Data(
+                        bytes: baseAddress,
+                        count: pointer.count * MemoryLayout<Float>.stride
+                    )
+                }
+
+                sqlite3_bind_text(upsertStmt, 1, doc.cardID.uuidString, -1, transientDestructor)
+                sqlite3_bind_int64(upsertStmt, 2, Int64(doc.contentHash))
+                sqlite3_bind_text(upsertStmt, 3, doc.category, -1, transientDestructor)
+                sqlite3_bind_int64(upsertStmt, 4, Int64(doc.orderIndex))
+                sqlite3_bind_double(upsertStmt, 5, doc.updatedAt.timeIntervalSince1970)
+                let _ = vectorData.withUnsafeBytes { bytes in
+                    if let base = bytes.baseAddress, bytes.count > 0 {
+                        sqlite3_bind_blob(upsertStmt, 6, base, Int32(bytes.count), transientDestructor)
+                    } else {
+                        sqlite3_bind_null(upsertStmt, 6)
+                    }
+                }
+                sqlite3_bind_text(upsertStmt, 7, doc.searchText, -1, transientDestructor)
+                try stepDone(upsertStmt, db: db)
+
+                sqlite3_reset(deleteTokenStmt)
+                sqlite3_clear_bindings(deleteTokenStmt)
+                sqlite3_bind_text(deleteTokenStmt, 1, doc.cardID.uuidString, -1, transientDestructor)
+                try stepDone(deleteTokenStmt, db: db)
+
+                for (token, tf) in doc.tokenTF where !token.isEmpty {
+                    sqlite3_reset(insertTokenStmt)
+                    sqlite3_clear_bindings(insertTokenStmt)
+                    sqlite3_bind_text(insertTokenStmt, 1, token, -1, transientDestructor)
+                    sqlite3_bind_text(insertTokenStmt, 2, doc.cardID.uuidString, -1, transientDestructor)
+                    sqlite3_bind_double(insertTokenStmt, 3, Double(tf))
+                    try stepDone(insertTokenStmt, db: db)
+                }
+            }
+
+            var existingIDs: [String] = []
+            while sqlite3_step(selectIDsStmt) == SQLITE_ROW {
+                if let cString = sqlite3_column_text(selectIDsStmt, 0) {
+                    existingIDs.append(String(cString: cString))
+                }
+            }
+            for idString in existingIDs {
+                guard let id = UUID(uuidString: idString) else { continue }
+                if validCardIDs.contains(id) { continue }
+
+                sqlite3_reset(deleteTokenStmt)
+                sqlite3_clear_bindings(deleteTokenStmt)
+                sqlite3_bind_text(deleteTokenStmt, 1, idString, -1, transientDestructor)
+                try stepDone(deleteTokenStmt, db: db)
+
+                sqlite3_reset(deleteEmbeddingStmt)
+                sqlite3_clear_bindings(deleteEmbeddingStmt)
+                sqlite3_bind_text(deleteEmbeddingStmt, 1, idString, -1, transientDestructor)
+                try stepDone(deleteEmbeddingStmt, db: db)
+            }
+
+            try exec(sql: "COMMIT;", db: db)
+        } catch {
+            try? exec(sql: "ROLLBACK;", db: db)
+            throw error
+        }
+    }
+
+    func queryCandidateIDs(
+        dbURL: URL,
+        queryTokens: [String],
+        limit: Int,
+        fallbackLimit: Int = 160
+    ) throws -> [UUID] {
+        let db = try openDatabase(at: dbURL)
+        defer { sqlite3_close(db) }
+        try createSchema(db: db)
+
+        var orderedIDs: [UUID] = []
+        var seen: Set<UUID> = []
+
+        let uniqueTokens = Array(Set(queryTokens.filter { !$0.isEmpty }))
+        if !uniqueTokens.isEmpty {
+            let placeholders = Array(repeating: "?", count: uniqueTokens.count).joined(separator: ",")
+            let sql = """
+            SELECT card_id, SUM(tf) AS score
+            FROM token_index
+            WHERE token IN (\(placeholders))
+            GROUP BY card_id
+            ORDER BY score DESC
+            LIMIT ?;
+            """
+            let stmt = try prepare(sql: sql, db: db)
+            defer { sqlite3_finalize(stmt) }
+
+            for (index, token) in uniqueTokens.enumerated() {
+                sqlite3_bind_text(stmt, Int32(index + 1), token, -1, transientDestructor)
+            }
+            sqlite3_bind_int64(stmt, Int32(uniqueTokens.count + 1), Int64(max(limit, fallbackLimit)))
+
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                guard let cString = sqlite3_column_text(stmt, 0) else { continue }
+                guard let id = UUID(uuidString: String(cString: cString)) else { continue }
+                if seen.insert(id).inserted {
+                    orderedIDs.append(id)
+                    if orderedIDs.count >= limit {
+                        return orderedIDs
+                    }
+                }
+            }
+        }
+
+        let recentStmt = try prepare(
+            sql: "SELECT card_id FROM embeddings ORDER BY updated_at DESC LIMIT ?;",
+            db: db
+        )
+        defer { sqlite3_finalize(recentStmt) }
+        sqlite3_bind_int64(recentStmt, 1, Int64(max(limit, fallbackLimit)))
+        while sqlite3_step(recentStmt) == SQLITE_ROW {
+            guard let cString = sqlite3_column_text(recentStmt, 0) else { continue }
+            guard let id = UUID(uuidString: String(cString: cString)) else { continue }
+            if seen.insert(id).inserted {
+                orderedIDs.append(id)
+                if orderedIDs.count >= limit { break }
+            }
+        }
+
+        return orderedIDs
+    }
+
+    private func openDatabase(at url: URL) throws -> OpaquePointer {
+        var db: OpaquePointer?
+        let flags = SQLITE_OPEN_CREATE | SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX
+        let result = sqlite3_open_v2(url.path, &db, flags, nil)
+        guard result == SQLITE_OK, let db else {
+            let message = db.flatMap { String(cString: sqlite3_errmsg($0)) } ?? "unknown"
+            if let db {
+                sqlite3_close(db)
+            }
+            throw StoreError.openFailed(message)
+        }
+        return db
+    }
+
+    private func createSchema(db: OpaquePointer) throws {
+        try exec(
+            sql: """
+            CREATE TABLE IF NOT EXISTS embeddings (
+                card_id TEXT PRIMARY KEY,
+                content_hash INTEGER NOT NULL,
+                category TEXT NOT NULL,
+                order_index INTEGER NOT NULL,
+                updated_at REAL NOT NULL,
+                vector BLOB NOT NULL,
+                search_text TEXT NOT NULL
+            );
+            """,
+            db: db
+        )
+        try exec(
+            sql: """
+            CREATE TABLE IF NOT EXISTS token_index (
+                token TEXT NOT NULL,
+                card_id TEXT NOT NULL,
+                tf REAL NOT NULL,
+                PRIMARY KEY(token, card_id)
+            );
+            """,
+            db: db
+        )
+        try exec(sql: "CREATE INDEX IF NOT EXISTS idx_embeddings_updated_at ON embeddings(updated_at DESC);", db: db)
+        try exec(sql: "CREATE INDEX IF NOT EXISTS idx_token_index_card_id ON token_index(card_id);", db: db)
+    }
+
+    private func exec(sql: String, db: OpaquePointer) throws {
+        if sqlite3_exec(db, sql, nil, nil, nil) != SQLITE_OK {
+            throw StoreError.sqlite(String(cString: sqlite3_errmsg(db)))
+        }
+    }
+
+    private func prepare(sql: String, db: OpaquePointer) throws -> OpaquePointer {
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) != SQLITE_OK {
+            throw StoreError.sqlite(String(cString: sqlite3_errmsg(db)))
+        }
+        guard let stmt else {
+            throw StoreError.sqlite("statement prepare failed")
+        }
+        return stmt
+    }
+
+    private func stepDone(_ stmt: OpaquePointer, db: OpaquePointer) throws {
+        if sqlite3_step(stmt) != SQLITE_DONE {
+            throw StoreError.sqlite(String(cString: sqlite3_errmsg(db)))
+        }
+    }
 }
 
 extension ScenarioWriterView {
 
     // MARK: - AI Chat View
 
+    private var aiThreadsMaxCount: Int { 30 }
+    private var aiMessagesMaxCountPerThread: Int { 140 }
+    private var aiEmbeddingMaxRecordCount: Int { 1200 }
+    private var aiRAGTopCardCount: Int { 8 }
+    private var aiRAGEmbeddingModelCandidates: [String] { ["gemini-embedding-001", "text-embedding-004"] }
+    private var visibleAIChatScopes: [AIChatScopeType] { [.selectedCards, .plotLine, .noteLine] }
+
+    func aiThreadsJSONEncoder() -> JSONEncoder {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+        return encoder
+    }
+
+    func aiThreadsJSONDecoder() -> JSONDecoder {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return decoder
+    }
+
+    func aiEmbeddingJSONEncoder() -> JSONEncoder {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+        return encoder
+    }
+
+    func aiEmbeddingJSONDecoder() -> JSONDecoder {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return decoder
+    }
+
+    func normalizedPersistedAIEmbeddings(_ records: [AIEmbeddingRecord], validCardIDs: Set<UUID>) -> [AIEmbeddingRecord] {
+        var normalized = records
+            .filter { validCardIDs.contains($0.cardID) && !$0.vector.isEmpty }
+            .prefix(aiEmbeddingMaxRecordCount)
+            .map { $0 }
+        normalized.sort { $0.updatedAt > $1.updatedAt }
+        return normalized
+    }
+
+    func persistAIEmbeddingsImmediately() {
+        guard aiEmbeddingIndexLoadedScenarioID == scenario.id else { return }
+        let validIDs = Set(
+            scenario.cards
+                .filter { !$0.isArchived && !$0.isFloating }
+                .map(\.id)
+        )
+        let normalizedRecords = normalizedPersistedAIEmbeddings(Array(aiEmbeddingIndexByCardID.values), validCardIDs: validIDs)
+        guard !normalizedRecords.isEmpty else {
+            store.saveAIEmbeddingIndexData(nil, for: scenario.id)
+            return
+        }
+
+        let payload = AIEmbeddingIndexPayload(
+            model: aiEmbeddingIndexModelID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? (aiRAGEmbeddingModelCandidates.first ?? "gemini-embedding-001")
+                : aiEmbeddingIndexModelID,
+            records: normalizedRecords,
+            updatedAt: Date()
+        )
+        guard let data = try? aiEmbeddingJSONEncoder().encode(payload) else { return }
+        store.saveAIEmbeddingIndexData(data, for: scenario.id)
+    }
+
+    func scheduleAIEmbeddingPersistence(delay: TimeInterval = 0.8) {
+        guard aiEmbeddingIndexLoadedScenarioID == scenario.id else { return }
+        aiEmbeddingIndexSaveWorkItem?.cancel()
+        let work = DispatchWorkItem { [scenarioID = scenario.id] in
+            guard scenarioID == scenario.id else { return }
+            persistAIEmbeddingsImmediately()
+            aiEmbeddingIndexSaveWorkItem = nil
+        }
+        aiEmbeddingIndexSaveWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    func flushAIEmbeddingPersistence() {
+        aiEmbeddingIndexSaveWorkItem?.cancel()
+        aiEmbeddingIndexSaveWorkItem = nil
+        persistAIEmbeddingsImmediately()
+    }
+
+    func loadPersistedAIEmbeddingIndexIfNeeded() {
+        guard aiEmbeddingIndexLoadedScenarioID != scenario.id else { return }
+
+        aiEmbeddingIndexSaveWorkItem?.cancel()
+        aiEmbeddingIndexSaveWorkItem = nil
+        aiEmbeddingIndexLoadedScenarioID = scenario.id
+        aiEmbeddingIndexByCardID = [:]
+        aiEmbeddingIndexModelID = aiRAGEmbeddingModelCandidates.first ?? "gemini-embedding-001"
+
+        let targetScenarioID = scenario.id
+        Task {
+            let loadedData = await store.loadAIEmbeddingIndexData(for: targetScenarioID)
+            await MainActor.run {
+                guard aiEmbeddingIndexLoadedScenarioID == targetScenarioID else { return }
+                guard let loadedData,
+                      let payload = try? aiEmbeddingJSONDecoder().decode(AIEmbeddingIndexPayload.self, from: loadedData) else {
+                    aiEmbeddingIndexByCardID = [:]
+                    aiEmbeddingIndexModelID = aiRAGEmbeddingModelCandidates.first ?? "gemini-embedding-001"
+                    return
+                }
+                let validIDs = Set(
+                    scenario.cards
+                        .filter { !$0.isArchived && !$0.isFloating }
+                        .map(\.id)
+                )
+                let normalized = normalizedPersistedAIEmbeddings(payload.records, validCardIDs: validIDs)
+                aiEmbeddingIndexByCardID = Dictionary(uniqueKeysWithValues: normalized.map { ($0.cardID, $0) })
+                let trimmedModel = payload.model.trimmingCharacters(in: .whitespacesAndNewlines)
+                aiEmbeddingIndexModelID = trimmedModel.isEmpty ? (aiRAGEmbeddingModelCandidates.first ?? "gemini-embedding-001") : trimmedModel
+            }
+        }
+    }
+
+    func normalizedPersistedAIThreads(_ threads: [AIChatThread]) -> [AIChatThread] {
+        var normalized = threads.prefix(aiThreadsMaxCount).map { thread in
+            var mutable = thread
+            mutable.scope.type = mutable.scope.type.normalizedForCurrentUI
+            if mutable.messages.count > aiMessagesMaxCountPerThread {
+                mutable.messages = Array(mutable.messages.suffix(aiMessagesMaxCountPerThread))
+            }
+            var tokenUsage = mutable.tokenUsage ?? .zero
+            tokenUsage.promptTokens = max(tokenUsage.promptTokens, 0)
+            tokenUsage.outputTokens = max(tokenUsage.outputTokens, 0)
+            tokenUsage.totalTokens = max(tokenUsage.totalTokens, 0)
+            mutable.tokenUsage = tokenUsage
+            return mutable
+        }
+        normalized.sort { $0.updatedAt > $1.updatedAt }
+        return normalized
+    }
+
+    func persistAIThreadsImmediately() {
+        guard aiThreadsLoadedScenarioID == scenario.id else { return }
+        let normalizedThreads = normalizedPersistedAIThreads(aiChatThreads)
+        let activeThreadID = normalizedThreads.contains(where: { $0.id == activeAIChatThreadID }) ? activeAIChatThreadID : normalizedThreads.first?.id
+        guard !normalizedThreads.isEmpty else {
+            store.saveAIChatThreadsData(nil, for: scenario.id)
+            return
+        }
+
+        let payload = AIChatThreadStorePayload(threads: normalizedThreads, activeThreadID: activeThreadID)
+        guard let data = try? aiThreadsJSONEncoder().encode(payload) else { return }
+        store.saveAIChatThreadsData(data, for: scenario.id)
+    }
+
+    func scheduleAIThreadsPersistence(delay: TimeInterval = 0.45) {
+        guard aiThreadsLoadedScenarioID == scenario.id else { return }
+        aiThreadsSaveWorkItem?.cancel()
+        let work = DispatchWorkItem { [scenarioID = scenario.id] in
+            guard scenarioID == scenario.id else { return }
+            persistAIThreadsImmediately()
+            aiThreadsSaveWorkItem = nil
+        }
+        aiThreadsSaveWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    func flushAIThreadsPersistence() {
+        aiThreadsSaveWorkItem?.cancel()
+        aiThreadsSaveWorkItem = nil
+        persistAIThreadsImmediately()
+    }
+
+    func loadPersistedAIThreadsIfNeeded() {
+        guard aiThreadsLoadedScenarioID != scenario.id else { return }
+
+        aiThreadsSaveWorkItem?.cancel()
+        aiThreadsSaveWorkItem = nil
+        aiThreadsLoadedScenarioID = scenario.id
+        aiChatThreads = []
+        activeAIChatThreadID = nil
+        aiCardDigestCache = [:]
+        aiLastContextPreview = nil
+        aiChatInput = ""
+
+        let targetScenarioID = scenario.id
+        Task {
+            let loadedData = await store.loadAIChatThreadsData(for: targetScenarioID)
+            await MainActor.run {
+                guard aiThreadsLoadedScenarioID == targetScenarioID else { return }
+                if let loadedData,
+                   let payload = try? aiThreadsJSONDecoder().decode(AIChatThreadStorePayload.self, from: loadedData) {
+                    let normalizedThreads = normalizedPersistedAIThreads(payload.threads)
+                    aiChatThreads = normalizedThreads
+                    if let savedActive = payload.activeThreadID,
+                       normalizedThreads.contains(where: { $0.id == savedActive }) {
+                        activeAIChatThreadID = savedActive
+                    } else {
+                        activeAIChatThreadID = normalizedThreads.first?.id
+                    }
+                }
+                ensureAIChatThreadSelection()
+            }
+        }
+    }
+
+    func handleAIChatScenarioChange() {
+        cancelAIChatRequest()
+        aiThreadsLoadedScenarioID = nil
+        aiEmbeddingIndexLoadedScenarioID = nil
+        loadPersistedAIThreadsIfNeeded()
+        loadPersistedAIEmbeddingIndexIfNeeded()
+    }
+
+    func activeAIChatThreadIndex() -> Int? {
+        guard let threadID = activeAIChatThreadID else { return nil }
+        return aiChatThreads.firstIndex { $0.id == threadID }
+    }
+
+    func activeAIChatMessages() -> [AIChatMessage] {
+        guard let index = activeAIChatThreadIndex() else { return [] }
+        return aiChatThreads[index].messages
+    }
+
+    func messagesForAIThread(_ threadID: UUID) -> [AIChatMessage] {
+        guard let index = aiChatThreads.firstIndex(where: { $0.id == threadID }) else { return [] }
+        return aiChatThreads[index].messages
+    }
+
+    func tokenUsageForAIThread(_ threadID: UUID?) -> AIChatTokenUsage {
+        guard let threadID,
+              let index = aiChatThreads.firstIndex(where: { $0.id == threadID }) else {
+            return .zero
+        }
+        return aiChatThreads[index].tokenUsage ?? .zero
+    }
+
+    func updateAIChatThread(_ threadID: UUID, mutate: (inout AIChatThread) -> Void) {
+        guard let index = aiChatThreads.firstIndex(where: { $0.id == threadID }) else { return }
+        mutate(&aiChatThreads[index])
+        aiChatThreads[index].updatedAt = Date()
+        scheduleAIThreadsPersistence()
+    }
+
+    func appendAIChatMessage(_ message: AIChatMessage, to threadID: UUID) {
+        updateAIChatThread(threadID) { thread in
+            thread.messages.append(message)
+            if message.role == "user",
+               thread.title.hasPrefix("상담 "),
+               !message.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                thread.title = suggestedThreadTitle(from: message.text)
+            }
+        }
+    }
+
+    func clearAIChatMessages(in threadID: UUID) {
+        updateAIChatThread(threadID) { thread in
+            thread.messages.removeAll()
+            thread.rollingSummary = ""
+            thread.decisionLog = []
+            thread.unresolvedQuestions = []
+            thread.tokenUsage = .zero
+        }
+        if threadID == activeAIChatThreadID {
+            aiLastContextPreview = nil
+        }
+    }
+
+    func currentSelectedCardIDsForAIContext() -> [UUID] {
+        if !selectedCardIDs.isEmpty {
+            return selectedCardIDs.sorted { $0.uuidString < $1.uuidString }
+        }
+        if let activeID = activeCardID {
+            return [activeID]
+        }
+        return []
+    }
+
+    func deleteAIChatThread(_ threadID: UUID) {
+        guard let index = aiChatThreads.firstIndex(where: { $0.id == threadID }) else { return }
+        let isActiveThread = (threadID == activeAIChatThreadID)
+        if isActiveThread {
+            cancelAIChatRequest()
+        }
+
+        aiChatThreads.remove(at: index)
+
+        if aiChatThreads.isEmpty {
+            createAIChatThread(focusInput: showAIChat)
+            setAIStatus("상담 스레드를 삭제했습니다.")
+            return
+        }
+
+        if isActiveThread {
+            let fallbackIndex = min(index, aiChatThreads.count - 1)
+            activeAIChatThreadID = aiChatThreads[fallbackIndex].id
+            aiChatInput = ""
+            aiLastContextPreview = nil
+            if showAIChat {
+                isAIChatInputFocused = true
+            }
+        }
+
+        scheduleAIThreadsPersistence(delay: 0.15)
+        setAIStatus("상담 스레드를 삭제했습니다.")
+    }
+
+    func suggestedThreadTitle(from userMessage: String) -> String {
+        let trimmed = userMessage.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "상담" }
+        let maxLength = 16
+        if trimmed.count <= maxLength { return trimmed }
+        let index = trimmed.index(trimmed.startIndex, offsetBy: maxLength)
+        return String(trimmed[..<index]) + "..."
+    }
+
+    func nextAIChatThreadTitle() -> String {
+        let prefix = "상담 "
+        let numbers = aiChatThreads.compactMap { thread -> Int? in
+            guard thread.title.hasPrefix(prefix) else { return nil }
+            return Int(thread.title.dropFirst(prefix.count))
+        }
+        let next = (numbers.max() ?? 0) + 1
+        return "상담 \(next)"
+    }
+
+    func resolvedInitialThreadScope() -> AIChatThreadScope {
+        let selectedIDs = currentSelectedCardIDsForAIContext()
+        if !selectedIDs.isEmpty {
+            return AIChatThreadScope(type: .selectedCards, cardIDs: selectedIDs, includeChildrenDepth: 0)
+        }
+        return AIChatThreadScope(type: .plotLine, cardIDs: [], includeChildrenDepth: 0)
+    }
+
+    func createAIChatThread(focusInput: Bool = true) {
+        cancelAIChatRequest()
+        let thread = AIChatThread(
+            id: UUID(),
+            title: nextAIChatThreadTitle(),
+            mode: .discussion,
+            scope: resolvedInitialThreadScope(),
+            messages: [],
+            rollingSummary: "",
+            decisionLog: [],
+            unresolvedQuestions: [],
+            updatedAt: Date()
+        )
+        aiChatThreads.insert(thread, at: 0)
+        activeAIChatThreadID = thread.id
+        aiChatInput = ""
+        aiLastContextPreview = nil
+        setAIStatus(nil)
+        scheduleAIThreadsPersistence(delay: 0.15)
+        if focusInput {
+            isAIChatInputFocused = true
+        }
+    }
+
+    func selectAIChatThread(_ threadID: UUID) {
+        guard activeAIChatThreadID != threadID else { return }
+        cancelAIChatRequest()
+        activeAIChatThreadID = threadID
+        aiChatInput = ""
+        aiLastContextPreview = nil
+        setAIStatus(nil)
+        scheduleAIThreadsPersistence(delay: 0.15)
+    }
+
+    func ensureAIChatThreadSelection() {
+        if aiChatThreads.isEmpty {
+            createAIChatThread(focusInput: false)
+            return
+        }
+        if activeAIChatThreadIndex() == nil {
+            activeAIChatThreadID = aiChatThreads.first?.id
+        }
+    }
+
+    func resolvedScopedCards(
+        for scope: AIChatThreadScope,
+        allCards: [AIChatCardSnapshot]
+    ) -> [AIChatCardSnapshot] {
+        let visibleCards = allCards.filter { !$0.isArchived && !$0.isFloating }
+        let resolvedScopeType = scope.type.normalizedForCurrentUI
+
+        func cards(for ids: [UUID]) -> [AIChatCardSnapshot] {
+            let idSet = Set(ids)
+            return visibleCards.filter { idSet.contains($0.id) }
+        }
+
+        var resolved: [AIChatCardSnapshot]
+        switch resolvedScopeType {
+        case .selectedCards, .multiSelection:
+            let fallbackIDs: [UUID]
+            let liveSelectionIDs = currentSelectedCardIDsForAIContext()
+            if !liveSelectionIDs.isEmpty {
+                fallbackIDs = liveSelectionIDs
+            } else if !scope.cardIDs.isEmpty {
+                fallbackIDs = scope.cardIDs
+            } else {
+                fallbackIDs = []
+            }
+            resolved = cards(for: fallbackIDs)
+        case .parentAndChildren:
+            resolved = []
+        case .plotLine:
+            resolved = visibleCards.filter { $0.category == "플롯" }
+        case .noteLine:
+            resolved = visibleCards.filter { $0.category == "노트" }
+        }
+
+        if resolved.isEmpty {
+            return Array(visibleCards.prefix(24))
+        }
+        return resolved.sorted {
+            if $0.orderIndex != $1.orderIndex { return $0.orderIndex < $1.orderIndex }
+            return $0.createdAt < $1.createdAt
+        }
+    }
+
+    func scopeLabel(for scope: AIChatThreadScope, cardCount: Int) -> String {
+        "\(scope.type.normalizedForCurrentUI.rawValue) (\(cardCount)개 카드)"
+    }
+
+    func applyScopeToActiveThread(_ type: AIChatScopeType) {
+        guard let threadID = activeAIChatThreadID else { return }
+        cancelAIChatRequest()
+        var newScope = AIChatThreadScope(type: type, cardIDs: [], includeChildrenDepth: 0)
+        switch type {
+        case .selectedCards:
+            newScope.cardIDs = currentSelectedCardIDsForAIContext()
+        case .multiSelection, .parentAndChildren:
+            newScope.type = .selectedCards
+            newScope.cardIDs = currentSelectedCardIDsForAIContext()
+        case .plotLine, .noteLine:
+            break
+        }
+
+        updateAIChatThread(threadID) { thread in
+            thread.scope = newScope
+        }
+        aiLastContextPreview = nil
+        setAIStatus("스레드 범위를 '\(type.rawValue)'로 설정했습니다.")
+    }
+
+    func syncSelectedScopeForThread(_ threadID: UUID) {
+        guard let index = aiChatThreads.firstIndex(where: { $0.id == threadID }) else { return }
+        guard aiChatThreads[index].scope.type.normalizedForCurrentUI == .selectedCards else { return }
+
+        let latestSelectionIDs = currentSelectedCardIDsForAIContext()
+        guard !latestSelectionIDs.isEmpty else { return }
+
+        if Set(aiChatThreads[index].scope.cardIDs) == Set(latestSelectionIDs) {
+            return
+        }
+
+        updateAIChatThread(threadID) { thread in
+            thread.scope.type = .selectedCards
+            thread.scope.cardIDs = latestSelectionIDs
+            thread.scope.includeChildrenDepth = 0
+        }
+    }
+
+    func syncActiveThreadSelectedScopeWithCurrentSelection() {
+        guard let threadID = activeAIChatThreadID else { return }
+        syncSelectedScopeForThread(threadID)
+    }
+
+    func handleAIChatInputKeyPress(_ press: KeyPress) -> KeyPress.Result {
+        guard press.phase == .down else { return .ignored }
+        let hasModifier =
+            press.modifiers.contains(.command) ||
+            press.modifiers.contains(.option) ||
+            press.modifiers.contains(.control)
+        if press.key == .return && !hasModifier && !press.modifiers.contains(.shift) {
+            sendAIChatMessage()
+            return .handled
+        }
+        return .ignored
+    }
+
+    func latestAIReplyText(for threadID: UUID?) -> String? {
+        guard let threadID else { return nil }
+        let text = messagesForAIThread(threadID)
+            .reversed()
+            .first(where: { $0.role == "model" })?
+            .text
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let text, !text.isEmpty else { return nil }
+        return text
+    }
+
+    func applyLatestAIReplyToActiveCard() {
+        guard let reply = latestAIReplyText(for: activeAIChatThreadID) else {
+            setAIStatusError("적용할 AI 답변이 없습니다.")
+            return
+        }
+        guard let activeID = activeCardID,
+              let activeCard = findCard(by: activeID) else {
+            setAIStatusError("먼저 반영할 카드를 선택해 주세요.")
+            return
+        }
+
+        finishEditing()
+        let prevState = captureScenarioState()
+        if activeCard.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            activeCard.content = reply
+        } else {
+            activeCard.content += "\n\n\(reply)"
+        }
+        scenario.bumpCardsVersion()
+        commitCardMutation(
+            previousState: prevState,
+            actionName: "AI 상담 반영",
+            forceSnapshot: true
+        )
+        selectedCardIDs = [activeCard.id]
+        changeActiveCard(to: activeCard, shouldFocusMain: false)
+        setAIStatus("AI 답변을 현재 선택 카드 하단에 반영했습니다.")
+    }
+
+    func addLatestAIReplyAsChildCard() {
+        guard let reply = latestAIReplyText(for: activeAIChatThreadID) else {
+            setAIStatusError("자식 카드로 만들 AI 답변이 없습니다.")
+            return
+        }
+        guard let activeID = activeCardID,
+              let parentCard = findCard(by: activeID) else {
+            setAIStatusError("먼저 부모 카드를 선택해 주세요.")
+            return
+        }
+
+        finishEditing()
+        let prevState = captureScenarioState()
+        let child = SceneCard(
+            content: reply,
+            orderIndex: parentCard.children.count,
+            parent: parentCard,
+            scenario: scenario,
+            category: parentCard.category
+        )
+        scenario.cards.append(child)
+        scenario.bumpCardsVersion()
+        commitCardMutation(
+            previousState: prevState,
+            actionName: "AI 상담 자식 카드 추가",
+            forceSnapshot: true
+        )
+        selectedCardIDs = [child.id]
+        changeActiveCard(to: child, shouldFocusMain: false)
+        setAIStatus("AI 답변을 자식 카드로 추가했습니다.")
+    }
+
+    func prepareAlternativeRequest() {
+        guard let threadID = activeAIChatThreadID else { return }
+        let latestUserQuestion = messagesForAIThread(threadID)
+            .reversed()
+            .first(where: { $0.role == "user" })?
+            .text
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let latestUserQuestion, !latestUserQuestion.isEmpty else {
+            aiChatInput = "지금 맥락에서 대안 3가지를 제시해줘. 서로 다른 방향으로 짧게."
+            isAIChatInputFocused = true
+            return
+        }
+        aiChatInput = "방금 질문에 대한 대안 3가지를 서로 다른 방향으로 제시해줘.\n원 질문: \(latestUserQuestion)"
+        isAIChatInputFocused = true
+    }
+
     @ViewBuilder
     var aiChatView: some View {
+        let activeMessages = activeAIChatMessages()
+        let hasLatestReply = latestAIReplyText(for: activeAIChatThreadID) != nil
+        let activeThreadTokenUsage = tokenUsageForAIThread(activeAIChatThreadID)
         VStack(spacing: 0) {
-            HStack {
-                Text("AI 시나리오 상담")
-                    .font(.system(size: 16, weight: .bold))
-                    .foregroundStyle(appearance == "light" ? .black.opacity(0.7) : .white.opacity(0.8))
-                Spacer()
-                Button {
-                    aiChatMessages.removeAll()
-                } label: {
-                    Image(systemName: "trash")
-                        .font(.system(size: 14))
-                        .foregroundColor(.secondary)
+            VStack(spacing: 10) {
+                HStack {
+                    Text("AI 시나리오 상담")
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundStyle(appearance == "light" ? .black.opacity(0.7) : .white.opacity(0.8))
+                    Spacer()
+                    Button {
+                        createAIChatThread()
+                    } label: {
+                        Image(systemName: "plus.circle")
+                            .font(.system(size: 15))
+                            .foregroundColor(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help("새 상담 스레드")
+
+                    Button {
+                        guard let threadID = activeAIChatThreadID else { return }
+                        deleteAIChatThread(threadID)
+                    } label: {
+                        Image(systemName: "trash")
+                            .font(.system(size: 14))
+                            .foregroundColor(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help("현재 상담 스레드 삭제")
+
+                    Button {
+                        toggleAIChat()
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 14))
+                            .foregroundColor(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.leading, 6)
                 }
-                .buttonStyle(.plain)
-                .help("대화 기록 지우기")
-                
-                Button {
-                    toggleAIChat()
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 14))
-                        .foregroundColor(.secondary)
+
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(aiChatThreads) { thread in
+                            let isActive = thread.id == activeAIChatThreadID
+                            Button {
+                                selectAIChatThread(thread.id)
+                            } label: {
+                                HStack(spacing: 6) {
+                                    Text(thread.mode.rawValue)
+                                        .font(.system(size: 10, weight: .bold))
+                                    Text(thread.title)
+                                        .font(.system(size: 12, weight: .semibold))
+                                    Text("\(thread.messages.count)")
+                                        .font(.system(size: 10, weight: .bold))
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 1)
+                                        .background((isActive ? Color.white : Color.secondary.opacity(0.16)))
+                                        .foregroundColor(isActive ? .accentColor : .secondary)
+                                        .cornerRadius(10)
+                                }
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 7)
+                                .background(
+                                    isActive
+                                        ? Color.accentColor.opacity(0.88)
+                                        : (appearance == "light" ? Color.black.opacity(0.05) : Color.white.opacity(0.10))
+                                )
+                                .foregroundColor(isActive ? .white : .primary)
+                                .cornerRadius(10)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.vertical, 1)
                 }
-                .buttonStyle(.plain)
-                .padding(.leading, 12)
+
+                if let activeThread = aiChatThreads.first(where: { $0.id == activeAIChatThreadID }) {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 6) {
+                            ForEach(visibleAIChatScopes, id: \.self) { scope in
+                                let isActiveScope = activeThread.scope.type.normalizedForCurrentUI == scope
+                                Button {
+                                    applyScopeToActiveThread(scope)
+                                } label: {
+                                    Text(scope.rawValue)
+                                        .font(.system(size: 11, weight: .semibold))
+                                        .padding(.horizontal, 10)
+                                        .padding(.vertical, 5)
+                                        .background(
+                                            isActiveScope
+                                                ? Color.accentColor.opacity(0.86)
+                                                : (appearance == "light" ? Color.black.opacity(0.04) : Color.white.opacity(0.08))
+                                        )
+                                        .foregroundColor(isActiveScope ? .white : .primary)
+                                        .cornerRadius(9)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(.vertical, 1)
+                    }
+                }
             }
-            .padding(18)
+            .padding(.horizontal, 14)
+            .padding(.top, 14)
+            .padding(.bottom, 10)
             
             Divider().background(appearance == "light" ? Color.black.opacity(0.1) : Color.white.opacity(0.15))
             
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(spacing: 20) {
-                        if aiChatMessages.isEmpty {
+                        if activeMessages.isEmpty {
                             VStack(spacing: 14) {
                                 Image(systemName: "sparkles.tv")
                                     .font(.system(size: 40))
@@ -53,13 +1524,18 @@ extension ScenarioWriterView {
                                 Text("AI에게 현재 시나리오에 대해 물어보세요.")
                                     .font(.system(size: 16))
                                     .foregroundColor(.secondary)
+                                if let thread = aiChatThreads.first(where: { $0.id == activeAIChatThreadID }) {
+                                    Text("스레드 범위: \(thread.scope.type.rawValue)")
+                                        .font(.system(size: 12))
+                                        .foregroundColor(.secondary.opacity(0.8))
+                                }
                                 Text("예: 이 이야기의 결말을 어떻게 내면 좋을까?")
                                     .font(.system(size: 13))
                                     .foregroundColor(.secondary.opacity(0.8))
                             }
                             .padding(.top, 70)
                         } else {
-                            ForEach(aiChatMessages) { msg in
+                            ForEach(activeMessages) { msg in
                                 HStack {
                                     if msg.role == "user" {
                                         Spacer(minLength: 50)
@@ -109,10 +1585,17 @@ extension ScenarioWriterView {
                     }
                     .padding(18)
                 }
-                .onChange(of: aiChatMessages.count) { _, _ in
+                .onChange(of: activeMessages.count) { _, _ in
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
                         withAnimation {
-                            proxy.scrollTo(aiChatMessages.last?.id, anchor: .bottom)
+                            proxy.scrollTo(activeMessages.last?.id, anchor: .bottom)
+                        }
+                    }
+                }
+                .onChange(of: activeAIChatThreadID) { _, _ in
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                        withAnimation {
+                            proxy.scrollTo(activeAIChatMessages().last?.id, anchor: .bottom)
                         }
                     }
                 }
@@ -137,6 +1620,63 @@ extension ScenarioWriterView {
                         .lineLimit(2)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
+
+                Text("누적 토큰(현재 스레드): 입력 \(activeThreadTokenUsage.promptTokens) / 출력 \(activeThreadTokenUsage.outputTokens) / 총 \(activeThreadTokenUsage.totalTokens)")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                if let context = aiLastContextPreview {
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text("이번 요청 컨텍스트")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(.secondary)
+                        Text("범위: \(context.scopeLabel)")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                        Text("선택 맥락: \(context.scopedContext)")
+                            .font(.system(size: 11))
+                            .lineLimit(3)
+                            .foregroundStyle(.secondary)
+                        Text("RAG 연관: \(context.ragContext)")
+                            .font(.system(size: 11))
+                            .lineLimit(3)
+                            .foregroundStyle(.secondary)
+                        Text("롤링 요약: \(context.rollingSummary)")
+                            .font(.system(size: 11))
+                            .lineLimit(3)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(appearance == "light" ? Color.black.opacity(0.035) : Color.white.opacity(0.06))
+                    .cornerRadius(8)
+                }
+
+                if hasLatestReply {
+                    HStack(spacing: 8) {
+                        Button("선택 카드에 반영") {
+                            applyLatestAIReplyToActiveCard()
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .disabled(activeCardID == nil)
+
+                        Button("자식 카드로 추가") {
+                            addLatestAIReplyAsChildCard()
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .disabled(activeCardID == nil)
+
+                        Button("대안 3개 요청") {
+                            prepareAlternativeRequest()
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
                 
                 HStack(alignment: .bottom, spacing: 10) {
                     if #available(macOS 13.0, *) {
@@ -148,6 +1688,9 @@ extension ScenarioWriterView {
                             .background(appearance == "light" ? Color.black.opacity(0.03) : Color.white.opacity(0.05))
                             .cornerRadius(10)
                             .focused($isAIChatInputFocused)
+                            .onKeyPress(phases: [.down]) { press in
+                                handleAIChatInputKeyPress(press)
+                            }
                             .onSubmit {
                                 sendAIChatMessage()
                             }
@@ -159,11 +1702,27 @@ extension ScenarioWriterView {
                             .background(appearance == "light" ? Color.black.opacity(0.03) : Color.white.opacity(0.05))
                             .cornerRadius(10)
                             .focused($isAIChatInputFocused)
+                            .onKeyPress(phases: [.down]) { press in
+                                handleAIChatInputKeyPress(press)
+                            }
                             .onSubmit {
                                 sendAIChatMessage()
                             }
                     }
                         
+                    if isAIChatLoading {
+                        Button(action: {
+                            cancelAIChatRequest(showMessage: true)
+                        }) {
+                            Image(systemName: "stop.circle.fill")
+                                .font(.system(size: 24))
+                                .foregroundColor(.orange)
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.bottom, 7)
+                        .help("현재 AI 요청 중단")
+                    }
+
                     Button(action: {
                         sendAIChatMessage()
                     }) {
@@ -180,83 +1739,516 @@ extension ScenarioWriterView {
             .background(appearance == "light" ? Color.white : Color(white: 0.12))
         }
         .onAppear {
+            loadPersistedAIThreadsIfNeeded()
+            loadPersistedAIEmbeddingIndexIfNeeded()
+            isMainViewFocused = false
             isAIChatInputFocused = true
+            syncActiveThreadSelectedScopeWithCurrentSelection()
+        }
+        .onChange(of: scenario.id) { _, _ in
+            handleAIChatScenarioChange()
+        }
+        .onChange(of: selectedCardIDs) { _, _ in
+            syncActiveThreadSelectedScopeWithCurrentSelection()
+        }
+        .onChange(of: activeCardID) { _, _ in
+            syncActiveThreadSelectedScopeWithCurrentSelection()
+        }
+        .onDisappear {
+            flushAIThreadsPersistence()
+            flushAIEmbeddingPersistence()
+            cancelAIChatRequest()
         }
     }
 
     func sendAIChatMessage() {
+        ensureAIChatThreadSelection()
+        guard let threadID = activeAIChatThreadID else { return }
+
         let text = aiChatInput.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !isAIChatLoading else { return }
         
         aiChatInput = ""
-        aiChatMessages.append(AIChatMessage(role: "user", text: text))
+        appendAIChatMessage(AIChatMessage(role: "user", text: text), to: threadID)
         
-        requestAIChatResponse()
+        requestAIChatResponse(for: threadID)
     }
 
-    func requestAIChatResponse() {
-        let clampedContext = buildAIChatContext()
-        let chatHistory = buildAIChatHistory()
-        let prompt = buildAIChatPrompt(context: clampedContext, history: chatHistory)
+    func resolvedRAGEmbeddingModelCandidates(preferredModel: String? = nil) -> [String] {
+        var candidates: [String] = []
+        if let preferredModel {
+            let trimmed = preferredModel.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                candidates.append(trimmed)
+            }
+        }
+        let loadedModel = aiEmbeddingIndexModelID.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !loadedModel.isEmpty, !candidates.contains(loadedModel) {
+            candidates.append(loadedModel)
+        }
+        for fallback in aiRAGEmbeddingModelCandidates where !candidates.contains(fallback) {
+            candidates.append(fallback)
+        }
+        if candidates.isEmpty {
+            candidates = ["gemini-embedding-001"]
+        }
+        return candidates
+    }
+
+    func clippedEmbeddingInput(for card: AIChatCardSnapshot) -> String {
+        let raw = "[\(card.category)]\n\(card.content)"
+        let normalized = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        let maxLength = 1800
+        if normalized.count <= maxLength { return normalized }
+        let index = normalized.index(normalized.startIndex, offsetBy: maxLength)
+        return String(normalized[..<index])
+    }
+
+    func ragSearchTokens(from text: String) -> [String] {
+        let allowed = text.lowercased().unicodeScalars.map { scalar -> Character in
+            if CharacterSet.alphanumerics.contains(scalar) || (scalar.value >= 0xAC00 && scalar.value <= 0xD7A3) {
+                return Character(scalar)
+            }
+            return " "
+        }
+        let normalized = String(allowed)
+        let words = normalized.split(whereSeparator: { $0.isWhitespace }).map(String.init)
+        var tokens: [String] = []
+        tokens.reserveCapacity(words.count * 2)
+        for word in words {
+            let trimmed = word.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard trimmed.count >= 2 else { continue }
+            tokens.append(trimmed)
+            if trimmed.unicodeScalars.contains(where: { $0.value >= 0xAC00 && $0.value <= 0xD7A3 }) {
+                let chars = Array(trimmed)
+                if chars.count >= 2 {
+                    for index in 0..<(chars.count - 1) {
+                        tokens.append(String(chars[index...index + 1]))
+                    }
+                }
+            }
+        }
+        return tokens
+    }
+
+    private func vectorStoreDocuments(
+        cards: [AIChatCardSnapshot],
+        digests: [UUID: AICardDigest],
+        embeddings: [UUID: AIEmbeddingRecord]
+    ) -> [AIVectorSQLiteStore.Document] {
+        cards.compactMap { card in
+            guard let digest = digests[card.id] else { return nil }
+            guard let embedding = embeddings[card.id], !embedding.vector.isEmpty else { return nil }
+            let mergedSearchText = [
+                card.category,
+                digest.shortSummary,
+                digest.keyFacts.joined(separator: " "),
+                clippedEmbeddingInput(for: card)
+            ]
+            .joined(separator: " ")
+            let tokens = ragSearchTokens(from: mergedSearchText)
+            let tokenTF = Dictionary(tokens.map { ($0, 1) }, uniquingKeysWith: +)
+            return AIVectorSQLiteStore.Document(
+                cardID: card.id,
+                contentHash: embedding.contentHash,
+                category: card.category,
+                orderIndex: card.orderIndex,
+                updatedAt: embedding.updatedAt,
+                vector: embedding.vector,
+                searchText: mergedSearchText,
+                tokenTF: tokenTF
+            )
+        }
+    }
+
+    func cosineSimilarity(_ lhs: [Float], _ rhs: [Float]) -> Double {
+        guard !lhs.isEmpty, lhs.count == rhs.count else { return 0 }
+        var dot: Double = 0
+        var lhsNormSquared: Double = 0
+        var rhsNormSquared: Double = 0
+        for index in lhs.indices {
+            let l = Double(lhs[index])
+            let r = Double(rhs[index])
+            dot += l * r
+            lhsNormSquared += l * l
+            rhsNormSquared += r * r
+        }
+        guard lhsNormSquared > 0, rhsNormSquared > 0 else { return 0 }
+        return dot / (sqrt(lhsNormSquared) * sqrt(rhsNormSquared))
+    }
+
+    func requestEmbeddingsForTexts(
+        _ texts: [String],
+        apiKey: String,
+        taskType: String,
+        modelCandidates: [String],
+        requestTimeout: TimeInterval
+    ) async throws -> (vectors: [[Float]], model: String) {
+        guard !texts.isEmpty else {
+            return ([], modelCandidates.first ?? "gemini-embedding-001")
+        }
+
+        var lastError: Error?
+        for model in modelCandidates {
+            do {
+                if texts.count == 1 {
+                    let vector = try await GeminiService.embedText(
+                        texts[0],
+                        model: model,
+                        apiKey: apiKey,
+                        taskType: taskType,
+                        requestTimeout: requestTimeout
+                    )
+                    return ([vector], model)
+                }
+
+                let chunkSize = 24
+                var merged: [[Float]] = []
+                merged.reserveCapacity(texts.count)
+                var start = 0
+                while start < texts.count {
+                    let end = min(start + chunkSize, texts.count)
+                    let chunk = Array(texts[start..<end])
+                    let chunkVectors = try await GeminiService.batchEmbedTexts(
+                        chunk,
+                        model: model,
+                        apiKey: apiKey,
+                        taskType: taskType,
+                        requestTimeout: requestTimeout
+                    )
+                    guard chunkVectors.count == chunk.count else {
+                        throw GeminiServiceError.invalidResponse
+                    }
+                    merged.append(contentsOf: chunkVectors)
+                    start = end
+                }
+                return (merged, model)
+            } catch {
+                lastError = error
+            }
+        }
+        throw lastError ?? GeminiServiceError.invalidResponse
+    }
+
+    func buildSemanticRAGContext(
+        query: String,
+        allCards: [AIChatCardSnapshot],
+        scopedCards: [AIChatCardSnapshot],
+        digests: [UUID: AICardDigest],
+        existingIndex: [UUID: AIEmbeddingRecord],
+        apiKey: String,
+        vectorDBURL: URL
+    ) async -> (semanticContext: String?, updatedIndex: [UUID: AIEmbeddingRecord], resolvedModel: String?) {
+        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedQuery.isEmpty else {
+            return (nil, existingIndex, nil)
+        }
+
+        let visibleCards = allCards.filter { !$0.isArchived && !$0.isFloating }
+        guard !visibleCards.isEmpty else {
+            return (nil, existingIndex, nil)
+        }
+
+        var updatedIndex = existingIndex
+        let validIDs = Set(visibleCards.map(\.id))
+        for cardID in Array(updatedIndex.keys) where !validIDs.contains(cardID) {
+            updatedIndex.removeValue(forKey: cardID)
+        }
+
+        var cardsToEmbed: [AIChatCardSnapshot] = []
+        cardsToEmbed.reserveCapacity(visibleCards.count)
+        for card in visibleCards {
+            let contentHash = card.content.trimmingCharacters(in: .whitespacesAndNewlines).hashValue
+            if let existing = updatedIndex[card.id],
+               existing.contentHash == contentHash,
+               !existing.vector.isEmpty {
+                continue
+            }
+            cardsToEmbed.append(card)
+        }
+
+        var embeddingModelUsed: String? = nil
+        let modelCandidates = resolvedRAGEmbeddingModelCandidates()
+        if !cardsToEmbed.isEmpty {
+            let texts = cardsToEmbed.map { clippedEmbeddingInput(for: $0) }
+            do {
+                let result = try await requestEmbeddingsForTexts(
+                    texts,
+                    apiKey: apiKey,
+                    taskType: "RETRIEVAL_DOCUMENT",
+                    modelCandidates: modelCandidates,
+                    requestTimeout: 80
+                )
+                let vectors = result.vectors
+                guard vectors.count == cardsToEmbed.count else {
+                    return (nil, existingIndex, nil)
+                }
+                embeddingModelUsed = result.model
+                for (index, card) in cardsToEmbed.enumerated() {
+                    let vector = vectors[index]
+                    guard !vector.isEmpty else { continue }
+                    let contentHash = card.content.trimmingCharacters(in: .whitespacesAndNewlines).hashValue
+                    updatedIndex[card.id] = AIEmbeddingRecord(
+                        cardID: card.id,
+                        contentHash: contentHash,
+                        vector: vector,
+                        updatedAt: Date()
+                    )
+                }
+            } catch {
+                return (nil, existingIndex, nil)
+            }
+        }
+
+        let validCardIDs = Set(visibleCards.map(\.id))
+        let sqliteDocuments = vectorStoreDocuments(cards: visibleCards, digests: digests, embeddings: updatedIndex)
+        if !sqliteDocuments.isEmpty {
+            do {
+                try await AIVectorSQLiteStore.shared.syncIndex(
+                    dbURL: vectorDBURL,
+                    documents: sqliteDocuments,
+                    validCardIDs: validCardIDs
+                )
+            } catch {
+                // Keep chat flow alive even if local vector store maintenance fails.
+            }
+        }
+
+        let resolvedModelCandidates = resolvedRAGEmbeddingModelCandidates(preferredModel: embeddingModelUsed)
+        var queryVector: [Float] = []
+        var queryModel: String? = nil
+        do {
+            let result = try await requestEmbeddingsForTexts(
+                [trimmedQuery],
+                apiKey: apiKey,
+                taskType: "RETRIEVAL_QUERY",
+                modelCandidates: resolvedModelCandidates,
+                requestTimeout: 45
+            )
+            queryVector = result.vectors.first ?? []
+            queryModel = result.model
+        } catch {
+            queryVector = []
+        }
+
+        guard !queryVector.isEmpty else {
+            return (nil, updatedIndex, embeddingModelUsed)
+        }
+
+        let scopedIDSet = Set(scopedCards.map(\.id))
+        let queryTokens = ragSearchTokens(from: trimmedQuery)
+        let candidateLimit = max(aiRAGTopCardCount * 24, 140)
+        let lexicalCandidates: [UUID]
+        if queryTokens.isEmpty {
+            lexicalCandidates = []
+        } else {
+            lexicalCandidates = (try? await AIVectorSQLiteStore.shared.queryCandidateIDs(
+                dbURL: vectorDBURL,
+                queryTokens: queryTokens,
+                limit: candidateLimit
+            )) ?? []
+        }
+        let candidateIDSet = Set(lexicalCandidates)
+        let retrievalCards = candidateIDSet.isEmpty
+            ? visibleCards
+            : visibleCards.filter { candidateIDSet.contains($0.id) }
+
+        var scoredCards: [(card: AIChatCardSnapshot, score: Double)] = []
+        scoredCards.reserveCapacity(retrievalCards.count)
+        for card in retrievalCards {
+            guard let record = updatedIndex[card.id], !record.vector.isEmpty else { continue }
+            guard record.vector.count == queryVector.count else { continue }
+            var score = cosineSimilarity(queryVector, record.vector)
+            guard score > 0 else { continue }
+            if scopedIDSet.contains(card.id) {
+                score += 0.08
+            }
+            scoredCards.append((card: card, score: score))
+        }
+
+        guard !scoredCards.isEmpty else {
+            return (nil, updatedIndex, queryModel ?? embeddingModelUsed)
+        }
+
+        scoredCards.sort { lhs, rhs in
+            if lhs.score != rhs.score { return lhs.score > rhs.score }
+            if lhs.card.orderIndex != rhs.card.orderIndex { return lhs.card.orderIndex < rhs.card.orderIndex }
+            return lhs.card.createdAt < rhs.card.createdAt
+        }
+
+        let topCards = scoredCards.prefix(aiRAGTopCardCount)
+        var lines: [String] = []
+        var budget = 0
+        let maxBudget = 900
+        for item in topCards {
+            guard let digest = digests[item.card.id] else { continue }
+            let marker = scopedIDSet.contains(item.card.id) ? "선택 연관" : "질문 연관"
+            let facts = digest.keyFacts.prefix(2).joined(separator: " / ")
+            let scoreText = String(format: "%.2f", min(max(item.score, 0), 0.99))
+            let line = facts.isEmpty
+                ? "[\(marker)][\(item.card.category)] \(digest.shortSummary) (유사도 \(scoreText))"
+                : "[\(marker)][\(item.card.category)] \(digest.shortSummary) | \(facts) (유사도 \(scoreText))"
+            let next = budget + line.count + 1
+            if next > maxBudget { break }
+            lines.append(line)
+            budget = next
+        }
+
+        guard !lines.isEmpty else {
+            return (nil, updatedIndex, queryModel ?? embeddingModelUsed)
+        }
+        return (lines.joined(separator: "\n"), updatedIndex, queryModel ?? embeddingModelUsed)
+    }
+
+    func requestAIChatResponse(for threadID: UUID) {
+        cancelAIChatRequest()
+        syncSelectedScopeForThread(threadID)
+        guard let thread = aiChatThreads.first(where: { $0.id == threadID }) else { return }
+
+        let requestID = UUID()
+        let allCardSnapshots = scenario.cards.map { card in
+            AIChatCardSnapshot(
+                id: card.id,
+                parentID: card.parent?.id,
+                category: card.category ?? "미분류",
+                content: card.content,
+                orderIndex: card.orderIndex,
+                createdAt: card.createdAt,
+                isArchived: card.isArchived,
+                isFloating: card.isFloating
+            )
+        }
+        let scopedCards = resolvedScopedCards(for: thread.scope, allCards: allCardSnapshots)
+        let scopeText = scopeLabel(for: thread.scope, cardCount: scopedCards.count)
+        let historySnapshots = messagesForAIThread(threadID).map { message in
+            AIChatMessageSnapshot(role: message.role, text: message.text)
+        }
+        let lastUserQuestion = historySnapshots.last(where: { $0.role == "user" })?.text ?? ""
+        let userTurnCount = historySnapshots.filter { $0.role == "user" }.count
+        let shouldRefreshRollingSummary = thread.rollingSummary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || userTurnCount % 4 == 0
+        let previousRollingSummary = thread.rollingSummary
+        let digestCacheSnapshot = aiCardDigestCache
+        let embeddingIndexSnapshot = aiEmbeddingIndexByCardID
+        let vectorDBURL = store.aiVectorIndexURL(for: scenario.id)
+        let resolvedModel = currentGeminiModel()
 
         isAIChatLoading = true
+        aiChatActiveRequestID = requestID
         setAIStatus(nil)
 
-        Task { @MainActor in
-            defer { isAIChatLoading = false }
+        aiChatRequestTask = Task {
+            var preparedContext: AIChatPromptBuildResult?
+            var preparedEmbeddingIndex = embeddingIndexSnapshot
+            var preparedEmbeddingModel = aiEmbeddingIndexModelID
             do {
                 let apiKey = try loadGeminiAPIKeyForChat()
-                let response = try await requestGeminiChatResponse(prompt: prompt, apiKey: apiKey)
-                aiChatMessages.append(AIChatMessage(role: "model", text: response))
+                let semanticRAG = await buildSemanticRAGContext(
+                    query: lastUserQuestion,
+                    allCards: allCardSnapshots,
+                    scopedCards: scopedCards,
+                    digests: digestCacheSnapshot,
+                    existingIndex: embeddingIndexSnapshot,
+                    apiKey: apiKey,
+                    vectorDBURL: vectorDBURL
+                )
+                preparedEmbeddingIndex = semanticRAG.updatedIndex
+                if let resolvedEmbeddingModel = semanticRAG.resolvedModel {
+                    preparedEmbeddingModel = resolvedEmbeddingModel
+                }
+
+                let buildResult = AIChatPromptBuilder.buildPrompt(
+                    allCards: allCardSnapshots,
+                    scopedCards: scopedCards,
+                    scopeLabel: scopeText,
+                    history: historySnapshots,
+                    lastUserMessage: lastUserQuestion,
+                    previousRollingSummary: previousRollingSummary,
+                    digestCache: digestCacheSnapshot,
+                    refreshRollingSummary: shouldRefreshRollingSummary,
+                    semanticRAGContext: semanticRAG.semanticContext
+                )
+                preparedContext = buildResult
+                try Task.checkCancellation()
+
+                let response = try await requestGeminiChatResponse(
+                    prompt: buildResult.prompt,
+                    apiKey: apiKey,
+                    model: resolvedModel
+                )
+                try Task.checkCancellation()
+
+                await MainActor.run {
+                    guard aiChatActiveRequestID == requestID else { return }
+                    aiCardDigestCache = buildResult.updatedDigestCache
+                    aiEmbeddingIndexByCardID = preparedEmbeddingIndex
+                    aiEmbeddingIndexModelID = preparedEmbeddingModel
+                    scheduleAIEmbeddingPersistence()
+                    aiLastContextPreview = buildResult.contextPreview
+                    updateAIChatThread(threadID) { thread in
+                        thread.rollingSummary = buildResult.rollingSummary
+                        var totalUsage = thread.tokenUsage ?? .zero
+                        totalUsage.add(response.usage)
+                        thread.tokenUsage = totalUsage
+                    }
+                    appendAIChatMessage(AIChatMessage(role: "model", text: response.text), to: threadID)
+                    finishAIChatRequest()
+                }
+            } catch is CancellationError {
+                await MainActor.run {
+                    guard aiChatActiveRequestID == requestID else { return }
+                    if let preparedContext {
+                        aiCardDigestCache = preparedContext.updatedDigestCache
+                        aiEmbeddingIndexByCardID = preparedEmbeddingIndex
+                        aiEmbeddingIndexModelID = preparedEmbeddingModel
+                        scheduleAIEmbeddingPersistence()
+                        aiLastContextPreview = preparedContext.contextPreview
+                        updateAIChatThread(threadID) { thread in
+                            thread.rollingSummary = preparedContext.rollingSummary
+                        }
+                    }
+                    finishAIChatRequest()
+                }
             } catch {
-                setAIStatusError(error.localizedDescription)
-                aiChatMessages.append(AIChatMessage(role: "model", text: "오류가 발생했습니다: \(error.localizedDescription)"))
+                await MainActor.run {
+                    guard aiChatActiveRequestID == requestID else { return }
+                    if let preparedContext {
+                        aiCardDigestCache = preparedContext.updatedDigestCache
+                        aiEmbeddingIndexByCardID = preparedEmbeddingIndex
+                        aiEmbeddingIndexModelID = preparedEmbeddingModel
+                        scheduleAIEmbeddingPersistence()
+                        aiLastContextPreview = preparedContext.contextPreview
+                        updateAIChatThread(threadID) { thread in
+                            thread.rollingSummary = preparedContext.rollingSummary
+                        }
+                    }
+                    setAIStatusError(error.localizedDescription)
+                    appendAIChatMessage(
+                        AIChatMessage(role: "model", text: "오류가 발생했습니다: \(error.localizedDescription)"),
+                        to: threadID
+                    )
+                    finishAIChatRequest()
+                }
             }
         }
     }
 
-    func buildAIChatContext() -> String {
-        let allCards = scenario.cards.filter { !$0.isArchived && !$0.isFloating }.sorted {
-            if $0.orderIndex != $1.orderIndex { return $0.orderIndex < $1.orderIndex }
-            return $0.createdAt < $1.createdAt
+    func cancelAIChatRequest(showMessage: Bool = false) {
+        aiChatRequestTask?.cancel()
+        aiChatRequestTask = nil
+        aiChatActiveRequestID = nil
+        if isAIChatLoading {
+            isAIChatLoading = false
+            if showMessage {
+                setAIStatus("AI 요청을 중단했습니다.")
+            }
         }
-
-        var contextStr = ""
-        for card in allCards {
-            contextStr += "[\(card.category ?? "미분류")] \(card.content)\n"
-        }
-
-        return clampedAIText(contextStr, maxLength: 10000, preserveLineBreak: true)
     }
 
-    func buildAIChatHistory() -> String {
-        var chatHistory = ""
-        let recentMessages = Array(aiChatMessages.suffix(20))
-        for msg in recentMessages {
-            let roleName = msg.role == "user" ? "사용자" : "AI"
-            let compactText = clampedAIText(msg.text, maxLength: 600, preserveLineBreak: true)
-            chatHistory += "\(roleName): \(compactText)\n\n"
-        }
-
-        return clampedAIText(chatHistory, maxLength: 6000, preserveLineBreak: true)
-    }
-
-    func buildAIChatPrompt(context: String, history: String) -> String {
-        """
-        당신은 이 시나리오를 함께 쓰는 전문 보조 작가다. 
-        아래는 현재 메인 작업창에 존재하는 모든 시나리오 카드들(플롯 및 노트 라인)의 내용이다.
-        이 맥락을 완벽하게 숙지하고 사용자의 질문에 답해야 한다.
-        
-        [현재 시나리오 내용 시작]
-        \(context)
-        [현재 시나리오 내용 끝]
-        
-        [지금까지의 대화 기록]
-        \(history)
-        
-        위 시나리오 맥락과 지금까지의 대화를 바탕으로, 사용자의 마지막 질문에 한국어로 친절하게 답변하라. 
-        마크다운을 적절히 사용하여 가독성 있게 작성하라. JSON 형식을 사용하지 말고 순수 텍스트(마크다운 포함)로만 출력할 것.
-        """
+    func finishAIChatRequest() {
+        aiChatRequestTask = nil
+        aiChatActiveRequestID = nil
+        isAIChatLoading = false
     }
 
     func loadGeminiAPIKeyForChat() throws -> String {
@@ -266,12 +2258,137 @@ extension ScenarioWriterView {
         return apiKey
     }
 
-    func requestGeminiChatResponse(prompt: String, apiKey: String) async throws -> String {
-        try await GeminiService.generateText(
-            prompt: prompt,
-            model: currentGeminiModel(),
-            apiKey: apiKey
+    private func requestGeminiChatResponse(
+        prompt: String,
+        apiKey: String,
+        model: String
+    ) async throws -> AIChatResponseResult {
+        let maxContinuationChunks = 4
+        var continuationPrompt = prompt
+        var mergedResponse = ""
+        var generatedChunks = 0
+        var accumulatedUsage = AIChatTokenUsage.zero
+
+        while true {
+            try Task.checkCancellation()
+            let chunk = try await requestGeminiChatChunk(
+                prompt: continuationPrompt,
+                apiKey: apiKey,
+                model: model
+            )
+
+            mergedResponse = mergeContinuationResponse(existing: mergedResponse, incoming: chunk.text)
+            accumulatedUsage.add(aiTokenUsage(from: chunk.usage))
+            generatedChunks += 1
+
+            let finishReason = chunk.finishReason?.uppercased()
+            let wasTruncated = finishReason == "MAX_TOKENS"
+            guard wasTruncated, generatedChunks < maxContinuationChunks else {
+                break
+            }
+
+            continuationPrompt = continuationPromptForChat(
+                originalPrompt: prompt,
+                partialResponse: mergedResponse
+            )
+        }
+
+        let finalResponse = mergedResponse.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !finalResponse.isEmpty else {
+            throw GeminiServiceError.invalidResponse
+        }
+        return AIChatResponseResult(text: finalResponse, usage: accumulatedUsage)
+    }
+
+    func requestGeminiChatChunk(
+        prompt: String,
+        apiKey: String,
+        model: String
+    ) async throws -> GeminiService.TextGenerationResult {
+        let attempts: [(timeout: TimeInterval, maxOutputTokens: Int?)] = [
+            (75, nil),
+            (120, nil)
+        ]
+        var lastError: Error?
+
+        for (index, attempt) in attempts.enumerated() {
+            try Task.checkCancellation()
+            do {
+                return try await GeminiService.generateTextWithMetadata(
+                    prompt: prompt,
+                    model: model,
+                    apiKey: apiKey,
+                    maxOutputTokens: attempt.maxOutputTokens,
+                    requestTimeout: attempt.timeout,
+                    temperature: 0.95,
+                    topP: 0.95
+                )
+            } catch {
+                if error is CancellationError {
+                    throw error
+                }
+                lastError = error
+                let isTimeout = (error as? URLError)?.code == .timedOut
+                    || error.localizedDescription.localizedCaseInsensitiveContains("timed out")
+                guard isTimeout, index < attempts.count - 1 else {
+                    throw error
+                }
+                try? await Task.sleep(nanoseconds: 800_000_000)
+            }
+        }
+
+        throw lastError ?? GeminiServiceError.invalidResponse
+    }
+
+    func aiTokenUsage(from usage: GeminiService.TokenUsage) -> AIChatTokenUsage {
+        AIChatTokenUsage(
+            promptTokens: max(usage.promptTokens, 0),
+            outputTokens: max(usage.outputTokens, 0),
+            totalTokens: max(usage.totalTokens, 0)
         )
+    }
+
+    func continuationPromptForChat(
+        originalPrompt: String,
+        partialResponse: String
+    ) -> String {
+        let responseTail = String(partialResponse.suffix(1400))
+        return """
+        \(originalPrompt)
+
+        [중요]
+        이전 출력이 길이 제한으로 중간에 끊겼습니다.
+        아래는 이미 출력된 답변의 마지막 부분입니다.
+        \"\"\"
+        \(responseTail)
+        \"\"\"
+        위 문장 바로 다음 문장부터 이어서 작성하세요.
+        - 이미 출력된 내용 반복 금지
+        - 번호를 처음부터 다시 시작 금지
+        - 사과/메타 설명 금지
+        """
+    }
+
+    func mergeContinuationResponse(existing: String, incoming: String) -> String {
+        let left = existing.trimmingCharacters(in: .whitespacesAndNewlines)
+        let right = incoming.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !left.isEmpty else { return right }
+        guard !right.isEmpty else { return left }
+
+        let maxOverlap = min(280, min(left.count, right.count))
+        var overlapLength = 0
+        if maxOverlap >= 20 {
+            for length in stride(from: maxOverlap, through: 20, by: -1) {
+                if left.suffix(length) == right.prefix(length) {
+                    overlapLength = length
+                    break
+                }
+            }
+        }
+
+        let mergedRight = overlapLength > 0 ? String(right.dropFirst(overlapLength)) : right
+        guard !mergedRight.isEmpty else { return left }
+        return left + "\n" + mergedRight
     }
 
     // MARK: - Timeline AI Controls
@@ -678,7 +2795,7 @@ extension ScenarioWriterView {
 
     func currentGeminiModel() -> String {
         let modelName = geminiModelID.trimmingCharacters(in: .whitespacesAndNewlines)
-        return normalizeGeminiModelID(modelName.isEmpty ? "gemini-3-pro-preview" : modelName)
+        return normalizeGeminiModelID(modelName.isEmpty ? "gemini-3.1-pro-preview" : modelName)
     }
 
     func normalizeGeminiModelID(_ raw: String) -> String {

@@ -67,6 +67,8 @@ func normalizeGeminiModelIDValue(_ raw: String) -> String {
     let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
     let lowered = trimmed.lowercased()
     switch lowered {
+    case "gemini-3.1-pro", "gemini-3.1-pro-latest":
+        return "gemini-3.1-pro-preview"
     case "gemini-3-pro", "gemini-3.0-pro", "gemini-3-pro-latest":
         return "gemini-3-pro-preview"
     case "gemini-3-flash-latest":

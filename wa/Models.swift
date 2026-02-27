@@ -345,6 +345,9 @@ final class FileStore: ObservableObject {
     private let scenariosFile = "scenarios.json"
     private let cardsFile = "cards_index.json"
     private let historyFile = "history.json"
+    private let aiThreadsFile = "ai_threads.json"
+    private let aiEmbeddingIndexFile = "ai_embedding_index.json"
+    private let aiVectorIndexFile = "ai_vector_index.sqlite"
     private let scenarioFolderPrefix = "scenario_"
     private let saveDebounceInterval: TimeInterval = 0.55
     private var scenarioFolderByID: [UUID: String] = [:]
@@ -375,6 +378,8 @@ final class FileStore: ObservableObject {
     private nonisolated(unsafe) var lastSavedCardsIndexData: [UUID: Data] = [:]
     private nonisolated(unsafe) var lastSavedHistoryData: [UUID: Data] = [:]
     private nonisolated(unsafe) var lastSavedCardContent: [UUID: [UUID: String]] = [:]
+    private nonisolated(unsafe) var lastSavedAIThreadsData: [UUID: Data] = [:]
+    private nonisolated(unsafe) var lastSavedAIEmbeddingIndexData: [UUID: Data] = [:]
 
     init(folderURL: URL) {
         self.folderURL = folderURL
@@ -755,6 +760,7 @@ final class FileStore: ObservableObject {
             lastSavedCardsIndexData = lastSavedCardsIndexData.filter { activeScenarioIDs.contains($0.key) }
             lastSavedHistoryData = lastSavedHistoryData.filter { activeScenarioIDs.contains($0.key) }
             lastSavedCardContent = lastSavedCardContent.filter { activeScenarioIDs.contains($0.key) }
+            lastSavedAIThreadsData = lastSavedAIThreadsData.filter { activeScenarioIDs.contains($0.key) }
 
         } catch { }
     }
@@ -805,6 +811,7 @@ final class FileStore: ObservableObject {
             try? fileManager.removeItem(at: folder)
             scenarioFolderByID.removeValue(forKey: scenario.id)
         }
+        lastSavedAIThreadsData.removeValue(forKey: scenario.id)
         saveAll(immediate: true)
     }
 
@@ -901,6 +908,86 @@ final class FileStore: ObservableObject {
         let folderName = "\(scenarioFolderPrefix)\(scenarioID.uuidString)"
         scenarioFolderByID[scenarioID] = folderName
         return folderName
+    }
+
+    private func aiThreadsURL(for scenarioID: UUID) -> URL {
+        let folderName = ensureScenarioFolder(for: scenarioID)
+        let scenarioFolder = folderURL.appendingPathComponent(folderName)
+        return scenarioFolder.appendingPathComponent(aiThreadsFile)
+    }
+
+    private func aiEmbeddingIndexURL(for scenarioID: UUID) -> URL {
+        let folderName = ensureScenarioFolder(for: scenarioID)
+        let scenarioFolder = folderURL.appendingPathComponent(folderName)
+        return scenarioFolder.appendingPathComponent(aiEmbeddingIndexFile)
+    }
+
+    func aiVectorIndexURL(for scenarioID: UUID) -> URL {
+        let folderName = ensureScenarioFolder(for: scenarioID)
+        let scenarioFolder = folderURL.appendingPathComponent(folderName)
+        return scenarioFolder.appendingPathComponent(aiVectorIndexFile)
+    }
+
+    func loadAIChatThreadsData(for scenarioID: UUID) async -> Data? {
+        let url = aiThreadsURL(for: scenarioID)
+        return await Task.detached(priority: .utility) {
+            guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+            return try? Data(contentsOf: url)
+        }.value
+    }
+
+    func saveAIChatThreadsData(_ data: Data?, for scenarioID: UUID) {
+        let url = aiThreadsURL(for: scenarioID)
+        let folder = url.deletingLastPathComponent()
+        saveQueue.async { [weak self] in
+            guard let self else { return }
+            if let data {
+                if self.lastSavedAIThreadsData[scenarioID] == data {
+                    return
+                }
+                try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                do {
+                    try data.write(to: url, options: .atomic)
+                    self.lastSavedAIThreadsData[scenarioID] = data
+                } catch { }
+            } else {
+                if FileManager.default.fileExists(atPath: url.path) {
+                    try? FileManager.default.removeItem(at: url)
+                }
+                self.lastSavedAIThreadsData.removeValue(forKey: scenarioID)
+            }
+        }
+    }
+
+    func loadAIEmbeddingIndexData(for scenarioID: UUID) async -> Data? {
+        let url = aiEmbeddingIndexURL(for: scenarioID)
+        return await Task.detached(priority: .utility) {
+            guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+            return try? Data(contentsOf: url)
+        }.value
+    }
+
+    func saveAIEmbeddingIndexData(_ data: Data?, for scenarioID: UUID) {
+        let url = aiEmbeddingIndexURL(for: scenarioID)
+        let folder = url.deletingLastPathComponent()
+        saveQueue.async { [weak self] in
+            guard let self else { return }
+            if let data {
+                if self.lastSavedAIEmbeddingIndexData[scenarioID] == data {
+                    return
+                }
+                try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                do {
+                    try data.write(to: url, options: .atomic)
+                    self.lastSavedAIEmbeddingIndexData[scenarioID] = data
+                } catch { }
+            } else {
+                if FileManager.default.fileExists(atPath: url.path) {
+                    try? FileManager.default.removeItem(at: url)
+                }
+                self.lastSavedAIEmbeddingIndexData.removeValue(forKey: scenarioID)
+            }
+        }
     }
 
     private func readJSON<T: Decodable>(url: URL, decoder: JSONDecoder) async throws -> T? {

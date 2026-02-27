@@ -62,7 +62,7 @@ struct ScenarioWriterView: View {
     @AppStorage("focusTypewriterBaseline") var focusTypewriterBaseline: Double = 0.60
     @AppStorage("mainCardLineSpacingValueV2") var mainCardLineSpacingValue: Double = 5.0
     @AppStorage("mainWorkspaceZoomScale") var mainWorkspaceZoomScale: Double = 1.0
-    @AppStorage("geminiModelID") var geminiModelID: String = "gemini-3-pro-preview"
+    @AppStorage("geminiModelID") var geminiModelID: String = "gemini-3.1-pro-preview"
     @AppStorage("focusModeWindowBackgroundActive") var focusModeWindowBackgroundActive: Bool = false
     @AppStorage("lastEditedScenarioID") var lastEditedScenarioID: String = ""
     @AppStorage("lastEditedCardID") var lastEditedCardID: String = ""
@@ -85,9 +85,20 @@ struct ScenarioWriterView: View {
     
     @State var showTimeline: Bool = false
     @State var showAIChat: Bool = false
-    @State var aiChatMessages: [AIChatMessage] = []
+    @State var aiChatThreads: [AIChatThread] = []
+    @State var activeAIChatThreadID: UUID? = nil
     @State var aiChatInput: String = ""
+    @State var aiCardDigestCache: [UUID: AICardDigest] = [:]
+    @State var aiEmbeddingIndexByCardID: [UUID: AIEmbeddingRecord] = [:]
+    @State var aiEmbeddingIndexModelID: String = "gemini-embedding-001"
+    @State var aiLastContextPreview: AIChatContextPreview? = nil
+    @State var aiThreadsLoadedScenarioID: UUID? = nil
+    @State var aiEmbeddingIndexLoadedScenarioID: UUID? = nil
+    @State var aiThreadsSaveWorkItem: DispatchWorkItem? = nil
+    @State var aiEmbeddingIndexSaveWorkItem: DispatchWorkItem? = nil
     @State var isAIChatLoading: Bool = false
+    @State var aiChatRequestTask: Task<Void, Never>? = nil
+    @State var aiChatActiveRequestID: UUID? = nil
     @FocusState var isAIChatInputFocused: Bool
 
     @State var exportMessage: String? = nil

@@ -36,15 +36,29 @@ enum GeminiServiceError: LocalizedError {
 }
 
 struct GeminiService {
-    private static let defaultModelID = "gemini-3-pro-preview"
+    private static let defaultModelID = "gemini-3.1-pro-preview"
     private static let apiVersions = ["v1", "v1beta"]
+
+    struct TokenUsage: Sendable {
+        let promptTokens: Int
+        let outputTokens: Int
+        let totalTokens: Int
+
+        static let zero = TokenUsage(promptTokens: 0, outputTokens: 0, totalTokens: 0)
+    }
+
+    struct TextGenerationResult: Sendable {
+        let text: String
+        let finishReason: String?
+        let usage: TokenUsage
+    }
 
     static func generateSuggestions(
         prompt: String,
         model: String,
         apiKey: String
     ) async throws -> [GeminiSuggestion] {
-        let text = try await generateRawText(
+        let raw = try await generateRawText(
             prompt: prompt,
             model: model,
             apiKey: apiKey,
@@ -52,6 +66,7 @@ struct GeminiService {
             temperature: 0.9,
             topP: 0.95
         )
+        let text = raw.text
 
         let suggestions = try decodeSuggestions(from: text)
         guard suggestions.count >= 5 else {
@@ -63,21 +78,157 @@ struct GeminiService {
     static func generateText(
         prompt: String,
         model: String,
-        apiKey: String
+        apiKey: String,
+        maxOutputTokens: Int? = nil,
+        requestTimeout: TimeInterval = 70,
+        allowVersionFallback: Bool = true,
+        temperature: Double = 0.7,
+        topP: Double = 0.9
     ) async throws -> String {
-        let text = try await generateRawText(
+        let result = try await generateTextWithMetadata(
             prompt: prompt,
             model: model,
             apiKey: apiKey,
-            responseMimeType: "text/plain",
-            temperature: 0.7,
-            topP: 0.9
+            maxOutputTokens: maxOutputTokens,
+            requestTimeout: requestTimeout,
+            allowVersionFallback: allowVersionFallback,
+            temperature: temperature,
+            topP: topP
         )
-        let cleaned = stripCodeFence(from: text).trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleaned = stripCodeFence(from: result.text).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleaned.isEmpty else {
             throw GeminiServiceError.invalidResponse
         }
         return cleaned
+    }
+
+    static func generateTextWithMetadata(
+        prompt: String,
+        model: String,
+        apiKey: String,
+        maxOutputTokens: Int? = nil,
+        requestTimeout: TimeInterval = 70,
+        allowVersionFallback: Bool = true,
+        temperature: Double = 0.7,
+        topP: Double = 0.9
+    ) async throws -> TextGenerationResult {
+        let result = try await generateRawText(
+            prompt: prompt,
+            model: model,
+            apiKey: apiKey,
+            responseMimeType: "text/plain",
+            temperature: temperature,
+            topP: topP,
+            maxOutputTokens: maxOutputTokens,
+            requestTimeout: requestTimeout,
+            allowVersionFallback: allowVersionFallback
+        )
+        let cleaned = stripCodeFence(from: result.text).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.isEmpty else {
+            throw GeminiServiceError.invalidResponse
+        }
+        return TextGenerationResult(
+            text: cleaned,
+            finishReason: result.finishReason,
+            usage: result.usage
+        )
+    }
+
+    static func embedText(
+        _ text: String,
+        model: String = "gemini-embedding-001",
+        apiKey: String,
+        taskType: String? = nil,
+        requestTimeout: TimeInterval = 45
+    ) async throws -> [Float] {
+        let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedText.isEmpty else { return [] }
+
+        let trimmedKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedKey.isEmpty else { throw GeminiServiceError.missingAPIKey }
+
+        let resolvedModel = normalizeEmbeddingModelID(model)
+        let pathModel = embeddingPathModel(from: resolvedModel)
+        let requestBody = GeminiEmbedContentRequest(
+            model: "models/\(pathModel)",
+            content: GeminiEmbedContent(parts: [GeminiRequestPart(text: trimmedText)]),
+            taskType: taskType
+        )
+
+        let (data, response) = try await performEmbeddingRequest(
+            apiMethod: "embedContent",
+            pathModel: pathModel,
+            apiKey: trimmedKey,
+            body: requestBody,
+            requestTimeout: requestTimeout
+        )
+        if !(200...299).contains(response.statusCode) {
+            let message = parseAPIErrorMessage(from: data)
+            throw GeminiServiceError.apiFailure(
+                buildAPIErrorMessage(statusCode: response.statusCode, message: message)
+            )
+        }
+
+        let decoded = try JSONDecoder().decode(GeminiEmbedContentResponse.self, from: data)
+        guard let values = decoded.embedding?.values, !values.isEmpty else {
+            throw GeminiServiceError.invalidResponse
+        }
+        return values.map { Float($0) }
+    }
+
+    static func batchEmbedTexts(
+        _ texts: [String],
+        model: String = "gemini-embedding-001",
+        apiKey: String,
+        taskType: String? = nil,
+        requestTimeout: TimeInterval = 80
+    ) async throws -> [[Float]] {
+        let normalizedTexts = texts
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard !normalizedTexts.isEmpty else { return [] }
+
+        let trimmedKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedKey.isEmpty else { throw GeminiServiceError.missingAPIKey }
+
+        let resolvedModel = normalizeEmbeddingModelID(model)
+        let pathModel = embeddingPathModel(from: resolvedModel)
+        let requests = normalizedTexts.map { text in
+            GeminiEmbedContentRequest(
+                model: "models/\(pathModel)",
+                content: GeminiEmbedContent(parts: [GeminiRequestPart(text: text)]),
+                taskType: taskType
+            )
+        }
+
+        let requestBody = GeminiBatchEmbedRequest(requests: requests)
+        let (data, response) = try await performEmbeddingRequest(
+            apiMethod: "batchEmbedContents",
+            pathModel: pathModel,
+            apiKey: trimmedKey,
+            body: requestBody,
+            requestTimeout: requestTimeout
+        )
+        if !(200...299).contains(response.statusCode) {
+            let message = parseAPIErrorMessage(from: data)
+            throw GeminiServiceError.apiFailure(
+                buildAPIErrorMessage(statusCode: response.statusCode, message: message)
+            )
+        }
+
+        let decoded = try JSONDecoder().decode(GeminiBatchEmbedResponse.self, from: data)
+        guard let embeddings = decoded.embeddings, !embeddings.isEmpty else {
+            throw GeminiServiceError.invalidResponse
+        }
+
+        let vectors = embeddings.compactMap { vector -> [Float]? in
+            guard let values = vector.values, !values.isEmpty else { return nil }
+            return values.map { Float($0) }
+        }
+        guard vectors.count == normalizedTexts.count else {
+            throw GeminiServiceError.invalidResponse
+        }
+        return vectors
     }
 
     private static func generateRawText(
@@ -86,8 +237,11 @@ struct GeminiService {
         apiKey: String,
         responseMimeType: String,
         temperature: Double,
-        topP: Double
-    ) async throws -> String {
+        topP: Double,
+        maxOutputTokens: Int? = nil,
+        requestTimeout: TimeInterval = 70,
+        allowVersionFallback: Bool = true
+    ) async throws -> TextGenerationResult {
         let trimmedKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedKey.isEmpty else {
             throw GeminiServiceError.missingAPIKey
@@ -107,12 +261,14 @@ struct GeminiService {
                     apiVersion: version,
                     responseMimeType: responseMimeType,
                     temperature: temperature,
-                    topP: topP
+                    topP: topP,
+                    maxOutputTokens: maxOutputTokens,
+                    requestTimeout: requestTimeout
                 )
 
                 if !(200...299).contains(response.statusCode) {
                     let message = parseAPIErrorMessage(from: data)
-                    if shouldRetryWithNextVersion(
+                    if allowVersionFallback && shouldRetryWithNextVersion(
                         statusCode: response.statusCode,
                         message: message,
                         attemptIndex: index,
@@ -131,8 +287,8 @@ struct GeminiService {
                     throw GeminiServiceError.blocked(blockReason)
                 }
 
-                let text = decoded.candidates?
-                    .first?
+                let firstCandidate = decoded.candidates?.first
+                let text = firstCandidate?
                     .content?
                     .parts?
                     .compactMap { $0.text }
@@ -141,13 +297,50 @@ struct GeminiService {
                 guard let text, !text.isEmpty else {
                     throw GeminiServiceError.invalidResponse
                 }
-                return text
+                return TextGenerationResult(
+                    text: text,
+                    finishReason: firstCandidate?.finishReason,
+                    usage: decodeTokenUsage(from: decoded.usageMetadata)
+                )
             } catch {
                 lastError = error
             }
         }
 
         throw lastError ?? GeminiServiceError.invalidResponse
+    }
+
+    private static func performEmbeddingRequest<T: Encodable>(
+        apiMethod: String,
+        pathModel: String,
+        apiKey: String,
+        body: T,
+        requestTimeout: TimeInterval
+    ) async throws -> (Data, HTTPURLResponse) {
+        guard let encodedModel = pathModel.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) else {
+            throw GeminiServiceError.invalidURL
+        }
+        var components = URLComponents(
+            string: "https://generativelanguage.googleapis.com/v1beta/models/\(encodedModel):\(apiMethod)"
+        )
+        components?.queryItems = [
+            URLQueryItem(name: "key", value: apiKey)
+        ]
+        guard let url = components?.url else {
+            throw GeminiServiceError.invalidURL
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = requestTimeout
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(body)
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw GeminiServiceError.invalidResponse
+        }
+        return (data, httpResponse)
     }
 
     private static func performGenerateContentRequest(
@@ -157,7 +350,9 @@ struct GeminiService {
         apiVersion: String,
         responseMimeType: String,
         temperature: Double,
-        topP: Double
+        topP: Double,
+        maxOutputTokens: Int? = nil,
+        requestTimeout: TimeInterval = 70
     ) async throws -> (Data, HTTPURLResponse) {
         guard let encodedModel = model.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) else {
             throw GeminiServiceError.invalidURL
@@ -174,7 +369,7 @@ struct GeminiService {
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
-        request.timeoutInterval = 70
+        request.timeoutInterval = requestTimeout
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
         let body = GeminiGenerateRequest(
@@ -187,7 +382,8 @@ struct GeminiService {
             generationConfig: GeminiGenerationConfig(
                 temperature: temperature,
                 topP: topP,
-                responseMimeType: responseMimeType
+                responseMimeType: responseMimeType,
+                maxOutputTokens: maxOutputTokens
             )
         )
         request.httpBody = try JSONEncoder().encode(body)
@@ -201,6 +397,25 @@ struct GeminiService {
 
     private static func normalizeModelID(_ raw: String) -> String {
         normalizeGeminiModelIDValue(raw)
+    }
+
+    private static func normalizeEmbeddingModelID(_ raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            return "gemini-embedding-001"
+        }
+        if trimmed.hasPrefix("models/") {
+            return String(trimmed.dropFirst("models/".count))
+        }
+        return trimmed
+    }
+
+    private static func embeddingPathModel(from model: String) -> String {
+        let trimmed = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.hasPrefix("models/") {
+            return String(trimmed.dropFirst("models/".count))
+        }
+        return trimmed
     }
 
     private static func shouldRetryWithNextVersion(
@@ -242,6 +457,18 @@ struct GeminiService {
             return raw
         }
         return "알 수 없는 오류"
+    }
+
+    private static func decodeTokenUsage(from usageMetadata: GeminiUsageMetadata?) -> TokenUsage {
+        guard let usageMetadata else { return .zero }
+        let prompt = max(usageMetadata.promptTokenCount ?? 0, 0)
+        let output = max(usageMetadata.candidatesTokenCount ?? 0, 0)
+        let total = max(usageMetadata.totalTokenCount ?? (prompt + output), 0)
+        return TokenUsage(
+            promptTokens: prompt,
+            outputTokens: output,
+            totalTokens: total
+        )
     }
 
     private static func decodeSuggestions(from rawText: String) throws -> [GeminiSuggestion] {
@@ -328,15 +555,44 @@ private struct GeminiGenerationConfig: Encodable {
     let temperature: Double
     let topP: Double
     let responseMimeType: String
+    let maxOutputTokens: Int?
+}
+
+private struct GeminiEmbedContent: Encodable {
+    let parts: [GeminiRequestPart]
+}
+
+private struct GeminiEmbedContentRequest: Encodable {
+    let model: String
+    let content: GeminiEmbedContent
+    let taskType: String?
+}
+
+private struct GeminiBatchEmbedRequest: Encodable {
+    let requests: [GeminiEmbedContentRequest]
 }
 
 private struct GeminiGenerateResponse: Decodable {
     let candidates: [GeminiCandidate]?
     let promptFeedback: GeminiPromptFeedback?
+    let usageMetadata: GeminiUsageMetadata?
+}
+
+private struct GeminiEmbeddingVector: Decodable {
+    let values: [Double]?
+}
+
+private struct GeminiEmbedContentResponse: Decodable {
+    let embedding: GeminiEmbeddingVector?
+}
+
+private struct GeminiBatchEmbedResponse: Decodable {
+    let embeddings: [GeminiEmbeddingVector]?
 }
 
 private struct GeminiCandidate: Decodable {
     let content: GeminiCandidateContent?
+    let finishReason: String?
 }
 
 private struct GeminiCandidateContent: Decodable {
@@ -349,6 +605,12 @@ private struct GeminiCandidatePart: Decodable {
 
 private struct GeminiPromptFeedback: Decodable {
     let blockReason: String?
+}
+
+private struct GeminiUsageMetadata: Decodable {
+    let promptTokenCount: Int?
+    let candidatesTokenCount: Int?
+    let totalTokenCount: Int?
 }
 
 private struct GeminiSuggestionEnvelope: Decodable {
