@@ -144,16 +144,30 @@ struct PreviewCardItem: View {
 
 // MARK: - 포커스 모드 카드 에디터
 
-private enum FocusModeTextHeightCalculator {
-    private static var lineFragmentPadding: CGFloat {
-        FocusModeLayoutMetrics.focusModeLineFragmentPadding
+private final class ReusableTextHeightMeasurer {
+    private let storage = NSTextStorage()
+    private let layoutManager = NSLayoutManager()
+    private let textContainer: NSTextContainer
+    private let paragraphStyle = NSMutableParagraphStyle()
+
+    init(lineFragmentPadding: CGFloat) {
+        let container = NSTextContainer(size: CGSize(width: 1, height: CGFloat.greatestFiniteMagnitude))
+        container.lineFragmentPadding = lineFragmentPadding
+        container.lineBreakMode = .byWordWrapping
+        container.maximumNumberOfLines = 0
+        container.widthTracksTextView = false
+        container.heightTracksTextView = false
+        textContainer = container
+        layoutManager.addTextContainer(container)
+        storage.addLayoutManager(layoutManager)
     }
 
-    static func measureBodyHeight(
+    func measureBodyHeight(
         text: String,
         fontSize: CGFloat,
         lineSpacing: CGFloat,
-        width: CGFloat
+        width: CGFloat,
+        safetyInset: CGFloat = 0
     ) -> CGFloat {
         let measuringText: String
         if text.isEmpty {
@@ -163,34 +177,42 @@ private enum FocusModeTextHeightCalculator {
         } else {
             measuringText = text
         }
+
         let constrainedWidth = max(1, width)
-        let paragraphStyle = NSMutableParagraphStyle()
+        if abs(textContainer.containerSize.width - constrainedWidth) > 0.5 {
+            textContainer.containerSize = CGSize(width: constrainedWidth, height: CGFloat.greatestFiniteMagnitude)
+        }
+
         paragraphStyle.lineSpacing = lineSpacing
         paragraphStyle.lineBreakMode = .byWordWrapping
+        paragraphStyle.lineHeightMultiple = 1.0
+        paragraphStyle.paragraphSpacing = 0
+        paragraphStyle.paragraphSpacingBefore = 0
 
         let font = NSFont(name: "SansMonoCJKFinalDraft", size: fontSize)
             ?? NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
 
-        let storage = NSTextStorage(
-            string: measuringText,
-            attributes: [
-                .font: font,
-                .paragraphStyle: paragraphStyle
-            ]
+        storage.beginEditing()
+        storage.setAttributedString(
+            NSAttributedString(
+                string: measuringText,
+                attributes: [
+                    .font: font,
+                    .paragraphStyle: paragraphStyle
+                ]
+            )
         )
-        let layoutManager = NSLayoutManager()
-        let textContainer = NSTextContainer(size: CGSize(width: constrainedWidth, height: CGFloat.greatestFiniteMagnitude))
-        textContainer.lineFragmentPadding = lineFragmentPadding
-        textContainer.lineBreakMode = .byWordWrapping
-        textContainer.maximumNumberOfLines = 0
-        textContainer.widthTracksTextView = false
-        textContainer.heightTracksTextView = false
-        layoutManager.addTextContainer(textContainer)
-        storage.addLayoutManager(layoutManager)
+        storage.endEditing()
         layoutManager.ensureLayout(for: textContainer)
 
         let usedHeight = layoutManager.usedRect(for: textContainer).height
-        return max(1, ceil(usedHeight + focusModeBodySafetyInset))
+        return max(1, ceil(usedHeight + safetyInset))
+    }
+}
+
+private enum FocusModeTextHeightCalculator {
+    static func makeMeasurer() -> ReusableTextHeightMeasurer {
+        ReusableTextHeightMeasurer(lineFragmentPadding: FocusModeLayoutMetrics.focusModeLineFragmentPadding)
     }
 }
 
@@ -208,7 +230,12 @@ struct FocusModeCardEditor: View {
     @AppStorage("focusModeLineSpacingValueTemp") private var focusModeLineSpacingValue: Double = 4.5
     @State private var measuredBodyHeight: CGFloat = 0
     @State private var measuredCardWidth: CGFloat = 0
+    @State private var measuredHeightRefreshWorkItem: DispatchWorkItem? = nil
+    @State private var measuredHeightRefreshLastAt: Date = .distantPast
+    @State private var bodyHeightMeasurer = FocusModeTextHeightCalculator.makeMeasurer()
     private let verticalInset: CGFloat = 40
+    private let measuredHeightRefreshMinInterval: TimeInterval = 0.033
+    private let measuredHeightUpdateThreshold: CGFloat = 0.25
     private var targetMeasuredHeight: CGFloat {
         guard measuredBodyHeight > 1 else { return 0 }
         return measuredBodyHeight + (verticalInset * 2)
@@ -235,20 +262,48 @@ struct FocusModeCardEditor: View {
                 guard oldValue != newValue else { return }
                 card.content = newValue
                 onContentChange(oldValue, newValue)
-                refreshMeasuredHeights()
+                scheduleMeasuredHeightRefresh()
             }
         )
     }
 
+    private func liveFocusedResponderBodyHeight() -> CGFloat? {
+        guard isActive else { return nil }
+        guard focusModeEditorCardID == card.id else { return nil }
+        guard let textView = NSApp.keyWindow?.firstResponder as? NSTextView else { return nil }
+        guard textView.string == card.content else { return nil }
+        guard let layoutManager = textView.layoutManager,
+              let textContainer = textView.textContainer else { return nil }
+        let textLength = (textView.string as NSString).length
+        let fullRange = NSRange(location: 0, length: textLength)
+        if textLength > 0 {
+            layoutManager.ensureGlyphs(forCharacterRange: fullRange)
+            layoutManager.ensureLayout(forCharacterRange: fullRange)
+        }
+        layoutManager.ensureLayout(for: textContainer)
+        let usedHeight = layoutManager.usedRect(for: textContainer).height
+        guard usedHeight > 0 else { return nil }
+        let insetHeight = textView.textContainerInset.height * 2
+        return max(1, ceil(usedHeight + insetHeight + focusModeBodySafetyInset))
+    }
+
     private func refreshMeasuredHeights() {
+        measuredHeightRefreshLastAt = Date()
         guard measuredCardWidth > 1 else {
             return
         }
-        let deterministicBodyHeight = FocusModeTextHeightCalculator.measureBodyHeight(
+        if let liveMeasured = liveFocusedResponderBodyHeight() {
+            if abs(measuredBodyHeight - liveMeasured) > measuredHeightUpdateThreshold {
+                measuredBodyHeight = liveMeasured
+            }
+            return
+        }
+        let deterministicBodyHeight = bodyHeightMeasurer.measureBodyHeight(
             text: sizingText,
             fontSize: focusModeFontSize,
             lineSpacing: focusModeLineSpacing,
-            width: textEditorMeasureWidth
+            width: textEditorMeasureWidth,
+            safetyInset: focusModeBodySafetyInset
         )
         let resolvedBodyHeight: CGFloat
         let observedRangeMin: CGFloat
@@ -267,11 +322,36 @@ struct FocusModeCardEditor: View {
             let noObservedScale: CGFloat = deterministicBodyHeight > 180 ? 0.95 : 1.0
             resolvedBodyHeight = max(1, deterministicBodyHeight * noObservedScale)
         }
-        
-        if abs(measuredBodyHeight - resolvedBodyHeight) > 0.25 {
+
+        if abs(measuredBodyHeight - resolvedBodyHeight) > measuredHeightUpdateThreshold {
             measuredBodyHeight = resolvedBodyHeight
         }
+    }
+
+    private func scheduleMeasuredHeightRefresh(immediate: Bool = false) {
+        if immediate {
+            measuredHeightRefreshWorkItem?.cancel()
+            measuredHeightRefreshWorkItem = nil
+            refreshMeasuredHeights()
+            return
         }
+
+        let now = Date()
+        let elapsed = now.timeIntervalSince(measuredHeightRefreshLastAt)
+        let delay = max(0, measuredHeightRefreshMinInterval - elapsed)
+        guard delay > 0.001 else {
+            refreshMeasuredHeights()
+            return
+        }
+
+        measuredHeightRefreshWorkItem?.cancel()
+        let work = DispatchWorkItem {
+            measuredHeightRefreshWorkItem = nil
+            refreshMeasuredHeights()
+        }
+        measuredHeightRefreshWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
 
     var body: some View {
         ZStack(alignment: .topLeading) {
@@ -305,25 +385,29 @@ struct FocusModeCardEditor: View {
             DispatchQueue.main.async {
                 guard abs(measuredCardWidth - normalizedWidth) > 0.25 else { return }
                 measuredCardWidth = normalizedWidth
-                refreshMeasuredHeights()
+                scheduleMeasuredHeightRefresh(immediate: true)
             }
         }
         .onAppear {
-            refreshMeasuredHeights()
+            scheduleMeasuredHeightRefresh(immediate: true)
+        }
+        .onDisappear {
+            measuredHeightRefreshWorkItem?.cancel()
+            measuredHeightRefreshWorkItem = nil
         }
         .onChange(of: isActive) { _, newValue in
             if newValue {
-                refreshMeasuredHeights()
+                scheduleMeasuredHeightRefresh(immediate: true)
             }
         }
         .onChange(of: fontSize) { _, _ in
-            refreshMeasuredHeights()
+            scheduleMeasuredHeightRefresh(immediate: true)
         }
         .onChange(of: focusModeLineSpacingValue) { _, _ in
-            refreshMeasuredHeights()
+            scheduleMeasuredHeightRefresh(immediate: true)
         }
         .onChange(of: observedBodyHeight) { _, _ in
-            refreshMeasuredHeights()
+            scheduleMeasuredHeightRefresh(immediate: true)
         }
         .contentShape(Rectangle())
         .onTapGesture { onActivate() }
@@ -346,9 +430,18 @@ struct CardItem: View {
     var onReferenceCard: (() -> Void)? = nil
     var onCreateUpperCardFromSelection: (() -> Void)? = nil
     var onSummarizeChildren: (() -> Void)? = nil
+    var onAIElaborate: (() -> Void)? = nil
+    var onAINextScene: (() -> Void)? = nil
+    var onAIAlternative: (() -> Void)? = nil
+    var onAISummarizeCurrent: (() -> Void)? = nil
+    var aiPlotActionsEnabled: Bool = false
+    var onApplyAICandidate: (() -> Void)? = nil
     var isSummarizingChildren: Bool = false
+    var isAIBusy: Bool = false
     var onDelete: (() -> Void)? = nil
     var onHardDelete: (() -> Void)? = nil
+    var onTranscriptionMode: (() -> Void)? = nil
+    var isTranscriptionBusy: Bool = false
     var showsEmptyCardBulkDeleteMenuOnly: Bool = false
     var onBulkDeleteEmptyCards: (() -> Void)? = nil
     var isCloneLinked: Bool = false
@@ -358,6 +451,9 @@ struct CardItem: View {
     @State private var mainEditingMeasuredBodyHeight: CGFloat = 0
     @State private var mainEditingMeasureWorkItem: DispatchWorkItem? = nil
     @State private var mainEditingMeasureLastAt: Date = .distantPast
+    @State private var mainBodyHeightMeasurer = ReusableTextHeightMeasurer(
+        lineFragmentPadding: MainEditorLayoutMetrics.mainEditorLineFragmentPadding
+    )
     @FocusState private var editorFocus: Bool
     @AppStorage("fontSize") private var fontSize: Double = 14.0
     @AppStorage("appearance") private var appearance: String = "dark"
@@ -371,7 +467,6 @@ struct CardItem: View {
     private var mainCardLineSpacing: CGFloat { CGFloat(mainCardLineSpacingValue) }
     private let mainCardContentPadding: CGFloat = MainEditorLayoutMetrics.mainCardContentPadding
     private let mainEditorVerticalPadding: CGFloat = 24
-    private let mainEditorLineFragmentPadding: CGFloat = MainEditorLayoutMetrics.mainEditorLineFragmentPadding
     private let mainEditingMeasureMinInterval: TimeInterval = 0.033
     private let mainEditingMeasureUpdateThreshold: CGFloat = 0.5
     private var mainEditorHorizontalPadding: CGFloat {
@@ -393,6 +488,13 @@ struct CardItem: View {
     }
     private var shouldShowChildRightEdge: Bool {
         !isArchived && !card.children.isEmpty
+    }
+    private var hasAIMenuActions: Bool {
+        onAIElaborate != nil
+            || onAINextScene != nil
+            || onAIAlternative != nil
+            || onAISummarizeCurrent != nil
+            || onSummarizeChildren != nil
     }
 
     private var resolvedCardRGB: (r: Double, g: Double, b: Double) {
@@ -472,41 +574,12 @@ struct CardItem: View {
     }
 
     private func measureMainEditorBodyHeight(text: String, width: CGFloat) -> CGFloat {
-        let content: String
-        if text.isEmpty {
-            content = " "
-        } else if text.hasSuffix("\n") {
-            content = text + " "
-        } else {
-            content = text
-        }
-
-        let paragraphStyle = NSMutableParagraphStyle()
-        paragraphStyle.lineSpacing = mainCardLineSpacing
-        paragraphStyle.lineBreakMode = .byWordWrapping
-
-        let font = NSFont(name: "SansMonoCJKFinalDraft", size: fontSize)
-            ?? NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
-
-        let storage = NSTextStorage(
-            string: content,
-            attributes: [
-                .font: font,
-                .paragraphStyle: paragraphStyle
-            ]
+        mainBodyHeightMeasurer.measureBodyHeight(
+            text: text,
+            fontSize: CGFloat(fontSize),
+            lineSpacing: mainCardLineSpacing,
+            width: width
         )
-        let layoutManager = NSLayoutManager()
-        let textContainer = NSTextContainer(size: CGSize(width: max(1, width), height: CGFloat.greatestFiniteMagnitude))
-        textContainer.lineFragmentPadding = mainEditorLineFragmentPadding
-        textContainer.lineBreakMode = .byWordWrapping
-        textContainer.maximumNumberOfLines = 0
-        textContainer.widthTracksTextView = false
-        textContainer.heightTracksTextView = false
-        layoutManager.addTextContainer(textContainer)
-        storage.addLayoutManager(layoutManager)
-        layoutManager.ensureLayout(for: textContainer)
-        let usedHeight = layoutManager.usedRect(for: textContainer).height
-        return max(1, ceil(usedHeight))
     }
 
     private func refreshMainEditingMeasuredBodyHeight() {
@@ -601,7 +674,7 @@ struct CardItem: View {
 
                 if isCandidateVisualCard {
                     VStack {
-                        HStack {
+                        HStack(spacing: 6) {
                             Spacer()
                             Text("AI 후보")
                                 .font(.system(size: 9, weight: .bold))
@@ -609,6 +682,18 @@ struct CardItem: View {
                                 .padding(.vertical, 3)
                                 .background(appearance == "light" ? Color.black.opacity(0.12) : Color.white.opacity(0.20))
                                 .clipShape(Capsule())
+                            if let onApplyAICandidate {
+                                Button("선택") {
+                                    onApplyAICandidate()
+                                }
+                                .font(.system(size: 9, weight: .semibold))
+                                .buttonStyle(.plain)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 3)
+                                .background(appearance == "light" ? Color.accentColor.opacity(0.22) : Color.accentColor.opacity(0.32))
+                                .clipShape(Capsule())
+                                .disabled(isAIBusy)
+                            }
                         }
                         Spacer()
                     }
@@ -656,6 +741,31 @@ struct CardItem: View {
         }
         .contextMenu {
             if showsEmptyCardBulkDeleteMenuOnly {
+                if hasAIMenuActions {
+                    Menu("AI") {
+                        Button("구체화") { onAIElaborate?() }
+                            .disabled(onAIElaborate == nil || !aiPlotActionsEnabled || isAIBusy)
+                        Button("다음 장면") { onAINextScene?() }
+                            .disabled(onAINextScene == nil || !aiPlotActionsEnabled || isAIBusy)
+                        Button("대안") { onAIAlternative?() }
+                            .disabled(onAIAlternative == nil || !aiPlotActionsEnabled || isAIBusy)
+                        Divider()
+                        Button("현재 카드 요약") { onAISummarizeCurrent?() }
+                            .disabled(onAISummarizeCurrent == nil || isAIBusy)
+                        Button("자식 카드 요약") { onSummarizeChildren?() }
+                            .disabled(onSummarizeChildren == nil || isAIBusy)
+                    }
+                    if onBulkDeleteEmptyCards != nil {
+                        Divider()
+                    }
+                }
+                if let onTranscriptionMode {
+                    Button("전사 모드") { onTranscriptionMode() }
+                        .disabled(isTranscriptionBusy || isAIBusy)
+                    if onBulkDeleteEmptyCards != nil {
+                        Divider()
+                    }
+                }
                 if let onBulkDeleteEmptyCards {
                     Button("내용 없음 카드 전체 삭제", role: .destructive) { onBulkDeleteEmptyCards() }
                 }
@@ -680,8 +790,20 @@ struct CardItem: View {
                     Button("새 상위 카드 만들기") { onCreateUpperCardFromSelection() }
                     Divider()
                 }
-                if let onSummarizeChildren {
-                    Button("하위 카드 요약") { onSummarizeChildren() }
+                if hasAIMenuActions {
+                    Menu("AI") {
+                        Button("구체화") { onAIElaborate?() }
+                            .disabled(onAIElaborate == nil || !aiPlotActionsEnabled || isAIBusy)
+                        Button("다음 장면") { onAINextScene?() }
+                            .disabled(onAINextScene == nil || !aiPlotActionsEnabled || isAIBusy)
+                        Button("대안") { onAIAlternative?() }
+                            .disabled(onAIAlternative == nil || !aiPlotActionsEnabled || isAIBusy)
+                        Divider()
+                        Button("현재 카드 요약") { onAISummarizeCurrent?() }
+                            .disabled(onAISummarizeCurrent == nil || isAIBusy)
+                        Button("자식 카드 요약") { onSummarizeChildren?() }
+                            .disabled(onSummarizeChildren == nil || isAIBusy)
+                    }
                     Divider()
                 }
                 if let onDelete {
@@ -690,13 +812,22 @@ struct CardItem: View {
                 if onDelete != nil {
                     Divider()
                 }
-                Button("기본") { onColorChange?(nil) }
-                Divider()
-                Button("연보라") { onColorChange?("E7D5FF") }
-                Button("하늘") { onColorChange?("CFE8FF") }
-                Button("민트") { onColorChange?("CFF2E8") }
-                Button("살구") { onColorChange?("FFE1CC") }
-                Button("연노랑") { onColorChange?("FFF3C4") }
+                if let onColorChange {
+                    Menu("카드 색") {
+                        Button("기본") { onColorChange(nil) }
+                        Divider()
+                        Button("연보라") { onColorChange("E7D5FF") }
+                        Button("하늘") { onColorChange("CFE8FF") }
+                        Button("민트") { onColorChange("CFF2E8") }
+                        Button("살구") { onColorChange("FFE1CC") }
+                        Button("연노랑") { onColorChange("FFF3C4") }
+                    }
+                }
+                if let onTranscriptionMode {
+                    Divider()
+                    Button("전사 모드") { onTranscriptionMode() }
+                        .disabled(isTranscriptionBusy || isAIBusy)
+                }
                 if let onHardDelete {
                     Divider()
                     Button("완전 삭제 (모든 곳)", role: .destructive) { onHardDelete() }

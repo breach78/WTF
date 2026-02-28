@@ -1,0 +1,16 @@
+{
+  "source": "/Users/three/app_build/wa/wa/ReferenceWindow.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "레퍼런스 카드가 없습니다",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 361
+        }
+      }
+    ]
+  },
+  "version": 1
+}

@@ -2391,99 +2391,6 @@ extension ScenarioWriterView {
         return left + "\n" + mergedRight
     }
 
-    // MARK: - Timeline AI Controls
-
-    @ViewBuilder
-    var aiTimelineActionPanel: some View {
-        let noActiveCard = activeCardID == nil
-        let activeCard = activeCardID.flatMap { findCard(by: $0) }
-        let isPlotLineActive = activeCard?.category == "플롯"
-        VStack(alignment: .leading, spacing: 10) {
-            Text("AI 카드 도우미")
-                .font(.system(size: 12, weight: .bold))
-                .foregroundStyle(appearance == "light" ? .black.opacity(0.55) : .white.opacity(0.72))
-
-            HStack(spacing: 8) {
-                aiActionButton(title: AICardAction.elaborate.title, disabled: noActiveCard || !isPlotLineActive) {
-                    openAIOptionsSheet(for: .elaborate)
-                }
-                aiActionButton(title: AICardAction.nextScene.title, disabled: noActiveCard || !isPlotLineActive) {
-                    openAIOptionsSheet(for: .nextScene)
-                }
-                aiActionButton(title: AICardAction.alternative.title, disabled: noActiveCard || !isPlotLineActive) {
-                    openAIOptionsSheet(for: .alternative)
-                }
-                aiActionButton(title: AICardAction.summary.title, disabled: noActiveCard) {
-                    requestAISummaryCandidate()
-                }
-                aiActionButton(
-                    title: "선택",
-                    prominent: true,
-                    disabled: !canApplyAICandidateSelection
-                ) {
-                    applySelectedAICandidateToParent()
-                }
-            }
-
-            if !noActiveCard && !isPlotLineActive {
-                Text("구체화/다음 장면/대안은 플롯 카드에서만 사용할 수 있습니다.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-            }
-
-            if aiIsGenerating {
-                HStack(spacing: 8) {
-                    ProgressView()
-                        .controlSize(.small)
-                    Text("AI가 후보를 생성하고 있습니다...")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                }
-            } else if let message = aiStatusMessage {
-                Text(message)
-                    .font(.system(size: 11))
-                    .foregroundStyle(aiStatusIsError ? Color.red : Color.secondary)
-                    .lineLimit(2)
-            }
-        }
-        .padding(12)
-        .background(appearance == "light" ? Color.black.opacity(0.04) : Color.white.opacity(0.06))
-        .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(appearance == "light" ? Color.black.opacity(0.10) : Color.white.opacity(0.12), lineWidth: 1)
-        )
-        .cornerRadius(8)
-        .padding([.horizontal, .top], 12)
-    }
-
-    @ViewBuilder
-    func aiActionButton(
-        title: String,
-        prominent: Bool = false,
-        disabled: Bool = false,
-        action: @escaping () -> Void
-    ) -> some View {
-        if prominent {
-            Button(action: action) {
-                Text(title)
-                    .font(.system(size: 12, weight: .semibold))
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.small)
-            .disabled(disabled || aiIsGenerating || dictationIsProcessing || dictationIsRecording)
-        } else {
-            Button(action: action) {
-                Text(title)
-                    .font(.system(size: 12, weight: .semibold))
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-            .disabled(disabled || aiIsGenerating || dictationIsProcessing || dictationIsRecording)
-        }
-    }
-
     func aiOptionsSheet(action: AICardAction) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             Text(action.sheetTitle)
@@ -2531,10 +2438,6 @@ extension ScenarioWriterView {
         .frame(width: 520, height: 560)
     }
 
-    var canApplyAICandidateSelection: Bool {
-        selectedAICandidateCard() != nil
-    }
-
     func openAIOptionsSheet(for action: AICardAction) {
         guard activeCardID != nil else {
             setAIStatusError("먼저 카드 하나를 선택해 주세요.")
@@ -2564,6 +2467,114 @@ extension ScenarioWriterView {
 
     // MARK: - AI Generation Actions
 
+    func runAICardActionFromContextMenu(for card: SceneCard, action: AICardAction) {
+        prepareCardForContextMenuAIAction(card)
+        switch action {
+        case .elaborate, .nextScene, .alternative:
+            openAIOptionsSheet(for: action)
+        case .summary:
+            requestAISummaryCandidate()
+        }
+    }
+
+    func runChildSummaryFromCardContextMenu(for card: SceneCard) {
+        prepareCardForContextMenuAIAction(card)
+        summarizeDirectChildrenIntoParent(cardID: card.id)
+    }
+
+    func applyAICandidateFromCardContextMenu(cardID: UUID) {
+        selectedCardIDs = [cardID]
+        if let card = findCard(by: cardID) {
+            changeActiveCard(to: card, shouldFocusMain: false)
+        }
+        applySelectedAICandidateToParent(candidateID: cardID)
+    }
+
+    func prepareCardForContextMenuAIAction(_ card: SceneCard) {
+        suppressMainFocusRestoreAfterFinishEditing = true
+        finishEditing()
+        selectedCardIDs = [card.id]
+        changeActiveCard(to: card, shouldFocusMain: false)
+    }
+
+    func aiCardGenerationQuery(for card: SceneCard, action: AICardAction, options: Set<AIGenerationOption>) -> String {
+        let optionLabels = sortedAIGenerationOptions(options).map(\.title).joined(separator: ", ")
+        let compactCard = clampedAIText(card.content, maxLength: 420, preserveLineBreak: true)
+        return "\(action.summaryLabel): \(compactCard)\n옵션: \(optionLabels)"
+    }
+
+    func aiSummaryQuery(for card: SceneCard) -> String {
+        let compactCard = clampedAIText(card.content, maxLength: 420, preserveLineBreak: true)
+        return "현재 카드 요약: \(compactCard)"
+    }
+
+    func aiAllCardSnapshots() -> [AIChatCardSnapshot] {
+        scenario.cards.map { card in
+            AIChatCardSnapshot(
+                id: card.id,
+                parentID: card.parent?.id,
+                category: card.category ?? "미분류",
+                content: card.content,
+                orderIndex: card.orderIndex,
+                createdAt: card.createdAt,
+                isArchived: card.isArchived,
+                isFloating: card.isFloating
+            )
+        }
+    }
+
+    func buildSharedConsultantContextForCardGeneration(
+        targetCardID: UUID,
+        query: String,
+        apiKey: String,
+        digestCache: [UUID: AICardDigest],
+        embeddingIndex: [UUID: AIEmbeddingRecord]
+    ) async -> (
+        preview: AIChatContextPreview?,
+        updatedDigestCache: [UUID: AICardDigest],
+        updatedEmbeddingIndex: [UUID: AIEmbeddingRecord],
+        resolvedEmbeddingModel: String?
+    ) {
+        let allCardSnapshots = aiAllCardSnapshots()
+        let visibleCards = allCardSnapshots.filter { !$0.isArchived && !$0.isFloating }
+        guard !visibleCards.isEmpty else {
+            return (nil, digestCache, embeddingIndex, nil)
+        }
+
+        let scopedCards = visibleCards.filter { $0.id == targetCardID }
+        let resolvedScopedCards = scopedCards.isEmpty ? Array(visibleCards.prefix(1)) : scopedCards
+        let vectorDBURL = store.aiVectorIndexURL(for: scenario.id)
+        let semanticRAG = await buildSemanticRAGContext(
+            query: query,
+            allCards: allCardSnapshots,
+            scopedCards: resolvedScopedCards,
+            digests: digestCache,
+            existingIndex: embeddingIndex,
+            apiKey: apiKey,
+            vectorDBURL: vectorDBURL
+        )
+
+        let scope = AIChatThreadScope(type: .selectedCards, cardIDs: [targetCardID], includeChildrenDepth: 0)
+        let buildResult = AIChatPromptBuilder.buildPrompt(
+            allCards: allCardSnapshots,
+            scopedCards: resolvedScopedCards,
+            scopeLabel: scopeLabel(for: scope, cardCount: resolvedScopedCards.count),
+            history: [],
+            lastUserMessage: query,
+            previousRollingSummary: "",
+            digestCache: digestCache,
+            refreshRollingSummary: false,
+            semanticRAGContext: semanticRAG.semanticContext
+        )
+
+        return (
+            buildResult.contextPreview,
+            buildResult.updatedDigestCache,
+            semanticRAG.updatedIndex,
+            semanticRAG.resolvedModel
+        )
+    }
+
     func requestAICandidates(action: AICardAction, selectedOptions: Set<AIGenerationOption>) {
         finishEditing()
         pruneAICandidateTracking()
@@ -2579,17 +2590,43 @@ extension ScenarioWriterView {
         }
 
         let options = selectedOptions.isEmpty ? Set([AIGenerationOption.balanced]) : selectedOptions
-        let prompt = buildAIPrompt(for: parentCard, action: action, options: options)
         let resolvedModel = currentGeminiModel()
 
         aiIsGenerating = true
+        aiChildSummaryLoadingCardIDs.insert(parentID)
         setAIStatus("\(action.summaryLabel)을 생성하는 중입니다...")
 
         Task { @MainActor in
+            defer {
+                aiIsGenerating = false
+                aiChildSummaryLoadingCardIDs.remove(parentID)
+            }
             do {
+                guard let latestParent = findCard(by: parentID) else { return }
                 guard let apiKey = try KeychainStore.loadGeminiAPIKey() else {
                     throw GeminiServiceError.missingAPIKey
                 }
+                loadPersistedAIEmbeddingIndexIfNeeded()
+                let query = aiCardGenerationQuery(for: latestParent, action: action, options: options)
+                let sharedContext = await buildSharedConsultantContextForCardGeneration(
+                    targetCardID: latestParent.id,
+                    query: query,
+                    apiKey: apiKey,
+                    digestCache: aiCardDigestCache,
+                    embeddingIndex: aiEmbeddingIndexByCardID
+                )
+                aiCardDigestCache = sharedContext.updatedDigestCache
+                aiEmbeddingIndexByCardID = sharedContext.updatedEmbeddingIndex
+                if let resolvedEmbeddingModel = sharedContext.resolvedEmbeddingModel {
+                    aiEmbeddingIndexModelID = resolvedEmbeddingModel
+                }
+                scheduleAIEmbeddingPersistence()
+                let prompt = buildAIPrompt(
+                    for: latestParent,
+                    action: action,
+                    options: options,
+                    sharedContext: sharedContext.preview
+                )
                 let suggestions = try await GeminiService.generateSuggestions(
                     prompt: prompt,
                     model: resolvedModel,
@@ -2603,7 +2640,6 @@ extension ScenarioWriterView {
             } catch {
                 setAIStatusError(error.localizedDescription)
             }
-            aiIsGenerating = false
         }
     }
 
@@ -2612,22 +2648,28 @@ extension ScenarioWriterView {
         pruneAICandidateTracking()
 
         guard let parentID = activeCardID,
-              let parentCard = findCard(by: parentID) else {
+              findCard(by: parentID) != nil else {
             setAIStatusError("활성 카드가 없어 요약을 만들 수 없습니다.")
             return
         }
 
-        let prompt = buildAISummaryPrompt(for: parentCard)
         let resolvedModel = currentGeminiModel()
 
         aiIsGenerating = true
+        aiChildSummaryLoadingCardIDs.insert(parentID)
         setAIStatus("요약 제안을 생성하는 중입니다...")
 
         Task { @MainActor in
+            defer {
+                aiIsGenerating = false
+                aiChildSummaryLoadingCardIDs.remove(parentID)
+            }
             do {
+                guard let latestParent = findCard(by: parentID) else { return }
                 guard let apiKey = try KeychainStore.loadGeminiAPIKey() else {
                     throw GeminiServiceError.missingAPIKey
                 }
+                let prompt = buildAISummaryPrompt(for: latestParent)
                 let summaryText = try await GeminiService.generateText(
                     prompt: prompt,
                     model: resolvedModel,
@@ -2646,7 +2688,6 @@ extension ScenarioWriterView {
             } catch {
                 setAIStatusError(error.localizedDescription)
             }
-            aiIsGenerating = false
         }
     }
 
@@ -2712,13 +2753,13 @@ extension ScenarioWriterView {
 
         let createdCount = newIDs.count
         if action == .summary {
-            setAIStatus("요약 후보 1개를 만들었습니다. 선택 후 '선택'을 누르면 부모 카드가 대체됩니다.")
+            setAIStatus("요약 후보 1개를 만들었습니다. 후보 카드 우상단 '선택' 버튼으로 바로 반영할 수 있습니다.")
         } else {
-            setAIStatus("\(action.summaryLabel) \(createdCount)개를 만들었습니다. 마음에 드는 카드를 선택하고 '선택'을 누르세요.")
+            setAIStatus("\(action.summaryLabel) \(createdCount)개를 만들었습니다. 후보 카드 우상단 '선택' 버튼으로 바로 반영할 수 있습니다.")
         }
     }
 
-    func applySelectedAICandidateToParent() {
+    func applySelectedAICandidateToParent(candidateID: UUID? = nil) {
         finishEditing()
         pruneAICandidateTracking()
 
@@ -2731,19 +2772,41 @@ extension ScenarioWriterView {
             setAIStatusError("AI 후보 작업 타입을 확인할 수 확인 할 수 없습니다. 다시 생성해 주세요.")
             return
         }
-        guard let selectedCandidate = selectedAICandidateCard() else {
-            setAIStatusError("AI 후보 카드 중 하나를 먼저 선택해 주세요.")
-            return
+        let selectedCandidate: SceneCard
+        if let candidateID {
+            guard aiCandidateState.cardIDs.contains(candidateID),
+                  let resolved = findCard(by: candidateID),
+                  !resolved.isArchived,
+                  resolved.parent?.id == parentID else {
+                setAIStatusError("선택한 AI 후보를 찾을 수 없습니다. 후보를 다시 생성해 주세요.")
+                return
+            }
+            selectedCandidate = resolved
+        } else {
+            guard let resolved = selectedAICandidateCard() else {
+                setAIStatusError("AI 후보 카드 중 하나를 먼저 선택해 주세요.")
+                return
+            }
+            selectedCandidate = resolved
         }
 
         let prevState = captureScenarioState()
         let selectedID = selectedCandidate.id
 
         switch action {
-        case .elaborate, .alternative, .summary:
+        case .elaborate, .alternative:
             parentCard.content = selectedCandidate.content
             selectedCandidate.colorHex = nil
             selectedCandidate.isAICandidate = false
+        case .summary:
+            let summaryText = selectedCandidate.content.trimmingCharacters(in: .whitespacesAndNewlines)
+            if parentCard.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                parentCard.content = summaryText
+            } else {
+                parentCard.content += "\n\n---\n\(summaryText)"
+            }
+            selectedCandidate.isAICandidate = false
+            selectedCandidate.isArchived = true
         case .nextScene:
             let destinationParent = parentCard.parent
             let destinationIndex = parentCard.orderIndex + 1
@@ -2758,7 +2821,13 @@ extension ScenarioWriterView {
             selectedCandidate.isAICandidate = false
         }
 
-        for candidateID in aiCandidateState.cardIDs where candidateID != selectedID {
+        let candidatesToArchive: [UUID]
+        if action == .summary {
+            candidatesToArchive = aiCandidateState.cardIDs
+        } else {
+            candidatesToArchive = aiCandidateState.cardIDs.filter { $0 != selectedID }
+        }
+        for candidateID in candidatesToArchive {
             if let candidate = findCard(by: candidateID) {
                 candidate.isAICandidate = false
                 candidate.isArchived = true
@@ -2786,8 +2855,10 @@ extension ScenarioWriterView {
         aiCandidateState.action = nil
 
         switch action {
-        case .elaborate, .alternative, .summary:
+        case .elaborate, .alternative:
             setAIStatus("선택한 후보를 부모 카드에 반영했고, 나머지 후보는 삭제했습니다.")
+        case .summary:
+            setAIStatus("요약을 원본 카드 하단(--- 아래)에 추가했고, 모든 요약 후보를 삭제했습니다.")
         case .nextScene:
             setAIStatus("선택한 후보를 부모 바로 아래 형제 카드로 배치했고, 나머지 후보는 삭제했습니다.")
         }
@@ -2853,7 +2924,8 @@ extension ScenarioWriterView {
     func buildAIPrompt(
         for card: SceneCard,
         action: AICardAction,
-        options: Set<AIGenerationOption>
+        options: Set<AIGenerationOption>,
+        sharedContext: AIChatContextPreview? = nil
     ) -> String {
         let sortedOptions = sortedAIGenerationOptions(options)
         let levelIndex = resolvedAILevelIndex(for: card)
@@ -2863,7 +2935,8 @@ extension ScenarioWriterView {
             for: card,
             action: action,
             optionLines: optionLines,
-            context: context
+            context: context,
+            sharedContext: sharedContext
         )
     }
 
@@ -2927,11 +3000,35 @@ extension ScenarioWriterView {
         for card: SceneCard,
         action: AICardAction,
         optionLines: String,
-        context: AIPromptContext
+        context: AIPromptContext,
+        sharedContext: AIChatContextPreview? = nil
     ) -> String {
-        """
+        let sharedScoped = sharedContext?.scopedContext ?? "(없음)"
+        let sharedRAG = sharedContext?.ragContext ?? "(없음)"
+        let sharedPlot = sharedContext?.globalPlotSummary ?? "(없음)"
+        let sharedNote = sharedContext?.globalNoteSummary ?? "(없음)"
+        return """
         당신은 영화 시나리오 공동 집필 파트너다.
         반드시 한국어로 작성하고, JSON 외의 어떤 텍스트도 출력하지 않는다.
+
+        [AI 시나리오 컨설턴트 공통 기준]
+        - 업계 최고 수준의 시나리오 컨설턴트 관점으로 판단한다.
+        - 뻔한 전개를 피하고, 논리적인 대안을 제시한다.
+        - 답변은 핵심만 간결하게 제시한다. 장황한 설명은 금지한다.
+        - 칭찬만 하지 말고, 작동 원리와 약점을 분명히 짚는다.
+
+        [AI 시나리오 상담 공통 컨텍스트]
+        [선택 범위 핵심]
+        \(sharedScoped)
+
+        [질문 연관 카드(RAG)]
+        \(sharedRAG)
+
+        [전역 플롯 요약]
+        \(sharedPlot)
+
+        [전역 노트 요약]
+        \(sharedNote)
 
         [작업 모드]
         \(action.summaryLabel)
@@ -2997,9 +3094,8 @@ extension ScenarioWriterView {
     }
 
     func buildAISummaryPrompt(for card: SceneCard) -> String {
-        let levelIndex = resolvedAILevelIndex(for: card)
-        let context = buildAISummaryPromptContext(for: card, levelIndex: levelIndex)
-        return renderAISummaryPrompt(context: context)
+        let articleText = clampedAIText(card.content, maxLength: 5600, preserveLineBreak: true)
+        return renderEntityDenseSummaryPrompt(articleText: articleText)
     }
 
     struct AISummaryPromptContext {
@@ -3027,23 +3123,11 @@ extension ScenarioWriterView {
         )
     }
 
-    func renderAISummaryPrompt(context: AISummaryPromptContext) -> String {
-        """
-        아래 텍스트를 대상으로 작업하라.
-
+    func renderEntityDenseSummaryPrompt(articleText: String) -> String {
+        return """
         [Article]
-        \(context.articleText)
+        \(articleText)
 
-        [맥락: 문서 심화 경로]
-        \(context.pathContext)
-
-        [맥락: 현재 열 플롯 흐름]
-        \(context.plotContext)
-
-        [맥락: 현재 열 노트 흐름]
-        \(context.noteContext)
-
-        아래 지시를 정확히 따른다:
         You will generate increasingly concise, entity-dense summaries of the above Article or webpage. Repeat the following 2 steps 5 times.
 
         Step 1. Identify 1-3 informative Entities (";" delimited) from the Article which are missing from the previously generated summary.

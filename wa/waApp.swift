@@ -948,9 +948,6 @@ struct SettingsView: View {
     @AppStorage("mainCardVerticalGap") private var mainCardVerticalGap: Double = 0.0
     @AppStorage("focusModeLineSpacingValueTemp") private var focusModeLineSpacingValue: Double = 4.5
     @AppStorage("geminiModelID") private var geminiModelID: String = "gemini-3.1-pro-preview"
-    @AppStorage("whisperInstallRootPath") private var whisperInstallRootPathStorage: String = ""
-    @AppStorage("whisperCLIPath") private var whisperCLIPathStorage: String = ""
-    @AppStorage("whisperModelPath") private var whisperModelPathStorage: String = ""
 
     @State private var geminiAPIKeyInput: String = ""
     @State private var hasGeminiAPIKey: Bool = false
@@ -962,13 +959,6 @@ struct SettingsView: View {
     @State private var newColorPresetName: String = ""
     @State private var saveColorPresetError: String? = nil
     @State private var selectedGeminiModelOption: String = "gemini-3.1-pro-preview"
-    @State private var whisperInstallRootInput: String = ""
-    @State private var whisperCLIPathInput: String = ""
-    @State private var whisperModelPathInput: String = ""
-    @State private var whisperStatusMessage: String? = nil
-    @State private var whisperStatusIsError: Bool = false
-    @State private var whisperIsInstalled: Bool = false
-    @State private var whisperIsInstalling: Bool = false
     @State private var autoBackupStatusMessage: String? = nil
     @State private var autoBackupStatusIsError: Bool = false
 
@@ -1392,65 +1382,6 @@ struct SettingsView: View {
                     }
                 },
                 third: {
-                    settingsCard(title: "Whisper 받아쓰기") {
-                        Text("로컬 whisper.cpp 엔진을 사용합니다. 다른 Mac에서는 자동 설치로 CLI/모델을 한 번에 준비할 수 있습니다.")
-                            .font(.system(size: 11))
-                            .foregroundColor(.secondary)
-                            .lineLimit(2)
-
-                        TextField("설치 루트 경로", text: $whisperInstallRootInput)
-                            .textFieldStyle(.roundedBorder)
-
-                        TextField("whisper-cli 경로", text: $whisperCLIPathInput)
-                            .textFieldStyle(.roundedBorder)
-
-                        TextField("모델 경로 (.bin)", text: $whisperModelPathInput)
-                            .textFieldStyle(.roundedBorder)
-
-                        HStack(spacing: 8) {
-                            Button("경로 저장") {
-                                saveWhisperPathSettings(statusMessage: "Whisper 경로를 저장했습니다.")
-                                refreshWhisperStatusFromInputs()
-                            }
-                            .disabled(whisperIsInstalling)
-
-                            Button("기본 경로 채우기") {
-                                fillWhisperDefaultPaths()
-                                setWhisperStatus("Whisper 기본 경로를 채웠습니다.", isError: false)
-                            }
-                            .disabled(whisperIsInstalling)
-                        }
-
-                        HStack(spacing: 8) {
-                            Button("설치 상태 확인") {
-                                refreshWhisperStatusFromInputs()
-                            }
-                            .disabled(whisperIsInstalling)
-
-                            Button("자동 설치 / 업데이트") {
-                                installOrUpdateWhisper()
-                            }
-                            .disabled(whisperIsInstalling)
-
-                            if whisperIsInstalling {
-                                ProgressView()
-                                    .controlSize(.small)
-                            }
-                        }
-
-                        Text(whisperIsInstalled ? "현재 Whisper 받아쓰기 사용 가능" : "현재 Whisper 설치 또는 경로 확인이 필요합니다.")
-                            .font(.system(size: 11))
-                            .foregroundColor(whisperIsInstalled ? .secondary : .orange)
-                            .lineLimit(2)
-
-                        if let message = whisperStatusMessage {
-                            Text(message)
-                                .font(.system(size: 11))
-                                .foregroundColor(whisperStatusIsError ? .red : .secondary)
-                                .lineLimit(2)
-                        }
-                    }
-
                     settingsCard(title: "색상 테마 프리셋") {
                         Picker("프리셋", selection: $selectedColorThemePresetID) {
                             ForEach(ColorThemePreset.allCases) { preset in
@@ -1561,8 +1492,6 @@ struct SettingsView: View {
             syncGeminiModelOptionSelection()
             loadCustomColorThemePresets()
             initializeAutoBackupSettingsIfNeeded()
-            loadWhisperPathInputsFromResolvedConfig()
-            refreshWhisperStatusFromInputs()
         }
         .sheet(isPresented: $showSaveColorPresetSheet) {
             saveColorPresetSheet
@@ -1925,105 +1854,6 @@ struct SettingsView: View {
     private func setAISettingsStatus(_ message: String, isError: Bool) {
         aiSettingsStatusMessage = message
         aiSettingsStatusIsError = isError
-    }
-
-    private func loadWhisperPathInputsFromResolvedConfig() {
-        let resolved = WhisperConfiguration.resolvedPaths()
-        whisperInstallRootInput = resolved.installRootPath
-        whisperCLIPathInput = resolved.cliPath
-        whisperModelPathInput = resolved.modelPath
-        whisperInstallRootPathStorage = resolved.installRootPath
-        whisperCLIPathStorage = resolved.cliPath
-        whisperModelPathStorage = resolved.modelPath
-    }
-
-    private func fillWhisperDefaultPaths() {
-        let baseRoot = whisperInstallRootInput.trimmingCharacters(in: .whitespacesAndNewlines)
-        let resolvedRoot = baseRoot.isEmpty ? WhisperConfiguration.defaultInstallRootPath() : baseRoot
-        let defaultsForRoot = WhisperConfiguration.paths(forInstallRoot: resolvedRoot)
-        whisperInstallRootInput = defaultsForRoot.installRootPath
-        whisperCLIPathInput = defaultsForRoot.cliPath
-        whisperModelPathInput = defaultsForRoot.modelPath
-    }
-
-    private func resolvedWhisperPathsFromInputs() -> WhisperPaths {
-        let trimmedRoot = whisperInstallRootInput.trimmingCharacters(in: .whitespacesAndNewlines)
-        let trimmedCLI = whisperCLIPathInput.trimmingCharacters(in: .whitespacesAndNewlines)
-        let trimmedModel = whisperModelPathInput.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        let inferredRoot =
-            !trimmedRoot.isEmpty
-            ? trimmedRoot
-            : (WhisperConfiguration.inferInstallRoot(cliPath: trimmedCLI, modelPath: trimmedModel)
-                ?? WhisperConfiguration.defaultInstallRootPath())
-
-        let defaultsForRoot = WhisperConfiguration.paths(forInstallRoot: inferredRoot)
-        return WhisperPaths(
-            installRootPath: inferredRoot,
-            cliPath: trimmedCLI.isEmpty ? defaultsForRoot.cliPath : trimmedCLI,
-            modelPath: trimmedModel.isEmpty ? defaultsForRoot.modelPath : trimmedModel
-        )
-    }
-
-    private func saveWhisperPathSettings(statusMessage: String?) {
-        let resolved = resolvedWhisperPathsFromInputs()
-        WhisperConfiguration.save(paths: resolved)
-        whisperInstallRootPathStorage = resolved.installRootPath
-        whisperCLIPathStorage = resolved.cliPath
-        whisperModelPathStorage = resolved.modelPath
-        whisperInstallRootInput = resolved.installRootPath
-        whisperCLIPathInput = resolved.cliPath
-        whisperModelPathInput = resolved.modelPath
-        if let statusMessage {
-            setWhisperStatus(statusMessage, isError: false)
-        }
-    }
-
-    private func refreshWhisperStatusFromInputs() {
-        let resolved = resolvedWhisperPathsFromInputs()
-        let status = WhisperInstallService.inspectEnvironment(paths: resolved)
-        whisperIsInstalled = status.isReady
-        setWhisperStatus(status.message, isError: !status.isReady)
-    }
-
-    private func installOrUpdateWhisper() {
-        guard !whisperIsInstalling else { return }
-
-        whisperIsInstalling = true
-        setWhisperStatus("Whisper 자동 설치를 시작합니다...", isError: false)
-
-        let targetRoot = resolvedWhisperPathsFromInputs().installRootPath
-        Task {
-            do {
-                let installed = try await WhisperInstallService.installOrUpdate(
-                    installRootPath: targetRoot,
-                    progress: { message in
-                        Task { @MainActor in
-                            setWhisperStatus(message, isError: false)
-                        }
-                    }
-                )
-                await MainActor.run {
-                    whisperIsInstalling = false
-                    whisperInstallRootInput = installed.installRootPath
-                    whisperCLIPathInput = installed.cliPath
-                    whisperModelPathInput = installed.modelPath
-                    saveWhisperPathSettings(statusMessage: "Whisper 설치 및 설정이 완료되었습니다.")
-                    refreshWhisperStatusFromInputs()
-                }
-            } catch {
-                await MainActor.run {
-                    whisperIsInstalling = false
-                    whisperIsInstalled = false
-                    setWhisperStatus(error.localizedDescription, isError: true)
-                }
-            }
-        }
-    }
-
-    private func setWhisperStatus(_ message: String, isError: Bool) {
-        whisperStatusMessage = message
-        whisperStatusIsError = isError
     }
 
     private func initializeAutoBackupSettingsIfNeeded() {

@@ -129,6 +129,8 @@ extension ScenarioWriterView {
         let isTimelineSelected = selectedCardIDs.contains(card.id)
         let isTimelineMultiSelected = selectedCardIDs.count > 1 && isTimelineSelected
         let isTimelineEmptyCard = card.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let isPlotLineCard = card.category == "플롯"
+        let canSummarizeChildren = canSummarizeDirectChildren(for: card)
         let isCloneLinked = scenario.isCardCloned(card.id)
         let clonePeerDestinations = isCloneLinked ? clonePeerMenuDestinations(for: card) : []
         CardItem(
@@ -156,10 +158,31 @@ extension ScenarioWriterView {
             onContentChange: nil,
             onColorChange: { hex in setCardColor(card, hex: hex) },
             onReferenceCard: { addCardToReferenceWindow(card) },
-            onSummarizeChildren: nil,
-            isSummarizingChildren: false,
+            onSummarizeChildren: canSummarizeChildren ? {
+                runChildSummaryFromCardContextMenu(for: card)
+            } : nil,
+            onAIElaborate: {
+                runAICardActionFromContextMenu(for: card, action: .elaborate)
+            },
+            onAINextScene: {
+                runAICardActionFromContextMenu(for: card, action: .nextScene)
+            },
+            onAIAlternative: {
+                runAICardActionFromContextMenu(for: card, action: .alternative)
+            },
+            onAISummarizeCurrent: {
+                runAICardActionFromContextMenu(for: card, action: .summary)
+            },
+            aiPlotActionsEnabled: isPlotLineCard,
+            onApplyAICandidate: isAICandidate ? {
+                applyAICandidateFromCardContextMenu(cardID: card.id)
+            } : nil,
+            isSummarizingChildren: aiChildSummaryLoadingCardIDs.contains(card.id),
+            isAIBusy: aiIsGenerating,
             onDelete: { performDelete(card) },
             onHardDelete: { performHardDelete(card) },
+            onTranscriptionMode: { startDictationMode(from: card) },
+            isTranscriptionBusy: dictationIsRecording || dictationIsProcessing,
             showsEmptyCardBulkDeleteMenuOnly: isTimelineEmptyCard,
             onBulkDeleteEmptyCards: isTimelineEmptyCard ? { performHardDeleteAllTimelineEmptyLeafCards() } : nil,
             isCloneLinked: isCloneLinked,
@@ -360,6 +383,7 @@ extension ScenarioWriterView {
     @ViewBuilder
     func cardRow(_ card: SceneCard, proxy: ScrollViewProxy) -> some View {
         let isAICandidate = aiCandidateState.cardIDs.contains(card.id) || card.isAICandidate
+        let isPlotLineCard = card.category == "플롯"
         let canCreateUpperCard = canCreateUpperCardFromSelection(contextCard: card)
         let canSummarizeChildren = canSummarizeDirectChildren(for: card)
         let isCloneLinked = scenario.isCardCloned(card.id)
@@ -391,10 +415,29 @@ extension ScenarioWriterView {
                 createUpperCardFromSelection(contextCard: card)
             } : nil,
             onSummarizeChildren: canSummarizeChildren ? {
-                summarizeDirectChildrenIntoParent(cardID: card.id)
+                runChildSummaryFromCardContextMenu(for: card)
+            } : nil,
+            onAIElaborate: {
+                runAICardActionFromContextMenu(for: card, action: .elaborate)
+            },
+            onAINextScene: {
+                runAICardActionFromContextMenu(for: card, action: .nextScene)
+            },
+            onAIAlternative: {
+                runAICardActionFromContextMenu(for: card, action: .alternative)
+            },
+            onAISummarizeCurrent: {
+                runAICardActionFromContextMenu(for: card, action: .summary)
+            },
+            aiPlotActionsEnabled: isPlotLineCard,
+            onApplyAICandidate: isAICandidate ? {
+                applyAICandidateFromCardContextMenu(cardID: card.id)
             } : nil,
             isSummarizingChildren: aiChildSummaryLoadingCardIDs.contains(card.id),
+            isAIBusy: aiIsGenerating,
             onHardDelete: { performHardDelete(card) },
+            onTranscriptionMode: { startDictationMode(from: card) },
+            isTranscriptionBusy: dictationIsRecording || dictationIsProcessing,
             isCloneLinked: isCloneLinked,
             onCloneCard: { copyCardsAsCloneFromContext(card) },
             clonePeerDestinations: clonePeerDestinations,
@@ -1769,75 +1812,19 @@ extension ScenarioWriterView {
         }
     }
 
-    func buildChildCardsSummaryPrompt(parentCard: SceneCard, directChildren: [SceneCard]) -> String {
-        let parentContext = clampedAIText(parentCard.content, maxLength: 1200, preserveLineBreak: true)
+    func buildChildCardsSummaryPrompt(parentCard _: SceneCard, directChildren: [SceneCard]) -> String {
         let orderedChildrenText = directChildren.enumerated().map { idx, child in
             let content = clampedAIText(child.content, maxLength: 1400, preserveLineBreak: true)
             return "\(idx + 1). \(content)"
         }.joined(separator: "\n\n")
-
-        return """
-        당신은 시나리오 편집 도우미다.
-        아래는 하나의 부모 카드와, 그 부모 카드의 \"직계 하위 카드들\"이다.
-        하위 카드들은 위에서 아래 순서가 곧 이야기 전개 순서다.
-
-        [중요 규칙]
-        - 반드시 직계 하위 카드들만 사용해 요약한다. 하위의 하위 카드(더 깊은 열)는 절대 참조하지 않는다.
-        - 한국어로 작성한다.
-        - 한 문단, 2~3문장으로 작성하고 예시 문단과 비슷한 길이(약 35~45어절)를 목표로 한다.
-        - 가능하면 45어절을 넘기지 않는다. 길어질 경우 핵심 사건만 남기고 압축한다.
-        - 핵심 사건 흐름, 인과, 전환을 간결하게 유지한다.
-        - 번호 목록, 마크다운, 따옴표 블록 없이 순수 본문만 출력한다.
-
-        [부모 카드 문맥]
-        \(parentContext)
-
-        [직계 하위 카드 목록(이 순서가 이야기 순서)]
-        \(orderedChildrenText)
-        """
+        return renderEntityDenseSummaryPrompt(articleText: orderedChildrenText)
     }
 
     func normalizedChildSummaryOutput(_ raw: String) -> String {
         var text = raw.replacingOccurrences(of: "\r\n", with: "\n")
-        text = text.replacingOccurrences(of: "\n", with: " ")
         text = text.replacingOccurrences(of: "\t", with: " ")
-        text = text.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+        text = text.replacingOccurrences(of: "\n{3,}", with: "\n\n", options: .regularExpression)
         text = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return "" }
-
-        let sentenceEndings: Set<Character> = [".", "!", "?", "…", "。"]
-        var sentenceCount = 0
-        var sentenceLimited = ""
-        for char in text {
-            sentenceLimited.append(char)
-            if sentenceEndings.contains(char) {
-                sentenceCount += 1
-                if sentenceCount >= 3 { break }
-            }
-        }
-        if sentenceCount > 0 {
-            text = sentenceLimited.trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-
-        let maxWords = 45
-        let words = text.split(whereSeparator: { $0.isWhitespace })
-        if words.count > maxWords {
-            text = words.prefix(maxWords).map(String.init).joined(separator: " ")
-        }
-
-        let maxCharacters = 180
-        if text.count > maxCharacters {
-            let cutoff = text.index(text.startIndex, offsetBy: maxCharacters)
-            var trimmed = String(text[..<cutoff])
-            if let lastSpace = trimmed.lastIndex(of: " "), lastSpace > trimmed.startIndex {
-                trimmed = String(trimmed[..<lastSpace])
-            }
-            text = trimmed.trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-
-        if let last = text.last, !sentenceEndings.contains(last) {
-            text += "."
-        }
         return text
     }
 

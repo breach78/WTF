@@ -1,6 +1,6 @@
 # WTF 사용자 가이드
 
-`WTF`는 macOS용 시나리오/스토리 카드 작성 앱입니다. 카드 트리(부모-자식) 구조로 이야기를 관리하고, 히스토리 스냅샷, AI 보조(Gemini), 음성 받아쓰기(Whisper), PDF/텍스트 내보내기를 제공합니다.
+`WTF`는 macOS용 시나리오/스토리 카드 작성 앱입니다. 카드 트리(부모-자식) 구조로 이야기를 관리하고, 히스토리 스냅샷, AI 보조(Gemini), 음성 받아쓰기(Apple Speech), PDF/텍스트 내보내기를 제공합니다.
 
 ## 1) 앱이 하는 일
 
@@ -60,7 +60,7 @@
 - 후보 카드 생성 후 원하는 후보를 선택해 반영
 - API 키는 설정 창에서 Keychain에 저장/삭제
 
-### 4-6. 받아쓰기 (Whisper)
+### 4-6. 받아쓰기 (Apple Speech)
 
 - 마이크 버튼으로 받아쓰기 시작/종료
 - 처리 완료 시
@@ -121,7 +121,6 @@
 - 출력/AI/저장
   - PDF 출력 옵션(중앙정렬식/한국식)
   - Gemini 모델 선택, API 키 저장/삭제
-  - Whisper 경로 저장/설치 상태 확인/자동 설치
   - 작업 파일(.wtf) 열기/생성/초기화
 - 단축키 목록
 
@@ -140,7 +139,6 @@
 
 - 마이크/음성 인식 권한 필요(받아쓰기 사용 시)
 - Gemini API 호출을 위한 외부 네트워크 사용
-- Whisper 자동 설치 시 `git`, `cmake` 및 모델 다운로드 네트워크 필요
 
 ## 10) 문제 해결
 
@@ -158,8 +156,7 @@
 ### Q3. 받아쓰기가 안 됩니다.
 
 - macOS 마이크/음성 인식 권한 허용 확인
-- 설정 -> Whisper 상태 확인
-- CLI/모델 경로 점검 또는 `자동 설치 / 업데이트` 실행
+- 시스템 음성 인식 권한 상태 및 네트워크/기기 상태 확인
 
 ### Q4. PDF 출력이 비어 있습니다.
 
@@ -173,6 +170,6 @@
 - 카드 편집/이동/출력: `wa/WriterCardManagement.swift`
 - 히스토리/타임라인: `wa/WriterHistoryView.swift`
 - AI 보조: `wa/WriterAI.swift`, `wa/GeminiService.swift`, `wa/KeychainStore.swift`
-- 받아쓰기: `wa/WriterSpeech.swift`, `wa/WhisperSupport.swift`
+- 받아쓰기: `wa/WriterSpeech.swift`
 - 저장 모델: `wa/Models.swift`
 - Xcode 빌드 설정: `wa.xcodeproj/project.pbxproj`

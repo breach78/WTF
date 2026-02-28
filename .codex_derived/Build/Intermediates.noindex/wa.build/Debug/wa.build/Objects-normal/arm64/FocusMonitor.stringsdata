@@ -1,0 +1,56 @@
+{
+  "source": "/Users/three/app_build/wa/wa/FocusMonitor.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "Stop",
+        "location": {
+          "startingColumn": 47,
+          "startingLine": 185
+        }
+      },
+      {
+        "comment": "",
+        "key": "Start",
+        "location": {
+          "startingColumn": 56,
+          "startingLine": 185
+        }
+      },
+      {
+        "comment": "",
+        "key": "Clear",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 192
+        }
+      },
+      {
+        "comment": "",
+        "key": "Copy",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 196
+        }
+      },
+      {
+        "comment": "",
+        "key": "Monitoring: ON",
+        "location": {
+          "startingColumn": 45,
+          "startingLine": 203
+        }
+      },
+      {
+        "comment": "",
+        "key": "Monitoring: OFF",
+        "location": {
+          "startingColumn": 64,
+          "startingLine": 203
+        }
+      }
+    ]
+  },
+  "version": 1
+}

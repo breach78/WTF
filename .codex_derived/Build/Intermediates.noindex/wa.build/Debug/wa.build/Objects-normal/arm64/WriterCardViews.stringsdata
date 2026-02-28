@@ -1,0 +1,152 @@
+{
+  "source": "/Users/three/app_build/wa/wa/WriterCardViews.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "카드 복사",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 137
+        }
+      },
+      {
+        "comment": "",
+        "key": "내용 복사",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 138
+        }
+      },
+      {
+        "comment": "",
+        "key": "AI 후보",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 606
+        }
+      },
+      {
+        "comment": "",
+        "key": "내용 없음 카드 전체 삭제",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 660
+        }
+      },
+      {
+        "comment": "",
+        "key": "클론 카드",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 664
+        }
+      },
+      {
+        "comment": "",
+        "key": "다른 클론으로 이동",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 668
+        }
+      },
+      {
+        "comment": "",
+        "key": "레퍼런스 카드로",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 676
+        }
+      },
+      {
+        "comment": "",
+        "key": "새 상위 카드 만들기",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 680
+        }
+      },
+      {
+        "comment": "",
+        "key": "하위 카드 요약",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 684
+        }
+      },
+      {
+        "comment": "",
+        "key": "삭제",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 688
+        }
+      },
+      {
+        "comment": "",
+        "key": "카드 색",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 694
+        }
+      },
+      {
+        "comment": "",
+        "key": "완전 삭제 (모든 곳)",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 706
+        }
+      },
+      {
+        "comment": "",
+        "key": "기본색",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 695
+        }
+      },
+      {
+        "comment": "",
+        "key": "연보라",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 697
+        }
+      },
+      {
+        "comment": "",
+        "key": "하늘",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 698
+        }
+      },
+      {
+        "comment": "",
+        "key": "민트",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 699
+        }
+      },
+      {
+        "comment": "",
+        "key": "살구",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 700
+        }
+      },
+      {
+        "comment": "",
+        "key": "연노랑",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 701
+        }
+      }
+    ]
+  },
+  "version": 1
+}

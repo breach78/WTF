@@ -2,6 +2,10 @@ import SwiftUI
 import UniformTypeIdentifiers
 import AppKit
 
+final class WeakTextViewBox {
+    weak var textView: NSTextView?
+}
+
 // MARK: - ScenarioWriterView (메인 struct + 프로퍼티 + body + 레이아웃)
 
 struct ScenarioWriterView: View {
@@ -215,6 +219,10 @@ struct ScenarioWriterView: View {
     @State var dictationIsRecording: Bool = false
     @State var dictationIsProcessing: Bool = false
     @State var dictationTargetParentID: UUID? = nil
+    @State var dictationPopupPresented: Bool = false
+    @State var dictationPopupLiveText: String = ""
+    @State var dictationPopupStatusText: String = ""
+    @State var dictationSourceTextViewBox = WeakTextViewBox()
     @State var mainNoChildRightArmCardID: UUID? = nil
     @State var mainNoChildRightArmAt: Date = .distantPast
     @State var mainBoundaryParentLeftArmCardID: UUID? = nil
@@ -438,6 +446,9 @@ struct ScenarioWriterView: View {
             }
             .sheet(item: $aiOptionsSheetAction) { action in
                 aiOptionsSheet(action: action)
+            }
+            .sheet(isPresented: $dictationPopupPresented) {
+                dictationPopupView
             }
             .alert("알림", isPresented: $showExportAlert) {
                 Button("확인", role: .cancel) { isMainViewFocused = true }
@@ -855,6 +866,7 @@ struct ScenarioWriterView: View {
                         .transition(.opacity)
                         .zIndex(10)
                 }
+
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
@@ -893,50 +905,10 @@ struct ScenarioWriterView: View {
             HStack(spacing: 12) {
                 Spacer()
                 checkpointToolbarButton
+                    .padding(.leading, 12)
                 historyToolbarButton
-                dictationToolbarButton
                 aiChatToolbarButton
                 timelineToolbarButton
-            }
-            if dictationIsRecording || dictationIsProcessing {
-                HStack(spacing: 6) {
-                    Spacer()
-                    Circle()
-                        .fill(dictationIsRecording ? Color.red : Color.orange)
-                        .frame(width: 8, height: 8)
-                    Text(dictationIsRecording ? "받아쓰기 진행 중" : "받아쓰기 처리 중")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .padding(.vertical, 4)
-                        .padding(.horizontal, 8)
-                        .background((dictationIsRecording ? Color.red.opacity(0.90) : Color.orange.opacity(0.90)))
-                        .clipShape(Capsule())
-                    Spacer().frame(width: 20)
-                }
-                .padding(.top, 4)
-                .transition(.opacity)
-            } else if aiStatusIsError,
-                      let message = aiStatusMessage,
-                      message.contains("받아쓰기") || message.localizedCaseInsensitiveContains("whisper") || message.contains("마이크") {
-                HStack(spacing: 6) {
-                    Spacer()
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(.white)
-                    Text(message)
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .lineLimit(1)
-                    Spacer().frame(width: 20)
-                }
-                .padding(.top, 4)
-                .padding(.vertical, 4)
-                .padding(.horizontal, 8)
-                .background(Color.red.opacity(0.92))
-                .clipShape(Capsule())
-                .frame(maxWidth: .infinity, alignment: .trailing)
-                .padding(.trailing, 8)
-                .transition(.opacity)
             }
             Spacer()
         }
@@ -987,32 +959,57 @@ struct ScenarioWriterView: View {
         .help("히스토리 타임라인 열기")
     }
 
-    var dictationToolbarButton: some View {
-        let isBusy = dictationIsProcessing || aiIsGenerating
-        return Button {
-            toggleDictationRecording()
-        } label: {
-            Group {
-                if dictationIsRecording {
-                    Image(systemName: "stop.fill")
-                } else if dictationIsProcessing {
-                    ProgressView()
-                        .controlSize(.small)
-                        .frame(width: 14, height: 14)
-                } else {
-                    Image(systemName: "mic.fill")
-                }
+    var dictationPopupView: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("전사 모드")
+                .font(.system(size: 14, weight: .semibold))
+
+            ScrollView {
+                let live = dictationPopupLiveText.trimmingCharacters(in: .whitespacesAndNewlines)
+                Text(live.isEmpty ? "음성을 기다리는 중..." : live)
+                    .font(.system(size: 12))
+                    .foregroundStyle(live.isEmpty ? .secondary : .primary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(8)
             }
-            .padding(8)
-            .background(dictationIsRecording ? Color.red : (isBusy ? Color.accentColor.opacity(0.85) : Color.clear))
-            .background(.ultraThinMaterial)
-            .clipShape(Circle())
-            .foregroundColor((dictationIsRecording || isBusy) ? .white : .primary)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(Color.secondary.opacity(0.25), lineWidth: 1)
+            )
+
+            if !dictationPopupStatusText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Text(dictationPopupStatusText)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+
+            HStack(spacing: 8) {
+                Button("취소") {
+                    cancelDictationMode()
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(dictationIsProcessing)
+
+                Spacer()
+
+                Button("완료") {
+                    finishDictationMode()
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .disabled(!dictationIsRecording || dictationIsProcessing)
+            }
         }
-        .buttonStyle(.plain)
-        .padding(.top, 2)
-        .disabled(dictationIsProcessing || aiIsGenerating || (activeCardID == nil && !dictationIsRecording))
-        .help(dictationIsRecording ? "받아쓰기 중지 후 요약 카드 생성" : "받아쓰기 시작")
+        .padding(12)
+        .frame(width: 420, height: 280, alignment: .topLeading)
+        .onDisappear {
+            if dictationIsRecording {
+                cancelDictationMode()
+            }
+        }
     }
     
     var aiChatToolbarButton: some View {

@@ -1,0 +1,176 @@
+{
+  "source": "/Users/three/app_build/wa/wa/WriterViews.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "카드 삭제",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 409
+        }
+      },
+      {
+        "comment": "",
+        "key": "알림",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 442
+        }
+      },
+      {
+        "comment": "",
+        "key": "취소",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 413
+        }
+      },
+      {
+        "comment": "",
+        "key": "삭제",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 415
+        }
+      },
+      {
+        "comment": "",
+        "key": "삭제",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 417
+        }
+      },
+      {
+        "comment": "",
+        "key": "취소",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 419
+        }
+      },
+      {
+        "comment": "",
+        "key": "선택한 카드들을 삭제(또는 내용 삭제)하시겠습니까?",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 425
+        }
+      },
+      {
+        "comment": "",
+        "key": "이 카드는 하위 카드를 가지고 있습니다. 삭제하면 하위 카드까지 함께 삭제됩니다. 계속하시겠습니까?",
+        "location": {
+          "startingColumn": 40,
+          "startingLine": 428
+        }
+      },
+      {
+        "comment": "",
+        "key": "카드를 삭제하시겠습니까?",
+        "location": {
+          "startingColumn": 182,
+          "startingLine": 428
+        }
+      },
+      {
+        "comment": "",
+        "key": "확인",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 443
+        }
+      },
+      {
+        "comment": "",
+        "key": "이름 있는 분기점 만들기",
+        "location": {
+          "startingColumn": 15,
+          "startingLine": 960
+        }
+      },
+      {
+        "comment": "",
+        "key": "히스토리 타임라인 열기",
+        "location": {
+          "startingColumn": 15,
+          "startingLine": 987
+        }
+      },
+      {
+        "comment": "",
+        "key": "받아쓰기 중지 후 요약 카드 생성",
+        "location": {
+          "startingColumn": 38,
+          "startingLine": 1015
+        }
+      },
+      {
+        "comment": "",
+        "key": "받아쓰기 시작",
+        "location": {
+          "startingColumn": 87,
+          "startingLine": 1015
+        }
+      },
+      {
+        "comment": "",
+        "key": "AI와 시나리오 상담하기",
+        "location": {
+          "startingColumn": 15,
+          "startingLine": 1031
+        }
+      },
+      {
+        "comment": "",
+        "key": "전체 카드 목록 열기",
+        "location": {
+          "startingColumn": 15,
+          "startingLine": 1057
+        }
+      },
+      {
+        "comment": "",
+        "key": "받아쓰기 진행 중",
+        "location": {
+          "startingColumn": 49,
+          "startingLine": 907
+        }
+      },
+      {
+        "comment": "",
+        "key": "받아쓰기 처리 중",
+        "location": {
+          "startingColumn": 77,
+          "startingLine": 907
+        }
+      },
+      {
+        "comment": "",
+        "key": "카드 붙여넣기",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 1113
+        }
+      },
+      {
+        "comment": "",
+        "key": "붙여넣을 위치를 선택하세요.",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 1115
+        }
+      },
+      {
+        "comment": "",
+        "key": "↑/↓ 선택 · Enter 확인 · Esc 취소",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 1124
+        }
+      }
+    ]
+  },
+  "version": 1
+}

@@ -715,8 +715,6 @@ extension ScenarioWriterView {
     @ViewBuilder
     var timelineView: some View {
         VStack(alignment: .leading, spacing: 0) {
-            aiTimelineActionPanel
-
             HStack {
                 Image(systemName: "magnifyingglass").foregroundColor(appearance == "light" ? .black.opacity(0.6) : .white.opacity(0.8))
                 TextField("", text: $searchText, prompt: Text("전체 카드 검색...").foregroundColor(appearance == "light" ? .black.opacity(0.4) : .white.opacity(0.7)))

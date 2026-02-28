@@ -1,0 +1,272 @@
+{
+  "source": "/Users/three/app_build/wa/wa/WriterHistoryView.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "이름 없는 스냅샷",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 296
+        }
+      },
+      {
+        "comment": "",
+        "key": "%@ %@",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 305
+        }
+      },
+      {
+        "comment": "",
+        "key": "이름 변경",
+        "location": {
+          "startingColumn": 39,
+          "startingLine": 282
+        }
+      },
+      {
+        "comment": "",
+        "key": "타임라인 히스토리",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 302
+        }
+      },
+      {
+        "comment": "",
+        "key": "이전 이름",
+        "location": {
+          "startingColumn": 77,
+          "startingLine": 358
+        }
+      },
+      {
+        "comment": "",
+        "key": "다음 이름",
+        "location": {
+          "startingColumn": 73,
+          "startingLine": 363
+        }
+      },
+      {
+        "comment": "",
+        "key": "미리보기 종료",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 373
+        }
+      },
+      {
+        "comment": "",
+        "key": "이 시점으로 복구",
+        "location": {
+          "startingColumn": 72,
+          "startingLine": 369
+        }
+      },
+      {
+        "comment": "",
+        "key": "이름 있는 분기점 만들기",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 393
+        }
+      },
+      {
+        "comment": "",
+        "key": "노트 (선택)",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 398
+        }
+      },
+      {
+        "comment": "",
+        "key": "분기점 이름 (예: 주인공 성격 수정)",
+        "location": {
+          "startingColumn": 23,
+          "startingLine": 395
+        }
+      },
+      {
+        "comment": "",
+        "key": "취소",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 419
+        }
+      },
+      {
+        "comment": "",
+        "key": "저장",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 422
+        }
+      },
+      {
+        "comment": "",
+        "key": "네임드 스냅샷/노트 검색...",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 470
+        }
+      },
+      {
+        "comment": "",
+        "key": "",
+        "location": {
+          "startingColumn": 17,
+          "startingLine": 468
+        }
+      },
+      {
+        "comment": "",
+        "key": "네임드 스냅샷 노트",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 494
+        }
+      },
+      {
+        "comment": "",
+        "key": "네임드 스냅샷이 없습니다",
+        "location": {
+          "startingColumn": 46,
+          "startingLine": 530
+        }
+      },
+      {
+        "comment": "",
+        "key": "검색 결과 없음",
+        "location": {
+          "startingColumn": 86,
+          "startingLine": 530
+        }
+      },
+      {
+        "comment": "",
+        "key": "이 시점은 네임드 스냅샷이 아닙니다",
+        "location": {
+          "startingColumn": 21,
+          "startingLine": 617
+        }
+      },
+      {
+        "comment": "",
+        "key": "연결 노트",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 637
+        }
+      },
+      {
+        "comment": "",
+        "key": "완료",
+        "location": {
+          "startingColumn": 53,
+          "startingLine": 641
+        }
+      },
+      {
+        "comment": "",
+        "key": "편집",
+        "location": {
+          "startingColumn": 64,
+          "startingLine": 641
+        }
+      },
+      {
+        "comment": "",
+        "key": "전체 카드 (최신순)",
+        "location": {
+          "startingColumn": 39,
+          "startingLine": 753
+        }
+      },
+      {
+        "comment": "",
+        "key": "검색 결과",
+        "location": {
+          "startingColumn": 69,
+          "startingLine": 753
+        }
+      },
+      {
+        "comment": "",
+        "key": "전체 카드 검색...",
+        "location": {
+          "startingColumn": 63,
+          "startingLine": 722
+        }
+      },
+      {
+        "comment": "",
+        "key": "",
+        "location": {
+          "startingColumn": 27,
+          "startingLine": 722
+        }
+      },
+      {
+        "comment": "",
+        "key": "클립보드에 복사",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 731
+        }
+      },
+      {
+        "comment": "",
+        "key": "텍스트 파일로 저장...",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 732
+        }
+      },
+      {
+        "comment": "",
+        "key": "중앙정렬식 PDF 저장...",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 734
+        }
+      },
+      {
+        "comment": "",
+        "key": "한국식 PDF 저장...",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 735
+        }
+      },
+      {
+        "comment": "",
+        "key": "출력",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 739
+        }
+      },
+      {
+        "comment": "",
+        "key": "카드가 없습니다",
+        "location": {
+          "startingColumn": 73,
+          "startingLine": 763
+        }
+      },
+      {
+        "comment": "",
+        "key": "'%@' 검색 결과 없음",
+        "location": {
+          "startingColumn": 100,
+          "startingLine": 763
+        }
+      }
+    ]
+  },
+  "version": 1
+}

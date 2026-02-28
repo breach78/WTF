@@ -1,0 +1,896 @@
+{
+  "source": "/Users/three/app_build/wa/wa/waApp.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "레퍼런스 카드",
+        "location": {
+          "startingColumn": 16,
+          "startingLine": 484
+        }
+      },
+      {
+        "comment": "",
+        "key": "작업 파일을 먼저 열어주세요.",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 492
+        }
+      },
+      {
+        "comment": "",
+        "key": "Undo",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 502
+        }
+      },
+      {
+        "comment": "",
+        "key": "Redo",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 510
+        }
+      },
+      {
+        "comment": "",
+        "key": "레퍼런스 창 열기",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 519
+        }
+      },
+      {
+        "comment": "",
+        "key": "집중 모드 토글",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 525
+        }
+      },
+      {
+        "comment": "",
+        "key": "다크 모드",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 531
+        }
+      },
+      {
+        "comment": "",
+        "key": "메인 작업창 스플릿 모드",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 534
+        }
+      },
+      {
+        "comment": "",
+        "key": "포커스 모드 타이프라이터",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 537
+        }
+      },
+      {
+        "comment": "",
+        "key": "메인 작업창 줌 축소",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 540
+        }
+      },
+      {
+        "comment": "",
+        "key": "메인 작업창 줌 확대",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 545
+        }
+      },
+      {
+        "comment": "",
+        "key": "메인 작업창 줌 100%",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 550
+        }
+      },
+      {
+        "comment": "",
+        "key": "편집기",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 555
+        }
+      },
+      {
+        "comment": "",
+        "key": "폰트 작게",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 556
+        }
+      },
+      {
+        "comment": "",
+        "key": "폰트 크게",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 561
+        }
+      },
+      {
+        "comment": "",
+        "key": "폰트 기본값 (17pt)",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 566
+        }
+      },
+      {
+        "comment": "",
+        "key": "데이터 저장 위치 설정",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 589
+        }
+      },
+      {
+        "comment": "",
+        "key": "시나리오 텍스트 파일을 저장할 작업 파일(.wtf)을 선택해주세요.\n클라우드 동기화 폴더(Dropbox, iCloud Drive 등)에 저장하면\n다른 기기에서도 이어서 작업할 수 있습니다.",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 592
+        }
+      },
+      {
+        "comment": "",
+        "key": "기존 작업 파일 열기",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 601
+        }
+      },
+      {
+        "comment": "",
+        "key": "새 작업 파일 만들기",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 609
+        }
+      },
+      {
+        "comment": "",
+        "key": "앱에 포함된 아래 폰트 파일은 SIL Open Font License 1.1 조건으로 배포됩니다.",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 1174
+        }
+      },
+      {
+        "comment": "",
+        "key": "OFL 공식 전문 열기",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 1187
+        }
+      },
+      {
+        "comment": "",
+        "key": "라이선스 전문 보기",
+        "location": {
+          "startingColumn": 29,
+          "startingLine": 1190
+        }
+      },
+      {
+        "comment": "",
+        "key": "메인 모드 행간 (임시): %@",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 1209
+        }
+      },
+      {
+        "comment": "",
+        "key": "카드 위아래 간격: %lld",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 1212
+        }
+      },
+      {
+        "comment": "",
+        "key": "기본값은 0이며, 필요할 때만 행 간격을 넓혀 보이게 합니다.",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 1214
+        }
+      },
+      {
+        "comment": "",
+        "key": "포커스 모드 행간 (임시): %@",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 1219
+        }
+      },
+      {
+        "comment": "",
+        "key": "타이프라이터 토글은 상단 메뉴 > 화면에서 변경합니다.",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 1224
+        }
+      },
+      {
+        "comment": "",
+        "key": "타이프라이터 기준선",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 1229
+        }
+      },
+      {
+        "comment": "",
+        "key": "현재 타이프라이터 모드가 켜져 있습니다.",
+        "location": {
+          "startingColumn": 55,
+          "startingLine": 1237
+        }
+      },
+      {
+        "comment": "",
+        "key": "현재 타이프라이터 모드가 꺼져 있습니다.",
+        "location": {
+          "startingColumn": 116,
+          "startingLine": 1237
+        }
+      },
+      {
+        "comment": "",
+        "key": "중앙 50%",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 1230
+        }
+      },
+      {
+        "comment": "",
+        "key": "기본 60%",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 1231
+        }
+      },
+      {
+        "comment": "",
+        "key": "아래 66%",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 1232
+        }
+      },
+      {
+        "comment": "",
+        "key": "현재 저장 경로:",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 1244
+        }
+      },
+      {
+        "comment": "",
+        "key": "기존 작업 파일 열기...",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 1253
+        }
+      },
+      {
+        "comment": "",
+        "key": "새 작업 파일 만들기...",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 1257
+        }
+      },
+      {
+        "comment": "",
+        "key": "작업 파일 초기화 (다시 선택)",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 1261
+        }
+      },
+      {
+        "comment": "",
+        "key": "백업 폴더",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 1270
+        }
+      },
+      {
+        "comment": "",
+        "key": "보관 정책: 최신 10개 + 이후 일 1개(7일) + 주 1개(4주까지) + 이후 월 1개",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 1289
+        }
+      },
+      {
+        "comment": "",
+        "key": "백업 파일명: 작업이름-YYYY-MM-DD-HH-mm-ss.wtf.zip",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 1294
+        }
+      },
+      {
+        "comment": "",
+        "key": "앱 종료 시 자동 백업",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 1268
+        }
+      },
+      {
+        "comment": "",
+        "key": "백업 폴더 선택...",
+        "location": {
+          "startingColumn": 36,
+          "startingLine": 1280
+        }
+      },
+      {
+        "comment": "",
+        "key": "기본 위치로",
+        "location": {
+          "startingColumn": 36,
+          "startingLine": 1283
+        }
+      },
+      {
+        "comment": "",
+        "key": "중앙정렬식 PDF",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 1312
+        }
+      },
+      {
+        "comment": "",
+        "key": "폰트 크기: %@pt",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 1314
+        }
+      },
+      {
+        "comment": "",
+        "key": "한국식 PDF",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 1322
+        }
+      },
+      {
+        "comment": "",
+        "key": "폰트 크기: %@pt",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 1324
+        }
+      },
+      {
+        "comment": "",
+        "key": "헤딩 볼드",
+        "location": {
+          "startingColumn": 36,
+          "startingLine": 1316
+        }
+      },
+      {
+        "comment": "",
+        "key": "캐릭터 볼드",
+        "location": {
+          "startingColumn": 36,
+          "startingLine": 1317
+        }
+      },
+      {
+        "comment": "",
+        "key": "오른쪽 씬 번호 표시",
+        "location": {
+          "startingColumn": 36,
+          "startingLine": 1318
+        }
+      },
+      {
+        "comment": "",
+        "key": "씬 헤딩 볼드",
+        "location": {
+          "startingColumn": 36,
+          "startingLine": 1326
+        }
+      },
+      {
+        "comment": "",
+        "key": "캐릭터 볼드",
+        "location": {
+          "startingColumn": 36,
+          "startingLine": 1327
+        }
+      },
+      {
+        "comment": "",
+        "key": "캐릭터 정렬",
+        "location": {
+          "startingColumn": 36,
+          "startingLine": 1328
+        }
+      },
+      {
+        "comment": "",
+        "key": "오른쪽",
+        "location": {
+          "startingColumn": 38,
+          "startingLine": 1329
+        }
+      },
+      {
+        "comment": "",
+        "key": "왼쪽",
+        "location": {
+          "startingColumn": 38,
+          "startingLine": 1330
+        }
+      },
+      {
+        "comment": "",
+        "key": "Gemini 모델",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 1337
+        }
+      },
+      {
+        "comment": "",
+        "key": "Gemini 3.1 Pro의 API 모델 ID는 gemini-3.1-pro-preview 입니다. 404가 뜨면 상단 메뉴에서 다른 모델을 선택하세요.",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 1358
+        }
+      },
+      {
+        "comment": "",
+        "key": "Gemini API 키",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 1363
+        }
+      },
+      {
+        "comment": "",
+        "key": "모델 선택",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 1340
+        }
+      },
+      {
+        "comment": "",
+        "key": "예: gemini-3.1-pro-preview",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 1352
+        }
+      },
+      {
+        "comment": "",
+        "key": "새 키를 입력하면 덮어씁니다",
+        "location": {
+          "startingColumn": 55,
+          "startingLine": 1366
+        }
+      },
+      {
+        "comment": "",
+        "key": "API 키 입력",
+        "location": {
+          "startingColumn": 99,
+          "startingLine": 1366
+        }
+      },
+      {
+        "comment": "",
+        "key": "현재 API 키가 저장되어 있습니다.",
+        "location": {
+          "startingColumn": 48,
+          "startingLine": 1381
+        }
+      },
+      {
+        "comment": "",
+        "key": "현재 저장된 API 키가 없습니다.",
+        "location": {
+          "startingColumn": 97,
+          "startingLine": 1381
+        }
+      },
+      {
+        "comment": "",
+        "key": "직접 입력",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 1344
+        }
+      },
+      {
+        "comment": "",
+        "key": "키 업데이트",
+        "location": {
+          "startingColumn": 54,
+          "startingLine": 1370
+        }
+      },
+      {
+        "comment": "",
+        "key": "키 저장",
+        "location": {
+          "startingColumn": 75,
+          "startingLine": 1370
+        }
+      },
+      {
+        "comment": "",
+        "key": "키 삭제",
+        "location": {
+          "startingColumn": 36,
+          "startingLine": 1375
+        }
+      },
+      {
+        "comment": "",
+        "key": "로컬 whisper.cpp 엔진을 사용합니다. 다른 Mac에서는 자동 설치로 CLI/모델을 한 번에 준비할 수 있습니다.",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 1396
+        }
+      },
+      {
+        "comment": "",
+        "key": "설치 루트 경로",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 1401
+        }
+      },
+      {
+        "comment": "",
+        "key": "whisper-cli 경로",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 1404
+        }
+      },
+      {
+        "comment": "",
+        "key": "모델 경로 (.bin)",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 1407
+        }
+      },
+      {
+        "comment": "",
+        "key": "현재 Whisper 받아쓰기 사용 가능",
+        "location": {
+          "startingColumn": 51,
+          "startingLine": 1441
+        }
+      },
+      {
+        "comment": "",
+        "key": "현재 Whisper 설치 또는 경로 확인이 필요합니다.",
+        "location": {
+          "startingColumn": 97,
+          "startingLine": 1441
+        }
+      },
+      {
+        "comment": "",
+        "key": "경로 저장",
+        "location": {
+          "startingColumn": 36,
+          "startingLine": 1411
+        }
+      },
+      {
+        "comment": "",
+        "key": "기본 경로 채우기",
+        "location": {
+          "startingColumn": 36,
+          "startingLine": 1417
+        }
+      },
+      {
+        "comment": "",
+        "key": "설치 상태 확인",
+        "location": {
+          "startingColumn": 36,
+          "startingLine": 1425
+        }
+      },
+      {
+        "comment": "",
+        "key": "자동 설치 / 업데이트",
+        "location": {
+          "startingColumn": 36,
+          "startingLine": 1430
+        }
+      },
+      {
+        "comment": "",
+        "key": "라이트/다크 모드는 그대로 유지하며 카드/배경 색 팔레트만 교체합니다.",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 1469
+        }
+      },
+      {
+        "comment": "",
+        "key": "프리셋",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 1455
+        }
+      },
+      {
+        "comment": "",
+        "key": "선택한 프리셋 적용",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 1465
+        }
+      },
+      {
+        "comment": "",
+        "key": "사용자: %@",
+        "location": {
+          "startingColumn": 38,
+          "startingLine": 1460
+        }
+      },
+      {
+        "comment": "",
+        "key": "현재 색상을 이름 있는 프리셋으로 저장할 수 있습니다.",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 1477
+        }
+      },
+      {
+        "comment": "",
+        "key": "프리셋으로 저장",
+        "location": {
+          "startingColumn": 36,
+          "startingLine": 1481
+        }
+      },
+      {
+        "comment": "",
+        "key": "카드/배경 색 기본값으로",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 1518
+        }
+      },
+      {
+        "comment": "",
+        "key": "설정",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 1525
+        }
+      },
+      {
+        "comment": "",
+        "key": "단축키",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 1555
+        }
+      },
+      {
+        "comment": "",
+        "key": "색상 프리셋 저장",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 1666
+        }
+      },
+      {
+        "comment": "",
+        "key": "현재 카드/배경 색 조합을 프리셋 메뉴에 추가합니다.",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 1669
+        }
+      },
+      {
+        "comment": "",
+        "key": "프리셋 이름",
+        "location": {
+          "startingColumn": 23,
+          "startingLine": 1673
+        }
+      },
+      {
+        "comment": "",
+        "key": "취소",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 1687
+        }
+      },
+      {
+        "comment": "",
+        "key": "저장",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 1690
+        }
+      },
+      {
+        "comment": "",
+        "key": "라이트",
+        "location": {
+          "startingColumn": 21,
+          "startingLine": 1725
+        }
+      },
+      {
+        "comment": "",
+        "key": "다크",
+        "location": {
+          "startingColumn": 21,
+          "startingLine": 1729
+        }
+      },
+      {
+        "comment": "",
+        "key": "시나리오를 선택하세요",
+        "location": {
+          "startingColumn": 44,
+          "startingLine": 2139
+        }
+      },
+      {
+        "comment": "",
+        "key": "새 시나리오 만들기",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 2176
+        }
+      },
+      {
+        "comment": "",
+        "key": "사용 가능한 템플릿이 없습니다. 먼저 시나리오를 템플릿으로 만드세요.",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 2190
+        }
+      },
+      {
+        "comment": "",
+        "key": "시나리오 이름",
+        "location": {
+          "startingColumn": 27,
+          "startingLine": 2179
+        }
+      },
+      {
+        "comment": "",
+        "key": "생성 방식",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 2182
+        }
+      },
+      {
+        "comment": "",
+        "key": "템플릿 선택",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 2194
+        }
+      },
+      {
+        "comment": "",
+        "key": "클린 시나리오",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 2183
+        }
+      },
+      {
+        "comment": "",
+        "key": "템플릿에서 생성",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 2184
+        }
+      },
+      {
+        "comment": "",
+        "key": "취소",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 2206
+        }
+      },
+      {
+        "comment": "",
+        "key": "생성",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 2209
+        }
+      },
+      {
+        "comment": "",
+        "key": "제목 입력",
+        "location": {
+          "startingColumn": 39,
+          "startingLine": 2280
+        }
+      },
+      {
+        "comment": "",
+        "key": "새 시나리오 추가",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 2313
+        }
+      },
+      {
+        "comment": "",
+        "key": "템플릿",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 2556
+        }
+      },
+      {
+        "comment": "",
+        "key": "이름 변경",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 2567
+        }
+      },
+      {
+        "comment": "",
+        "key": "템플릿으로 만들기",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 2568
+        }
+      },
+      {
+        "comment": "",
+        "key": "삭제",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 2569
+        }
+      }
+    ]
+  },
+  "version": 1
+}
