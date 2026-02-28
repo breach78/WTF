@@ -144,30 +144,16 @@ struct PreviewCardItem: View {
 
 // MARK: - 포커스 모드 카드 에디터
 
-private final class ReusableTextHeightMeasurer {
-    private let storage = NSTextStorage()
-    private let layoutManager = NSLayoutManager()
-    private let textContainer: NSTextContainer
-    private let paragraphStyle = NSMutableParagraphStyle()
-
-    init(lineFragmentPadding: CGFloat) {
-        let container = NSTextContainer(size: CGSize(width: 1, height: CGFloat.greatestFiniteMagnitude))
-        container.lineFragmentPadding = lineFragmentPadding
-        container.lineBreakMode = .byWordWrapping
-        container.maximumNumberOfLines = 0
-        container.widthTracksTextView = false
-        container.heightTracksTextView = false
-        textContainer = container
-        layoutManager.addTextContainer(container)
-        storage.addLayoutManager(layoutManager)
+private enum FocusModeTextHeightCalculator {
+    private static var lineFragmentPadding: CGFloat {
+        FocusModeLayoutMetrics.focusModeLineFragmentPadding
     }
 
-    func measureBodyHeight(
+    static func measureBodyHeight(
         text: String,
         fontSize: CGFloat,
         lineSpacing: CGFloat,
-        width: CGFloat,
-        safetyInset: CGFloat = 0
+        width: CGFloat
     ) -> CGFloat {
         let measuringText: String
         if text.isEmpty {
@@ -177,42 +163,34 @@ private final class ReusableTextHeightMeasurer {
         } else {
             measuringText = text
         }
-
         let constrainedWidth = max(1, width)
-        if abs(textContainer.containerSize.width - constrainedWidth) > 0.5 {
-            textContainer.containerSize = CGSize(width: constrainedWidth, height: CGFloat.greatestFiniteMagnitude)
-        }
-
+        let paragraphStyle = NSMutableParagraphStyle()
         paragraphStyle.lineSpacing = lineSpacing
         paragraphStyle.lineBreakMode = .byWordWrapping
-        paragraphStyle.lineHeightMultiple = 1.0
-        paragraphStyle.paragraphSpacing = 0
-        paragraphStyle.paragraphSpacingBefore = 0
 
         let font = NSFont(name: "SansMonoCJKFinalDraft", size: fontSize)
             ?? NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
 
-        storage.beginEditing()
-        storage.setAttributedString(
-            NSAttributedString(
-                string: measuringText,
-                attributes: [
-                    .font: font,
-                    .paragraphStyle: paragraphStyle
-                ]
-            )
+        let storage = NSTextStorage(
+            string: measuringText,
+            attributes: [
+                .font: font,
+                .paragraphStyle: paragraphStyle
+            ]
         )
-        storage.endEditing()
+        let layoutManager = NSLayoutManager()
+        let textContainer = NSTextContainer(size: CGSize(width: constrainedWidth, height: CGFloat.greatestFiniteMagnitude))
+        textContainer.lineFragmentPadding = lineFragmentPadding
+        textContainer.lineBreakMode = .byWordWrapping
+        textContainer.maximumNumberOfLines = 0
+        textContainer.widthTracksTextView = false
+        textContainer.heightTracksTextView = false
+        layoutManager.addTextContainer(textContainer)
+        storage.addLayoutManager(layoutManager)
         layoutManager.ensureLayout(for: textContainer)
 
         let usedHeight = layoutManager.usedRect(for: textContainer).height
-        return max(1, ceil(usedHeight + safetyInset))
-    }
-}
-
-private enum FocusModeTextHeightCalculator {
-    static func makeMeasurer() -> ReusableTextHeightMeasurer {
-        ReusableTextHeightMeasurer(lineFragmentPadding: FocusModeLayoutMetrics.focusModeLineFragmentPadding)
+        return max(1, ceil(usedHeight + focusModeBodySafetyInset))
     }
 }
 
@@ -230,12 +208,7 @@ struct FocusModeCardEditor: View {
     @AppStorage("focusModeLineSpacingValueTemp") private var focusModeLineSpacingValue: Double = 4.5
     @State private var measuredBodyHeight: CGFloat = 0
     @State private var measuredCardWidth: CGFloat = 0
-    @State private var measuredHeightRefreshWorkItem: DispatchWorkItem? = nil
-    @State private var measuredHeightRefreshLastAt: Date = .distantPast
-    @State private var bodyHeightMeasurer = FocusModeTextHeightCalculator.makeMeasurer()
     private let verticalInset: CGFloat = 40
-    private let measuredHeightRefreshMinInterval: TimeInterval = 0.033
-    private let measuredHeightUpdateThreshold: CGFloat = 0.25
     private var targetMeasuredHeight: CGFloat {
         guard measuredBodyHeight > 1 else { return 0 }
         return measuredBodyHeight + (verticalInset * 2)
@@ -262,48 +235,20 @@ struct FocusModeCardEditor: View {
                 guard oldValue != newValue else { return }
                 card.content = newValue
                 onContentChange(oldValue, newValue)
-                scheduleMeasuredHeightRefresh()
+                refreshMeasuredHeights()
             }
         )
     }
 
-    private func liveFocusedResponderBodyHeight() -> CGFloat? {
-        guard isActive else { return nil }
-        guard focusModeEditorCardID == card.id else { return nil }
-        guard let textView = NSApp.keyWindow?.firstResponder as? NSTextView else { return nil }
-        guard textView.string == card.content else { return nil }
-        guard let layoutManager = textView.layoutManager,
-              let textContainer = textView.textContainer else { return nil }
-        let textLength = (textView.string as NSString).length
-        let fullRange = NSRange(location: 0, length: textLength)
-        if textLength > 0 {
-            layoutManager.ensureGlyphs(forCharacterRange: fullRange)
-            layoutManager.ensureLayout(forCharacterRange: fullRange)
-        }
-        layoutManager.ensureLayout(for: textContainer)
-        let usedHeight = layoutManager.usedRect(for: textContainer).height
-        guard usedHeight > 0 else { return nil }
-        let insetHeight = textView.textContainerInset.height * 2
-        return max(1, ceil(usedHeight + insetHeight + focusModeBodySafetyInset))
-    }
-
     private func refreshMeasuredHeights() {
-        measuredHeightRefreshLastAt = Date()
         guard measuredCardWidth > 1 else {
             return
         }
-        if let liveMeasured = liveFocusedResponderBodyHeight() {
-            if abs(measuredBodyHeight - liveMeasured) > measuredHeightUpdateThreshold {
-                measuredBodyHeight = liveMeasured
-            }
-            return
-        }
-        let deterministicBodyHeight = bodyHeightMeasurer.measureBodyHeight(
+        let deterministicBodyHeight = FocusModeTextHeightCalculator.measureBodyHeight(
             text: sizingText,
             fontSize: focusModeFontSize,
             lineSpacing: focusModeLineSpacing,
-            width: textEditorMeasureWidth,
-            safetyInset: focusModeBodySafetyInset
+            width: textEditorMeasureWidth
         )
         let resolvedBodyHeight: CGFloat
         let observedRangeMin: CGFloat
@@ -322,36 +267,11 @@ struct FocusModeCardEditor: View {
             let noObservedScale: CGFloat = deterministicBodyHeight > 180 ? 0.95 : 1.0
             resolvedBodyHeight = max(1, deterministicBodyHeight * noObservedScale)
         }
-
-        if abs(measuredBodyHeight - resolvedBodyHeight) > measuredHeightUpdateThreshold {
+        
+        if abs(measuredBodyHeight - resolvedBodyHeight) > 0.25 {
             measuredBodyHeight = resolvedBodyHeight
         }
-    }
-
-    private func scheduleMeasuredHeightRefresh(immediate: Bool = false) {
-        if immediate {
-            measuredHeightRefreshWorkItem?.cancel()
-            measuredHeightRefreshWorkItem = nil
-            refreshMeasuredHeights()
-            return
         }
-
-        let now = Date()
-        let elapsed = now.timeIntervalSince(measuredHeightRefreshLastAt)
-        let delay = max(0, measuredHeightRefreshMinInterval - elapsed)
-        guard delay > 0.001 else {
-            refreshMeasuredHeights()
-            return
-        }
-
-        measuredHeightRefreshWorkItem?.cancel()
-        let work = DispatchWorkItem {
-            measuredHeightRefreshWorkItem = nil
-            refreshMeasuredHeights()
-        }
-        measuredHeightRefreshWorkItem = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
-    }
 
     var body: some View {
         ZStack(alignment: .topLeading) {
@@ -385,29 +305,25 @@ struct FocusModeCardEditor: View {
             DispatchQueue.main.async {
                 guard abs(measuredCardWidth - normalizedWidth) > 0.25 else { return }
                 measuredCardWidth = normalizedWidth
-                scheduleMeasuredHeightRefresh(immediate: true)
+                refreshMeasuredHeights()
             }
         }
         .onAppear {
-            scheduleMeasuredHeightRefresh(immediate: true)
-        }
-        .onDisappear {
-            measuredHeightRefreshWorkItem?.cancel()
-            measuredHeightRefreshWorkItem = nil
+            refreshMeasuredHeights()
         }
         .onChange(of: isActive) { _, newValue in
             if newValue {
-                scheduleMeasuredHeightRefresh(immediate: true)
+                refreshMeasuredHeights()
             }
         }
         .onChange(of: fontSize) { _, _ in
-            scheduleMeasuredHeightRefresh(immediate: true)
+            refreshMeasuredHeights()
         }
         .onChange(of: focusModeLineSpacingValue) { _, _ in
-            scheduleMeasuredHeightRefresh(immediate: true)
+            refreshMeasuredHeights()
         }
         .onChange(of: observedBodyHeight) { _, _ in
-            scheduleMeasuredHeightRefresh(immediate: true)
+            refreshMeasuredHeights()
         }
         .contentShape(Rectangle())
         .onTapGesture { onActivate() }
@@ -451,9 +367,6 @@ struct CardItem: View {
     @State private var mainEditingMeasuredBodyHeight: CGFloat = 0
     @State private var mainEditingMeasureWorkItem: DispatchWorkItem? = nil
     @State private var mainEditingMeasureLastAt: Date = .distantPast
-    @State private var mainBodyHeightMeasurer = ReusableTextHeightMeasurer(
-        lineFragmentPadding: MainEditorLayoutMetrics.mainEditorLineFragmentPadding
-    )
     @FocusState private var editorFocus: Bool
     @AppStorage("fontSize") private var fontSize: Double = 14.0
     @AppStorage("appearance") private var appearance: String = "dark"
@@ -467,6 +380,7 @@ struct CardItem: View {
     private var mainCardLineSpacing: CGFloat { CGFloat(mainCardLineSpacingValue) }
     private let mainCardContentPadding: CGFloat = MainEditorLayoutMetrics.mainCardContentPadding
     private let mainEditorVerticalPadding: CGFloat = 24
+    private let mainEditorLineFragmentPadding: CGFloat = MainEditorLayoutMetrics.mainEditorLineFragmentPadding
     private let mainEditingMeasureMinInterval: TimeInterval = 0.033
     private let mainEditingMeasureUpdateThreshold: CGFloat = 0.5
     private var mainEditorHorizontalPadding: CGFloat {
@@ -574,12 +488,41 @@ struct CardItem: View {
     }
 
     private func measureMainEditorBodyHeight(text: String, width: CGFloat) -> CGFloat {
-        mainBodyHeightMeasurer.measureBodyHeight(
-            text: text,
-            fontSize: CGFloat(fontSize),
-            lineSpacing: mainCardLineSpacing,
-            width: width
+        let content: String
+        if text.isEmpty {
+            content = " "
+        } else if text.hasSuffix("\n") {
+            content = text + " "
+        } else {
+            content = text
+        }
+
+        let paragraphStyle = NSMutableParagraphStyle()
+        paragraphStyle.lineSpacing = mainCardLineSpacing
+        paragraphStyle.lineBreakMode = .byWordWrapping
+
+        let font = NSFont(name: "SansMonoCJKFinalDraft", size: fontSize)
+            ?? NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
+
+        let storage = NSTextStorage(
+            string: content,
+            attributes: [
+                .font: font,
+                .paragraphStyle: paragraphStyle
+            ]
         )
+        let layoutManager = NSLayoutManager()
+        let textContainer = NSTextContainer(size: CGSize(width: max(1, width), height: CGFloat.greatestFiniteMagnitude))
+        textContainer.lineFragmentPadding = mainEditorLineFragmentPadding
+        textContainer.lineBreakMode = .byWordWrapping
+        textContainer.maximumNumberOfLines = 0
+        textContainer.widthTracksTextView = false
+        textContainer.heightTracksTextView = false
+        layoutManager.addTextContainer(textContainer)
+        storage.addLayoutManager(layoutManager)
+        layoutManager.ensureLayout(for: textContainer)
+        let usedHeight = layoutManager.usedRect(for: textContainer).height
+        return max(1, ceil(usedHeight))
     }
 
     private func refreshMainEditingMeasuredBodyHeight() {

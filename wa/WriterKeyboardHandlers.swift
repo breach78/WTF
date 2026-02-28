@@ -795,6 +795,7 @@ extension ScenarioWriterView {
 
     // --- Main Nav Key Monitor ---
     func startMainNavKeyMonitor() {
+        guard !showFocusMode else { return }
         if mainNavKeyMonitor != nil { return }
         mainNavKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { event in
             let isReferenceWindowEvent = event.window?.identifier?.rawValue == ReferenceWindowConstants.windowID

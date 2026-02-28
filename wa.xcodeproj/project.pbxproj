@@ -268,12 +268,8 @@
 				ENABLE_RESOURCE_ACCESS_PRINTING = NO;
 				ENABLE_RESOURCE_ACCESS_USB = NO;
 				ENABLE_USER_SELECTED_FILES = readwrite;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDocumentTypes = "{\n    CFBundleTypeExtensions =     (\n        wtf\n    );\n    CFBundleTypeName = \"wa Workspace\";\n    CFBundleTypeRole = Editor;\n    LSHandlerRank = Owner;\n    LSItemContentTypes =     (\n        \"com.wa.workspace\"\n    );\n    LSTypeIsPackage = YES;\n}";
-				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "음성 받아쓰기 기능을 위해 마이크 접근이 필요합니다.";
-				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "받아쓰기한 음성을 텍스트로 변환하기 위해 필요합니다.";
-				INFOPLIST_KEY_UTExportedTypeDeclarations = "{\n    UTTypeConformsTo =     (\n        \"com.apple.package\"\n    );\n    UTTypeDescription = \"wa Workspace\";\n    UTTypeIdentifier = \"com.wa.workspace\";\n    UTTypeTagSpecification =     {\n        \"public.filename-extension\" =         (\n            wtf\n        );\n    };\n}";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -314,12 +310,8 @@
 				ENABLE_RESOURCE_ACCESS_PRINTING = NO;
 				ENABLE_RESOURCE_ACCESS_USB = NO;
 				ENABLE_USER_SELECTED_FILES = readwrite;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDocumentTypes = "{\n    CFBundleTypeExtensions =     (\n        wtf\n    );\n    CFBundleTypeName = \"wa Workspace\";\n    CFBundleTypeRole = Editor;\n    LSHandlerRank = Owner;\n    LSItemContentTypes =     (\n        \"com.wa.workspace\"\n    );\n    LSTypeIsPackage = YES;\n}";
-				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "음성 받아쓰기 기능을 위해 마이크 접근이 필요합니다.";
-				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "받아쓰기한 음성을 텍스트로 변환하기 위해 필요합니다.";
-				INFOPLIST_KEY_UTExportedTypeDeclarations = "{\n    UTTypeConformsTo =     (\n        \"com.apple.package\"\n    );\n    UTTypeDescription = \"wa Workspace\";\n    UTTypeIdentifier = \"com.wa.workspace\";\n    UTTypeTagSpecification =     {\n        \"public.filename-extension\" =         (\n            wtf\n        );\n    };\n}";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",

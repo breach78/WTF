@@ -576,6 +576,8 @@ struct ScenarioWriterView: View {
             ]
         }
         if isOn {
+            stopMainNavKeyMonitor()
+            stopMainCaretMonitor()
             finalizeMainTypingCoalescing(reason: "focus-enter")
             resetMainTypingCoalescing()
             resetFocusTypingCoalescing()
@@ -601,6 +603,9 @@ struct ScenarioWriterView: View {
             stopFocusModeKeyMonitor()
             stopFocusModeScrollMonitor()
             stopFocusModeCaretMonitor()
+            startMainNavKeyMonitor()
+            startMainCaretMonitor()
+            requestMainCanvasRestoreForFocusExit()
         }
     }
 
@@ -852,21 +857,17 @@ struct ScenarioWriterView: View {
     func primaryWorkspaceColumn(size: CGSize, availableWidth: CGFloat) -> some View {
         VStack(spacing: 0) {
             ZStack {
-                mainCanvasWithOptionalZoom(size: size, availableWidth: availableWidth)
-                    .opacity(showFocusMode ? 0 : 1)
-                    .allowsHitTesting(!showFocusMode)
-
-                if !showFocusMode, showWorkspaceTopToolbar {
-                    workspaceTopToolbar
-                }
-
                 if showFocusMode {
                     focusModeCanvas(size: size)
                         .ignoresSafeArea(.container, edges: .top)
                         .transition(.opacity)
                         .zIndex(10)
+                } else {
+                    mainCanvasWithOptionalZoom(size: size, availableWidth: availableWidth)
+                    if showWorkspaceTopToolbar {
+                        workspaceTopToolbar
+                    }
                 }
-
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
@@ -1220,15 +1221,19 @@ struct ScenarioWriterView: View {
                 mainCanvasScrollableContent(size: size, availableWidth: availableWidth)
             }
             .onChange(of: Int(historyIndex)) { _, _ in
+                guard !showFocusMode else { return }
                 handleMainCanvasHistoryIndexChange(hProxy: hProxy)
             }
             .onChange(of: activeCardID) { _, newID in
+                guard !showFocusMode else { return }
                 handleMainCanvasActiveCardChange(newID, hProxy: hProxy, availableWidth: availableWidth)
             }
             .onChange(of: pendingMainCanvasRestoreCardID) { _, _ in
+                guard !showFocusMode else { return }
                 handleMainCanvasRestoreRequest(hProxy: hProxy, availableWidth: availableWidth)
             }
             .onAppear {
+                guard !showFocusMode else { return }
                 handleMainCanvasAppear(hProxy: hProxy, availableWidth: availableWidth)
             }
         }
@@ -1306,6 +1311,7 @@ struct ScenarioWriterView: View {
     }
 
     func handleMainCanvasHistoryIndexChange(hProxy: ScrollViewProxy) {
+        guard !showFocusMode else { return }
         guard acceptsKeyboardInput else { return }
         if isPreviewingHistory {
             withAnimation(quickEaseAnimation) {
@@ -1333,11 +1339,13 @@ struct ScenarioWriterView: View {
     }
 
     func handleMainCanvasRestoreRequest(hProxy: ScrollViewProxy, availableWidth: CGFloat) {
+        guard !showFocusMode else { return }
         guard acceptsKeyboardInput else { return }
         restoreMainCanvasPositionIfNeeded(proxy: hProxy, availableWidth: availableWidth)
     }
 
     func handleMainCanvasAppear(hProxy: ScrollViewProxy, availableWidth: CGFloat) {
+        guard !showFocusMode else { return }
         if acceptsKeyboardInput {
             restoreMainCanvasPositionIfNeeded(proxy: hProxy, availableWidth: availableWidth)
         }

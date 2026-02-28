@@ -739,7 +739,7 @@ private struct FloatingReferenceWindowAccessor: NSViewRepresentable {
             guard let window = view.window else { return }
             window.identifier = NSUserInterfaceItemIdentifier(ReferenceWindowConstants.windowID)
             window.title = "레퍼런스 카드"
-            window.level = .normal
+            window.level = .floating
             window.collectionBehavior.insert(.fullScreenAuxiliary)
             let fixedWidth = ReferenceWindowConstants.windowWidth
             window.minSize = NSSize(width: fixedWidth, height: 220)

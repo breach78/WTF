@@ -30,6 +30,16 @@ extension ScenarioWriterView {
         }
     }
 
+    func requestMainCanvasRestoreForFocusExit() {
+        guard !showFocusMode else { return }
+        let targetID = activeCardID ?? editingCardID ?? lastActiveCardID ?? scenario.rootCards.first?.id
+        guard let targetID else { return }
+        pendingMainCanvasRestoreCardID = nil
+        DispatchQueue.main.async {
+            pendingMainCanvasRestoreCardID = targetID
+        }
+    }
+
     // MARK: - Resolved Colors & Search
 
     func resolvedBackgroundColor() -> Color {
@@ -255,6 +265,7 @@ extension ScenarioWriterView {
                     .padding(.horizontal, 6).frame(width: columnWidth)
                 }
                 .onChange(of: activeCardID) { _, newID in
+                    guard !showFocusMode else { return }
                     guard acceptsKeyboardInput else { return }
                     // 현재 열이 활성 카드 본인이거나 그 조상을 포함한 '포커스 경로'일 때만 애니메이션 스크롤
                     // 자식 열이 부모의 움직임에 따라 마구 스크롤되는 현상(Dancing)을 방지합니다.
@@ -267,16 +278,19 @@ extension ScenarioWriterView {
                     }
                 }
                 .onChange(of: cards.map { $0.id }) { _, _ in
+                    guard !showFocusMode else { return }
                     guard acceptsKeyboardInput else { return }
                     // 부모가 바뀌어 열의 카드 구성이 달라진 경우(자식 열 등장), 애니메이션 없이 즉시 위치를 잡습니다.
                     scrollToFocus(in: cards, parent: parent, proxy: proxy, viewportHeight: screenHeight, animated: false)
                 }
                 .onAppear {
+                    guard !showFocusMode else { return }
                     guard acceptsKeyboardInput else { return }
                     // 처음 열이 그려질 때는 지연 없이 즉시 스냅하여 튀어오르는 느낌을 제거합니다.
                     scrollToFocus(in: cards, parent: parent, proxy: proxy, viewportHeight: screenHeight, animated: false)
                 }
                 .onPreferenceChange(MainCardHeightPreferenceKey.self) { heights in
+                    guard !showFocusMode else { return }
                     guard acceptsKeyboardInput else { return }
                     let previousHeights = mainCardHeights
                     mainCardHeights.merge(heights, uniquingKeysWith: { _, new in new })
@@ -291,10 +305,10 @@ extension ScenarioWriterView {
                     }
                 }
                 .onPreferenceChange(MainCardWidthPreferenceKey.self) { widths in
+                    guard !showFocusMode else { return }
                     guard acceptsKeyboardInput else { return }
                     let previousWidths = mainCardWidths
                     mainCardWidths.merge(widths, uniquingKeysWith: { _, new in new })
-                    guard !showFocusMode else { return }
                     guard let editingID = editingCardID else { return }
                     let oldWidth = previousWidths[editingID] ?? 0
                     let newWidth = mainCardWidths[editingID] ?? 0
@@ -306,6 +320,7 @@ extension ScenarioWriterView {
                     }
                 }
                 .onChange(of: mainBottomRevealTick) { _, _ in
+                    guard !showFocusMode else { return }
                     guard acceptsKeyboardInput else { return }
                     guard let requestedID = mainBottomRevealCardID else { return }
                     guard activeCardID == requestedID else { return }
@@ -396,7 +411,7 @@ extension ScenarioWriterView {
             isArchived: card.isArchived,
             isAncestor: activeAncestorIDs.contains(card.id) || activeSiblingIDs.contains(card.id),
             isDescendant: activeDescendantIDs.contains(card.id),
-            isEditing: acceptsKeyboardInput && editingCardID == card.id,
+            isEditing: !showFocusMode && acceptsKeyboardInput && editingCardID == card.id,
             dropTarget: activeDropTarget,
             forceNamedSnapshotNoteStyle: false,
             forceCustomColorVisibility: isAICandidate,

@@ -70,6 +70,7 @@ enum WorkspaceAutoBackupService {
     nonisolated private static let dailyRetentionDays = 7
     nonisolated private static let weeklyRetentionDays = 28
     nonisolated private static let archiveSuffix = ".wtf.zip"
+    nonisolated private static let workspacePackageExtension = "wtf"
     nonisolated private static let timestampLength = 19 // yyyy-MM-dd-HH-mm-ss
     nonisolated private static let daySeconds: TimeInterval = 24 * 60 * 60
 
@@ -146,7 +147,11 @@ enum WorkspaceAutoBackupService {
             )
         }
 
-        try runCompressionCommand(workspaceURL: workspaceURL, archiveURL: archiveURL)
+        try runCompressionCommand(
+            workspaceURL: workspaceURL,
+            archiveURL: archiveURL,
+            workspaceName: workspaceName
+        )
 
         let entries = loadEntries(
             for: workspaceName,
@@ -161,17 +166,59 @@ enum WorkspaceAutoBackupService {
         return Result(archiveURL: archiveURL, deletedCount: deleteTargets.count)
     }
 
-    nonisolated private static func runCompressionCommand(workspaceURL: URL, archiveURL: URL) throws {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
-        process.arguments = [
+    nonisolated private static func runCompressionCommand(
+        workspaceURL: URL,
+        archiveURL: URL,
+        workspaceName: String
+    ) throws {
+        let expectedPackageName = "\(workspaceName).\(workspacePackageExtension)"
+        if workspaceURL.lastPathComponent.caseInsensitiveCompare(expectedPackageName) == .orderedSame {
+            markAsPackageIfPossible(at: workspaceURL)
+            try runDittoCompression(sourceURL: workspaceURL, archiveURL: archiveURL)
+            return
+        }
+
+        // Legacy folder names without .wtf extension are staged to a .wtf package name
+        // so unzipping always restores a .wtf container.
+        let fileManager = FileManager.default
+        let stagingDirectoryURL = fileManager.temporaryDirectory
+            .appendingPathComponent("wa-backup-staging-\(UUID().uuidString)", isDirectory: true)
+        let stagedWorkspaceURL = stagingDirectoryURL.appendingPathComponent(expectedPackageName, isDirectory: true)
+        try fileManager.createDirectory(at: stagingDirectoryURL, withIntermediateDirectories: true)
+        defer {
+            try? fileManager.removeItem(at: stagingDirectoryURL)
+        }
+
+        do {
+            try runDittoCopy(sourceURL: workspaceURL, destinationURL: stagedWorkspaceURL)
+            markAsPackageIfPossible(at: stagedWorkspaceURL)
+            try runDittoCompression(sourceURL: stagedWorkspaceURL, archiveURL: archiveURL)
+        } catch let backupError as BackupError {
+            throw backupError
+        } catch {
+            throw BackupError.compressionFailed(error.localizedDescription)
+        }
+    }
+
+    nonisolated private static func runDittoCopy(sourceURL: URL, destinationURL: URL) throws {
+        try runDittoCommand(arguments: [sourceURL.path, destinationURL.path])
+    }
+
+    nonisolated private static func runDittoCompression(sourceURL: URL, archiveURL: URL) throws {
+        try runDittoCommand(arguments: [
             "-c",
             "-k",
             "--sequesterRsrc",
             "--keepParent",
-            workspaceURL.path,
+            sourceURL.path,
             archiveURL.path
-        ]
+        ])
+    }
+
+    nonisolated private static func runDittoCommand(arguments: [String]) throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
+        process.arguments = arguments
         let stderrPipe = Pipe()
         process.standardError = stderrPipe
 
@@ -182,6 +229,14 @@ enum WorkspaceAutoBackupService {
             let stderr = String(data: stderrData, encoding: .utf8) ?? ""
             throw BackupError.compressionFailed(stderr)
         }
+    }
+
+    nonisolated private static func markAsPackageIfPossible(at url: URL) {
+        guard url.pathExtension.lowercased() == workspacePackageExtension else { return }
+        var mutableURL = url
+        var values = URLResourceValues()
+        values.isPackage = true
+        try? mutableURL.setResourceValues(values)
     }
 
     nonisolated private static func sanitizedWorkspaceName(from workspaceURL: URL) -> String {
@@ -1282,6 +1337,10 @@ struct SettingsView: View {
                             .lineLimit(3)
 
                         Text("백업 파일명: 작업이름-YYYY-MM-DD-HH-mm-ss.wtf.zip")
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                            .lineLimit(2)
+                        Text("압축 해제 시 작업이름.wtf 컨테이너로 복원됩니다.")
                             .font(.system(size: 11))
                             .foregroundColor(.secondary)
                             .lineLimit(2)

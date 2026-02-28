@@ -17,6 +17,7 @@ extension ScenarioWriterView {
     // MARK: - Main Caret Monitor
 
     func startMainCaretMonitor() {
+        guard !showFocusMode else { return }
         guard mainSelectionObserver == nil else { return }
         mainSelectionObserver = NotificationCenter.default.addObserver(
             forName: NSTextView.didChangeSelectionNotification,
@@ -193,14 +194,10 @@ extension ScenarioWriterView {
         return nil
     }
 
-    func applyMainEditorLineSpacingIfNeeded(
-        forceApplyToFullText: Bool = false,
-        preferredTextView: NSTextView? = nil
-    ) {
+    func applyMainEditorLineSpacingIfNeeded(forceApplyToFullText: Bool = false) {
         guard !showFocusMode else { return }
         guard let editingID = editingCardID, let card = findCard(by: editingID) else { return }
-        let textView = preferredTextView ?? resolveMainEditorTextView(for: card)
-        guard let textView else { return }
+        guard let textView = resolveMainEditorTextView(for: card) else { return }
         guard textView.string == card.content else { return }
 
         prepareMainEditorTextViewForLineSpacing(textView)
@@ -369,13 +366,11 @@ extension ScenarioWriterView {
         guard editingCardID == cardID else { return }
         markEditingSessionTextMutation()
         handleMainTypingContentChange(cardID: cardID, oldValue: oldValue, newValue: newValue)
+        applyMainEditorLineSpacingIfNeeded()
         if let textView = NSApp.keyWindow?.firstResponder as? NSTextView,
            textView.window?.identifier?.rawValue != ReferenceWindowConstants.windowID,
            textView.string == newValue {
-            applyMainEditorLineSpacingIfNeeded(preferredTextView: textView)
             normalizeMainEditorTextViewOffsetIfNeeded(textView, reason: "content-change")
-        } else {
-            applyMainEditorLineSpacingIfNeeded()
         }
         requestCoalescedMainCaretEnsure(minInterval: mainCaretSelectionEnsureMinInterval, delay: 0.0)
     }
