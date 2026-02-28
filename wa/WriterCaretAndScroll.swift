@@ -363,6 +363,7 @@ extension ScenarioWriterView {
     func handleMainEditorContentChange(cardID: UUID, oldValue: String, newValue: String) {
         guard !showFocusMode else { return }
         guard editingCardID == cardID else { return }
+        markEditingSessionTextMutation()
         handleMainTypingContentChange(cardID: cardID, oldValue: oldValue, newValue: newValue)
         applyMainEditorLineSpacingIfNeeded()
         if let textView = NSApp.keyWindow?.firstResponder as? NSTextView,

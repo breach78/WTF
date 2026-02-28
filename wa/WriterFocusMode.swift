@@ -217,6 +217,7 @@ extension ScenarioWriterView {
     @ViewBuilder
     func focusModeCardBlock(_ card: SceneCard) -> some View {
         let isActiveCard = activeCardID == card.id
+        let isCloneLinked = scenario.isCardCloned(card.id)
         FocusModeCardEditor(
             card: card,
             isActive: isActiveCard,
@@ -230,6 +231,14 @@ extension ScenarioWriterView {
                 handleFocusModeCardContentChange(cardID: card.id, oldValue: oldValue, newValue: newValue)
             }
         )
+        .overlay(alignment: .topLeading) {
+            if isCloneLinked {
+                Rectangle()
+                    .fill(appearance == "light" ? Color.black.opacity(0.48) : Color.white.opacity(0.85))
+                    .frame(width: 8, height: 8)
+                    .allowsHitTesting(false)
+            }
+        }
     }
 
     func activateFocusModeCardFromClick(_ card: SceneCard) {
@@ -305,6 +314,10 @@ extension ScenarioWriterView {
 
     func handleFocusModeKeyDown(_ event: NSEvent) -> NSEvent? {
         if shouldPassThroughFocusModeEvent(event) { return event }
+        if showCloneCardPasteDialog {
+            _ = handleClonePasteDialogKeyDownEvent(event)
+            return nil
+        }
         if handleFocusDeleteAlertShortcutIfNeeded(event) { return nil }
 
         let flags = event.modifierFlags
@@ -1979,6 +1992,7 @@ extension ScenarioWriterView {
 
     func handleFocusModeCardContentChange(cardID: UUID, oldValue: String, newValue: String) {
         guard canHandleFocusModeCardContentChange(cardID: cardID, oldValue: oldValue, newValue: newValue) else { return }
+        markEditingSessionTextMutation()
         guard syncFocusModeContentChangeEditorOffsetIfNeeded() else { return }
 
         let delta = utf16ChangeDelta(oldValue: oldValue, newValue: newValue)

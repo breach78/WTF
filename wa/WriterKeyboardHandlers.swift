@@ -117,6 +117,88 @@ extension ScenarioWriterView {
         return nil
     }
 
+    func isClonePastePlacementEnabled(_ placement: ClonePastePlacement) -> Bool {
+        switch placement {
+        case .child:
+            return activeCardID != nil
+        case .sibling:
+            return true
+        }
+    }
+
+    func resetClonePasteDialogSelection() {
+        clonePasteDialogSelection = isClonePastePlacementEnabled(.child) ? .child : .sibling
+    }
+
+    func moveClonePasteDialogSelection() {
+        if !isClonePastePlacementEnabled(.child) {
+            clonePasteDialogSelection = .sibling
+            return
+        }
+        switch clonePasteDialogSelection {
+        case .child:
+            clonePasteDialogSelection = .sibling
+        case .sibling:
+            clonePasteDialogSelection = .child
+        }
+    }
+
+    func confirmClonePasteDialogSelection() {
+        guard isClonePastePlacementEnabled(clonePasteDialogSelection) else { return }
+        applyPendingPastePlacement(as: clonePasteDialogSelection)
+    }
+
+    func handleClonePasteDialogKeyPress(_ press: KeyPress) -> KeyPress.Result {
+        guard showCloneCardPasteDialog else { return .ignored }
+        if press.modifiers.contains(.command) || press.modifiers.contains(.option) || press.modifiers.contains(.control) {
+            return .handled
+        }
+        switch press.key {
+        case .upArrow, .downArrow:
+            moveClonePasteDialogSelection()
+            return .handled
+        case .return:
+            if press.phase == .down {
+                confirmClonePasteDialogSelection()
+            }
+            return .handled
+        case .escape:
+            if press.phase == .down {
+                cancelPendingPastePlacement()
+            }
+            return .handled
+        default:
+            return .handled
+        }
+    }
+
+    func handleClonePasteDialogKeyDownEvent(_ event: NSEvent) -> Bool {
+        guard showCloneCardPasteDialog else { return false }
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        if flags.contains(.command) || flags.contains(.option) || flags.contains(.control) {
+            return true
+        }
+        switch event.keyCode {
+        case 126, 125: // up/down
+            DispatchQueue.main.async {
+                moveClonePasteDialogSelection()
+            }
+            return true
+        case 36, 76: // return
+            DispatchQueue.main.async {
+                confirmClonePasteDialogSelection()
+            }
+            return true
+        case 53: // escape
+            DispatchQueue.main.async {
+                cancelPendingPastePlacement()
+            }
+            return true
+        default:
+            return true
+        }
+    }
+
     func handleDownPhaseShortcuts(
         _ press: KeyPress,
         isMainEditorTyping: Bool,
@@ -275,7 +357,7 @@ extension ScenarioWriterView {
             return .handled
         }
         if !hasExtraModifier && (normalized == "v" || press.characters == "ㅍ") {
-            DispatchQueue.main.async { pasteCopiedCardTree() }
+            DispatchQueue.main.async { handlePasteShortcut() }
             return .handled
         }
         return nil
@@ -721,6 +803,10 @@ extension ScenarioWriterView {
                 return event
             }
             if !acceptsKeyboardInput { return event }
+            if showCloneCardPasteDialog {
+                _ = handleClonePasteDialogKeyDownEvent(event)
+                return nil
+            }
             if showFocusMode || showHistoryBar || isPreviewingHistory { return event }
             if showDeleteAlert {
                 let hasChildren = selectedCardsForDeletion().contains { !$0.children.isEmpty }

@@ -65,6 +65,216 @@ private enum WorkspaceBookmarkService {
     }
 }
 
+enum WorkspaceAutoBackupService {
+    nonisolated private static let keepLatestCount = 10
+    nonisolated private static let dailyRetentionDays = 7
+    nonisolated private static let weeklyRetentionDays = 28
+    nonisolated private static let archiveSuffix = ".wtf.zip"
+    nonisolated private static let timestampLength = 19 // yyyy-MM-dd-HH-mm-ss
+    nonisolated private static let daySeconds: TimeInterval = 24 * 60 * 60
+
+    struct Result {
+        let archiveURL: URL
+        let deletedCount: Int
+    }
+
+    enum BackupError: LocalizedError {
+        case invalidWorkspace
+        case backupDirectoryInsideWorkspace
+        case compressionFailed(String)
+
+        var errorDescription: String? {
+            switch self {
+            case .invalidWorkspace:
+                return "백업할 작업 파일 경로를 찾을 수 없습니다."
+            case .backupDirectoryInsideWorkspace:
+                return "백업 폴더를 작업 파일(.wtf) 내부에 둘 수 없습니다."
+            case .compressionFailed(let stderr):
+                if stderr.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    return "작업 파일 압축 백업에 실패했습니다."
+                }
+                return "작업 파일 압축 백업에 실패했습니다: \(stderr)"
+            }
+        }
+    }
+
+    private struct BackupArchiveEntry {
+        let url: URL
+        let timestamp: Date
+    }
+
+    nonisolated static func defaultBackupDirectoryURL() -> URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Documents", isDirectory: true)
+            .appendingPathComponent("wa-backups", isDirectory: true)
+    }
+
+    nonisolated static func resolvedBackupDirectoryURL(from storedPath: String) -> URL {
+        let trimmed = storedPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            return defaultBackupDirectoryURL()
+        }
+        let expanded = NSString(string: trimmed).expandingTildeInPath
+        return URL(fileURLWithPath: expanded, isDirectory: true)
+    }
+
+    nonisolated static func createCompressedBackupAndPrune(
+        workspaceURL: URL,
+        backupDirectoryURL: URL,
+        now: Date = Date()
+    ) throws -> Result {
+        let fileManager = FileManager.default
+        try fileManager.createDirectory(at: backupDirectoryURL, withIntermediateDirectories: true)
+        let workspacePath = workspaceURL.standardizedFileURL.path + "/"
+        let backupPath = backupDirectoryURL.standardizedFileURL.path + "/"
+        guard !backupPath.hasPrefix(workspacePath) else {
+            throw BackupError.backupDirectoryInsideWorkspace
+        }
+
+        let workspaceName = sanitizedWorkspaceName(from: workspaceURL)
+        guard !workspaceName.isEmpty else { throw BackupError.invalidWorkspace }
+
+        let timestampFormatter = makeTimestampFormatter()
+        var archiveTimestamp = now
+        var archiveURL = backupDirectoryURL.appendingPathComponent(
+            "\(workspaceName)-\(timestampFormatter.string(from: archiveTimestamp))\(archiveSuffix)"
+        )
+        while fileManager.fileExists(atPath: archiveURL.path) {
+            archiveTimestamp = archiveTimestamp.addingTimeInterval(1)
+            archiveURL = backupDirectoryURL.appendingPathComponent(
+                "\(workspaceName)-\(timestampFormatter.string(from: archiveTimestamp))\(archiveSuffix)"
+            )
+        }
+
+        try runCompressionCommand(workspaceURL: workspaceURL, archiveURL: archiveURL)
+
+        let entries = loadEntries(
+            for: workspaceName,
+            in: backupDirectoryURL,
+            fallbackNow: now
+        )
+        let deleteTargets = entriesToDelete(entries: entries, now: now)
+        for target in deleteTargets {
+            try? fileManager.removeItem(at: target.url)
+        }
+
+        return Result(archiveURL: archiveURL, deletedCount: deleteTargets.count)
+    }
+
+    nonisolated private static func runCompressionCommand(workspaceURL: URL, archiveURL: URL) throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
+        process.arguments = [
+            "-c",
+            "-k",
+            "--sequesterRsrc",
+            "--keepParent",
+            workspaceURL.path,
+            archiveURL.path
+        ]
+        let stderrPipe = Pipe()
+        process.standardError = stderrPipe
+
+        try process.run()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else {
+            let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+            let stderr = String(data: stderrData, encoding: .utf8) ?? ""
+            throw BackupError.compressionFailed(stderr)
+        }
+    }
+
+    nonisolated private static func sanitizedWorkspaceName(from workspaceURL: URL) -> String {
+        let base = workspaceURL.deletingPathExtension().lastPathComponent
+        let replaced = base.replacingOccurrences(
+            of: "[/:\\\\?%*|\"<>]",
+            with: "_",
+            options: .regularExpression
+        )
+        let trimmed = replaced.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "workspace" : trimmed
+    }
+
+    nonisolated private static func makeTimestampFormatter() -> DateFormatter {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = .autoupdatingCurrent
+        formatter.dateFormat = "yyyy-MM-dd-HH-mm-ss"
+        return formatter
+    }
+
+    nonisolated private static func loadEntries(
+        for workspaceName: String,
+        in backupDirectoryURL: URL,
+        fallbackNow: Date
+    ) -> [BackupArchiveEntry] {
+        let fileManager = FileManager.default
+        let prefix = "\(workspaceName)-"
+        let timestampFormatter = makeTimestampFormatter()
+        let urls = (try? fileManager.contentsOfDirectory(
+            at: backupDirectoryURL,
+            includingPropertiesForKeys: [.contentModificationDateKey, .creationDateKey],
+            options: [.skipsHiddenFiles]
+        )) ?? []
+
+        return urls.compactMap { url in
+            let name = url.lastPathComponent
+            guard name.hasPrefix(prefix), name.hasSuffix(archiveSuffix) else { return nil }
+            guard name.count >= prefix.count + timestampLength + archiveSuffix.count else { return nil }
+
+            let timestampStart = name.index(name.endIndex, offsetBy: -(timestampLength + archiveSuffix.count))
+            let timestampEnd = name.index(name.endIndex, offsetBy: -archiveSuffix.count)
+            let timestampText = String(name[timestampStart..<timestampEnd])
+            let timestamp = timestampFormatter.date(from: timestampText)
+                ?? ((try? url.resourceValues(forKeys: [.creationDateKey, .contentModificationDateKey]).creationDate)
+                    ?? (try? url.resourceValues(forKeys: [.creationDateKey, .contentModificationDateKey]).contentModificationDate)
+                    ?? fallbackNow)
+            return BackupArchiveEntry(url: url, timestamp: timestamp)
+        }
+        .sorted { $0.timestamp > $1.timestamp }
+    }
+
+    nonisolated private static func entriesToDelete(entries: [BackupArchiveEntry], now: Date) -> [BackupArchiveEntry] {
+        guard !entries.isEmpty else { return [] }
+
+        var keepPaths: Set<String> = Set(entries.prefix(keepLatestCount).map { $0.url.path })
+        var dailyBucketKeys: Set<String> = []
+        var weeklyBucketKeys: Set<String> = []
+        var monthlyBucketKeys: Set<String> = []
+        let calendar = Calendar(identifier: .gregorian)
+
+        for entry in entries.dropFirst(keepLatestCount) {
+            let age = now.timeIntervalSince(entry.timestamp)
+            if age < daySeconds * Double(dailyRetentionDays) {
+                let comps = calendar.dateComponents([.year, .month, .day], from: entry.timestamp)
+                let key = "\(comps.year ?? 0)-\(comps.month ?? 0)-\(comps.day ?? 0)"
+                if dailyBucketKeys.insert(key).inserted {
+                    keepPaths.insert(entry.url.path)
+                }
+                continue
+            }
+
+            if age < daySeconds * Double(weeklyRetentionDays) {
+                let comps = calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: entry.timestamp)
+                let key = "\(comps.yearForWeekOfYear ?? 0)-\(comps.weekOfYear ?? 0)"
+                if weeklyBucketKeys.insert(key).inserted {
+                    keepPaths.insert(entry.url.path)
+                }
+                continue
+            }
+
+            let comps = calendar.dateComponents([.year, .month], from: entry.timestamp)
+            let key = "\(comps.year ?? 0)-\(comps.month ?? 0)"
+            if monthlyBucketKeys.insert(key).inserted {
+                keepPaths.insert(entry.url.path)
+            }
+        }
+
+        return entries.filter { !keepPaths.contains($0.url.path) }
+    }
+}
+
 private struct MainWindowTitleHider: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView {
         NSView()
@@ -202,6 +412,8 @@ struct waApp: App {
     @AppStorage("focusModeWindowBackgroundActive") private var focusModeWindowBackgroundActive: Bool = false
     @AppStorage("forceWorkspaceReset") private var forceWorkspaceReset: Bool = false
     @AppStorage("didResetForV2") private var didResetForV2: Bool = false
+    @AppStorage("autoBackupEnabledOnQuit") private var autoBackupEnabledOnQuit: Bool = true
+    @AppStorage("autoBackupDirectoryPath") private var autoBackupDirectoryPath: String = ""
     
     // 폴더 접근 권한을 유지하기 위한 북마크 데이터 저장
     @AppStorage("storageBookmark") private var storageBookmark: Data?
@@ -248,6 +460,7 @@ struct waApp: App {
                     store = nil
                     forceWorkspaceReset = false
                 }
+                initializeAutoBackupSettingsIfNeeded()
                 setupStore()
                 focusModeWindowBackgroundActive = false
                 hideReferenceWindowOnLaunchOnce()
@@ -264,7 +477,7 @@ struct waApp: App {
                 setupStore()
             }
             .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
-                store?.flushPendingSaves()
+                handleApplicationWillTerminate()
             }
         }
         .windowStyle(.hiddenTitleBar)
@@ -531,6 +744,29 @@ struct waApp: App {
         mainWorkspaceZoomScale = (next * 100).rounded() / 100
     }
 
+    private func initializeAutoBackupSettingsIfNeeded() {
+        let trimmed = autoBackupDirectoryPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            autoBackupDirectoryPath = WorkspaceAutoBackupService.defaultBackupDirectoryURL().path
+        }
+    }
+
+    private func handleApplicationWillTerminate() {
+        store?.flushPendingSaves()
+        guard autoBackupEnabledOnQuit else { return }
+        guard let workspaceURL = store?.folderURL else { return }
+        let backupDirectoryURL = WorkspaceAutoBackupService.resolvedBackupDirectoryURL(from: autoBackupDirectoryPath)
+        do {
+            let result = try WorkspaceAutoBackupService.createCompressedBackupAndPrune(
+                workspaceURL: workspaceURL,
+                backupDirectoryURL: backupDirectoryURL
+            )
+            print("Auto backup created: \(result.archiveURL.path), pruned \(result.deletedCount) file(s)")
+        } catch {
+            print("Auto backup failed: \(error.localizedDescription)")
+        }
+    }
+
 }
 
 struct SettingsView: View {
@@ -672,6 +908,19 @@ struct SettingsView: View {
         }
     }
 
+    private struct SavedColorThemePreset: Identifiable, Codable {
+        let id: String
+        let title: String
+        let lightBackground: String
+        let lightCardBase: String
+        let lightCardActive: String
+        let lightCardRelated: String
+        let darkBackground: String
+        let darkCardBase: String
+        let darkCardActive: String
+        let darkCardRelated: String
+    }
+
     @AppStorage("backgroundColorHex") private var backgroundColorHex: String = "F4F2EE"
     @AppStorage("darkBackgroundColorHex") private var darkBackgroundColorHex: String = "111418"
     @AppStorage("cardBaseColorHex") private var cardBaseColorHex: String = "FFFFFF"
@@ -680,6 +929,9 @@ struct SettingsView: View {
     @AppStorage("darkCardBaseColorHex") private var darkCardBaseColorHex: String = "1A2029"
     @AppStorage("darkCardActiveColorHex") private var darkCardActiveColorHex: String = "2A3A4E"
     @AppStorage("darkCardRelatedColorHex") private var darkCardRelatedColorHex: String = "242F3F"
+    @AppStorage("customColorThemePresetsJSON") private var customColorThemePresetsJSON: String = ""
+    @AppStorage("autoBackupEnabledOnQuit") private var autoBackupEnabledOnQuit: Bool = true
+    @AppStorage("autoBackupDirectoryPath") private var autoBackupDirectoryPath: String = ""
     @AppStorage("storageBookmark") private var storageBookmark: Data?
     @AppStorage("forceWorkspaceReset") private var forceWorkspaceReset: Bool = false
     @AppStorage("exportCenteredFontSize") private var exportCenteredFontSize: Double = 12.0
@@ -704,7 +956,11 @@ struct SettingsView: View {
     @State private var hasGeminiAPIKey: Bool = false
     @State private var aiSettingsStatusMessage: String? = nil
     @State private var aiSettingsStatusIsError: Bool = false
-    @State private var selectedColorThemePreset: ColorThemePreset = .warmPaper
+    @State private var selectedColorThemePresetID: String = ColorThemePreset.warmPaper.rawValue
+    @State private var customColorThemePresets: [SavedColorThemePreset] = []
+    @State private var showSaveColorPresetSheet: Bool = false
+    @State private var newColorPresetName: String = ""
+    @State private var saveColorPresetError: String? = nil
     @State private var selectedGeminiModelOption: String = "gemini-3.1-pro-preview"
     @State private var whisperInstallRootInput: String = ""
     @State private var whisperCLIPathInput: String = ""
@@ -713,6 +969,8 @@ struct SettingsView: View {
     @State private var whisperStatusIsError: Bool = false
     @State private var whisperIsInstalled: Bool = false
     @State private var whisperIsInstalling: Bool = false
+    @State private var autoBackupStatusMessage: String? = nil
+    @State private var autoBackupStatusIsError: Bool = false
 
     private let customGeminiModelToken = "__custom__"
     private let geminiModelOptions: [GeminiModelOption] = [
@@ -738,6 +996,14 @@ struct SettingsView: View {
             return url.path
         }
         return "알 수 없는 경로"
+    }
+
+    private var currentAutoBackupPath: String {
+        let trimmed = autoBackupDirectoryPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            return WorkspaceAutoBackupService.defaultBackupDirectoryURL().path
+        }
+        return NSString(string: trimmed).expandingTildeInPath
     }
 
     private var shortcutSections: [ShortcutSection] {
@@ -998,6 +1264,46 @@ struct SettingsView: View {
                         }
                     }
 
+                    settingsCard(title: "자동 백업") {
+                        Toggle("앱 종료 시 자동 백업", isOn: $autoBackupEnabledOnQuit)
+
+                        Text("백업 폴더")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Text(currentAutoBackupPath)
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(.secondary)
+                            .lineLimit(2)
+                            .truncationMode(.middle)
+
+                        HStack(spacing: 8) {
+                            Button("백업 폴더 선택...") {
+                                selectAutoBackupDirectory()
+                            }
+                            Button("기본 위치로") {
+                                autoBackupDirectoryPath = WorkspaceAutoBackupService.defaultBackupDirectoryURL().path
+                                setAutoBackupStatus("기본 백업 경로를 적용했습니다.", isError: false)
+                            }
+                        }
+
+                        Text("보관 정책: 최신 10개 + 이후 일 1개(7일) + 주 1개(4주까지) + 이후 월 1개")
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                            .lineLimit(3)
+
+                        Text("백업 파일명: 작업이름-YYYY-MM-DD-HH-mm-ss.wtf.zip")
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                            .lineLimit(2)
+
+                        if let message = autoBackupStatusMessage {
+                            Text(message)
+                                .font(.system(size: 11))
+                                .foregroundColor(autoBackupStatusIsError ? .red : .secondary)
+                                .lineLimit(2)
+                        }
+                    }
+
                     oflFontLicenseCard()
                 },
                 second: {
@@ -1146,15 +1452,18 @@ struct SettingsView: View {
                     }
 
                     settingsCard(title: "색상 테마 프리셋") {
-                        Picker("프리셋", selection: $selectedColorThemePreset) {
+                        Picker("프리셋", selection: $selectedColorThemePresetID) {
                             ForEach(ColorThemePreset.allCases) { preset in
-                                Text(preset.title).tag(preset)
+                                Text(preset.title).tag(preset.rawValue)
+                            }
+                            ForEach(customColorThemePresets) { preset in
+                                Text("사용자: \(preset.title)").tag(preset.id)
                             }
                         }
                         .pickerStyle(.menu)
 
                         Button("선택한 프리셋 적용") {
-                            applyColorThemePreset(selectedColorThemePreset)
+                            applySelectedColorThemePreset()
                         }
 
                         Text("라이트/다크 모드는 그대로 유지하며 카드/배경 색 팔레트만 교체합니다.")
@@ -1164,6 +1473,17 @@ struct SettingsView: View {
                     }
 
                     settingsCard(title: "색상 설정") {
+                        HStack {
+                            Text("현재 색상을 이름 있는 프리셋으로 저장할 수 있습니다.")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            Spacer()
+                            Button("프리셋으로 저장") {
+                                newColorPresetName = ""
+                                saveColorPresetError = nil
+                                showSaveColorPresetSheet = true
+                            }
+                        }
                         themedColorPickerRow(
                             title: "앱 배경 색",
                             lightHex: $backgroundColorHex,
@@ -1239,8 +1559,13 @@ struct SettingsView: View {
         .onAppear {
             refreshGeminiAPIKeyStatus()
             syncGeminiModelOptionSelection()
+            loadCustomColorThemePresets()
+            initializeAutoBackupSettingsIfNeeded()
             loadWhisperPathInputsFromResolvedConfig()
             refreshWhisperStatusFromInputs()
+        }
+        .sheet(isPresented: $showSaveColorPresetSheet) {
+            saveColorPresetSheet
         }
     }
 
@@ -1336,6 +1661,44 @@ struct SettingsView: View {
         }
     }
 
+    private var saveColorPresetSheet: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("색상 프리셋 저장")
+                .font(.headline)
+
+            Text("현재 카드/배경 색 조합을 프리셋 메뉴에 추가합니다.")
+                .font(.caption)
+                .foregroundColor(.secondary)
+
+            TextField("프리셋 이름", text: $newColorPresetName)
+                .textFieldStyle(.roundedBorder)
+                .onSubmit {
+                    saveCurrentColorsAsPreset()
+                }
+
+            if let message = saveColorPresetError {
+                Text(message)
+                    .font(.caption)
+                    .foregroundColor(.red)
+            }
+
+            HStack {
+                Spacer()
+                Button("취소", role: .cancel) {
+                    showSaveColorPresetSheet = false
+                }
+                Button("저장") {
+                    saveCurrentColorsAsPreset()
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(newColorPresetName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+            .padding(.top, 2)
+        }
+        .padding(16)
+        .frame(width: 360)
+    }
+
     private func colorBinding(hex: Binding<String>, fallback: Color) -> Binding<Color> {
         Binding(
             get: { colorFromHex(hex.wrappedValue) ?? fallback },
@@ -1395,15 +1758,115 @@ struct SettingsView: View {
         darkCardRelatedColorHex = "242F3F"
     }
 
+    private func loadCustomColorThemePresets() {
+        guard !customColorThemePresetsJSON.isEmpty else {
+            customColorThemePresets = []
+            return
+        }
+        guard let data = customColorThemePresetsJSON.data(using: .utf8) else {
+            customColorThemePresets = []
+            return
+        }
+        do {
+            customColorThemePresets = try JSONDecoder().decode([SavedColorThemePreset].self, from: data)
+        } catch {
+            customColorThemePresets = []
+        }
+    }
+
+    private func persistCustomColorThemePresets() {
+        guard let data = try? JSONEncoder().encode(customColorThemePresets),
+              let json = String(data: data, encoding: .utf8) else {
+            return
+        }
+        customColorThemePresetsJSON = json
+    }
+
+    private func saveCurrentColorsAsPreset() {
+        let trimmedName = newColorPresetName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty else {
+            saveColorPresetError = "프리셋 이름을 입력해 주세요."
+            return
+        }
+        if customColorThemePresets.contains(where: { $0.title.caseInsensitiveCompare(trimmedName) == .orderedSame }) {
+            saveColorPresetError = "같은 이름의 프리셋이 이미 있습니다."
+            return
+        }
+
+        let preset = SavedColorThemePreset(
+            id: UUID().uuidString,
+            title: trimmedName,
+            lightBackground: backgroundColorHex,
+            lightCardBase: cardBaseColorHex,
+            lightCardActive: cardActiveColorHex,
+            lightCardRelated: cardRelatedColorHex,
+            darkBackground: darkBackgroundColorHex,
+            darkCardBase: darkCardBaseColorHex,
+            darkCardActive: darkCardActiveColorHex,
+            darkCardRelated: darkCardRelatedColorHex
+        )
+        customColorThemePresets.append(preset)
+        persistCustomColorThemePresets()
+        selectedColorThemePresetID = preset.id
+        saveColorPresetError = nil
+        showSaveColorPresetSheet = false
+    }
+
+    private func applySelectedColorThemePreset() {
+        if let preset = ColorThemePreset(rawValue: selectedColorThemePresetID) {
+            applyColorThemePreset(preset)
+            return
+        }
+        guard let customPreset = customColorThemePresets.first(where: { $0.id == selectedColorThemePresetID }) else {
+            return
+        }
+        applyColorThemePreset(customPreset)
+    }
+
+    private func applyColorThemeValues(
+        lightBackground: String,
+        lightCardBase: String,
+        lightCardActive: String,
+        lightCardRelated: String,
+        darkBackground: String,
+        darkCardBase: String,
+        darkCardActive: String,
+        darkCardRelated: String
+    ) {
+        backgroundColorHex = lightBackground
+        darkBackgroundColorHex = darkBackground
+        cardBaseColorHex = lightCardBase
+        cardActiveColorHex = lightCardActive
+        cardRelatedColorHex = lightCardRelated
+        darkCardBaseColorHex = darkCardBase
+        darkCardActiveColorHex = darkCardActive
+        darkCardRelatedColorHex = darkCardRelated
+    }
+
     private func applyColorThemePreset(_ preset: ColorThemePreset) {
-        backgroundColorHex = preset.lightBackground
-        darkBackgroundColorHex = preset.darkBackground
-        cardBaseColorHex = preset.lightCardBase
-        cardActiveColorHex = preset.lightCardActive
-        cardRelatedColorHex = preset.lightCardRelated
-        darkCardBaseColorHex = preset.darkCardBase
-        darkCardActiveColorHex = preset.darkCardActive
-        darkCardRelatedColorHex = preset.darkCardRelated
+        applyColorThemeValues(
+            lightBackground: preset.lightBackground,
+            lightCardBase: preset.lightCardBase,
+            lightCardActive: preset.lightCardActive,
+            lightCardRelated: preset.lightCardRelated,
+            darkBackground: preset.darkBackground,
+            darkCardBase: preset.darkCardBase,
+            darkCardActive: preset.darkCardActive,
+            darkCardRelated: preset.darkCardRelated
+        )
+    }
+
+    private func applyColorThemePreset(_ preset: SavedColorThemePreset) {
+        applyColorThemeValues(
+            lightBackground: preset.lightBackground,
+            lightCardBase: preset.lightCardBase,
+            lightCardActive: preset.lightCardActive,
+            lightCardRelated: preset.lightCardRelated,
+            darkBackground: preset.darkBackground,
+            darkCardBase: preset.darkCardBase,
+            darkCardActive: preset.darkCardActive,
+            darkCardRelated: preset.darkCardRelated
+        )
     }
 
     private func syncGeminiModelOptionSelection() {
@@ -1561,6 +2024,38 @@ struct SettingsView: View {
     private func setWhisperStatus(_ message: String, isError: Bool) {
         whisperStatusMessage = message
         whisperStatusIsError = isError
+    }
+
+    private func initializeAutoBackupSettingsIfNeeded() {
+        let trimmed = autoBackupDirectoryPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            autoBackupDirectoryPath = WorkspaceAutoBackupService.defaultBackupDirectoryURL().path
+        } else {
+            autoBackupDirectoryPath = NSString(string: trimmed).expandingTildeInPath
+        }
+    }
+
+    private func selectAutoBackupDirectory() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = true
+        panel.prompt = "선택"
+        panel.message = "자동 백업 파일을 저장할 폴더를 선택하세요."
+        let current = URL(fileURLWithPath: currentAutoBackupPath, isDirectory: true)
+        if FileManager.default.fileExists(atPath: current.path) {
+            panel.directoryURL = current
+        }
+
+        guard panel.runModal() == .OK, let selected = panel.url else { return }
+        autoBackupDirectoryPath = selected.path
+        setAutoBackupStatus("자동 백업 폴더를 변경했습니다.", isError: false)
+    }
+
+    private func setAutoBackupStatus(_ message: String, isError: Bool) {
+        autoBackupStatusMessage = message
+        autoBackupStatusIsError = isError
     }
 
     private func openWorkspaceFile() {

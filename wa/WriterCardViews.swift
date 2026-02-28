@@ -351,6 +351,10 @@ struct CardItem: View {
     var onHardDelete: (() -> Void)? = nil
     var showsEmptyCardBulkDeleteMenuOnly: Bool = false
     var onBulkDeleteEmptyCards: (() -> Void)? = nil
+    var isCloneLinked: Bool = false
+    var onCloneCard: (() -> Void)? = nil
+    var clonePeerDestinations: [ClonePeerMenuDestination] = []
+    var onNavigateToClonePeer: ((UUID) -> Void)? = nil
     @State private var mainEditingMeasuredBodyHeight: CGFloat = 0
     @State private var mainEditingMeasureWorkItem: DispatchWorkItem? = nil
     @State private var mainEditingMeasureLastAt: Date = .distantPast
@@ -632,6 +636,14 @@ struct CardItem: View {
                     .allowsHitTesting(false)
             }
         }
+        .overlay(alignment: .topLeading) {
+            if isCloneLinked {
+                Rectangle()
+                    .fill(appearance == "light" ? Color.black.opacity(0.48) : Color.white.opacity(0.85))
+                    .frame(width: 8, height: 8)
+                    .allowsHitTesting(false)
+            }
+        }
         .onTapGesture { onSelect() }
         .simultaneousGesture(TapGesture(count: 2).onEnded { onDoubleClick() })
         .onChange(of: isEditing) { _, newValue in
@@ -648,6 +660,18 @@ struct CardItem: View {
                     Button("내용 없음 카드 전체 삭제", role: .destructive) { onBulkDeleteEmptyCards() }
                 }
             } else {
+                if let onCloneCard {
+                    Button("클론 카드") { onCloneCard() }
+                    Divider()
+                }
+                if let onNavigateToClonePeer, !clonePeerDestinations.isEmpty {
+                    Menu("다른 클론으로 이동") {
+                        ForEach(clonePeerDestinations) { destination in
+                            Button(destination.title) { onNavigateToClonePeer(destination.id) }
+                        }
+                    }
+                    Divider()
+                }
                 if let onReferenceCard {
                     Button("레퍼런스 카드로") { onReferenceCard() }
                     Divider()

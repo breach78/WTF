@@ -129,6 +129,8 @@ extension ScenarioWriterView {
         let isTimelineSelected = selectedCardIDs.contains(card.id)
         let isTimelineMultiSelected = selectedCardIDs.count > 1 && isTimelineSelected
         let isTimelineEmptyCard = card.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let isCloneLinked = scenario.isCardCloned(card.id)
+        let clonePeerDestinations = isCloneLinked ? clonePeerMenuDestinations(for: card) : []
         CardItem(
             card: card,
             isActive: activeCardID == card.id,
@@ -159,7 +161,11 @@ extension ScenarioWriterView {
             onDelete: { performDelete(card) },
             onHardDelete: { performHardDelete(card) },
             showsEmptyCardBulkDeleteMenuOnly: isTimelineEmptyCard,
-            onBulkDeleteEmptyCards: isTimelineEmptyCard ? { performHardDeleteAllTimelineEmptyLeafCards() } : nil
+            onBulkDeleteEmptyCards: isTimelineEmptyCard ? { performHardDeleteAllTimelineEmptyLeafCards() } : nil,
+            isCloneLinked: isCloneLinked,
+            onCloneCard: { copyCardsAsCloneFromContext(card) },
+            clonePeerDestinations: clonePeerDestinations,
+            onNavigateToClonePeer: { targetID in navigateToCloneCard(targetID) }
         )
         .background(
             RoundedRectangle(cornerRadius: 6)
@@ -356,6 +362,8 @@ extension ScenarioWriterView {
         let isAICandidate = aiCandidateState.cardIDs.contains(card.id) || card.isAICandidate
         let canCreateUpperCard = canCreateUpperCardFromSelection(contextCard: card)
         let canSummarizeChildren = canSummarizeDirectChildren(for: card)
+        let isCloneLinked = scenario.isCardCloned(card.id)
+        let clonePeerDestinations = isCloneLinked ? clonePeerMenuDestinations(for: card) : []
         CardItem(
             card: card,
             isActive: activeCardID == card.id,
@@ -386,7 +394,11 @@ extension ScenarioWriterView {
                 summarizeDirectChildrenIntoParent(cardID: card.id)
             } : nil,
             isSummarizingChildren: aiChildSummaryLoadingCardIDs.contains(card.id),
-            onHardDelete: { performHardDelete(card) }
+            onHardDelete: { performHardDelete(card) },
+            isCloneLinked: isCloneLinked,
+            onCloneCard: { copyCardsAsCloneFromContext(card) },
+            clonePeerDestinations: clonePeerDestinations,
+            onNavigateToClonePeer: { targetID in navigateToCloneCard(targetID) }
         )
         .background(
             GeometryReader { geometry in
@@ -403,6 +415,65 @@ extension ScenarioWriterView {
         .id(card.id)
         .onDrag { NSItemProvider(object: card.id.uuidString as NSString) }
         .onDrop(of: [.text], delegate: AdvancedCardDropDelegate(targetCard: card, activeDropTarget: $activeDropTarget, performAction: { providers, target in handleGeneralDrop(providers, target: target) }))
+    }
+
+    func clonePeerMenuDestinations(for card: SceneCard) -> [ClonePeerMenuDestination] {
+        let peers = scenario.clonePeers(for: card.id)
+        guard !peers.isEmpty else { return [] }
+        let orderedPeers = peers.sorted { lhs, rhs in
+            let l = scenario.cardLocationByID(lhs.id) ?? (Int.max, Int.max)
+            let r = scenario.cardLocationByID(rhs.id) ?? (Int.max, Int.max)
+            if l.level != r.level { return l.level < r.level }
+            if l.index != r.index { return l.index < r.index }
+            return lhs.createdAt < rhs.createdAt
+        }
+        let baseTitles = orderedPeers.map { cloneParentTitle(for: $0) }
+
+        var titleCounts: [String: Int] = [:]
+        for title in baseTitles {
+            titleCounts[title, default: 0] += 1
+        }
+
+        var resolvedIndexByTitle: [String: Int] = [:]
+        return orderedPeers.enumerated().map { offset, peer in
+            let baseTitle = baseTitles[offset]
+            let totalCount = titleCounts[baseTitle] ?? 0
+            let index = (resolvedIndexByTitle[baseTitle] ?? 0) + 1
+            resolvedIndexByTitle[baseTitle] = index
+            let title = totalCount > 1 ? "\(baseTitle) (\(index))" : baseTitle
+            return ClonePeerMenuDestination(id: peer.id, title: title)
+        }
+    }
+
+    func cloneParentTitle(for card: SceneCard) -> String {
+        if let parent = card.parent {
+            let firstLine = firstMeaningfulLine(from: parent.content)
+            if let firstLine {
+                return firstLine
+            }
+            return "(내용 없는 부모 카드)"
+        }
+        return "(루트)"
+    }
+
+    func firstMeaningfulLine(from text: String) -> String? {
+        let lines = text.components(separatedBy: .newlines)
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                if trimmed.count <= 36 { return trimmed }
+                let cutoff = trimmed.index(trimmed.startIndex, offsetBy: 36)
+                return "\(trimmed[..<cutoff])..."
+            }
+        }
+        return nil
+    }
+
+    func navigateToCloneCard(_ cardID: UUID) {
+        guard let target = findCard(by: cardID) else { return }
+        selectedCardIDs = [target.id]
+        changeActiveCard(to: target)
+        isMainViewFocused = true
     }
 
     @ViewBuilder
@@ -1030,6 +1101,195 @@ extension ScenarioWriterView {
         cutCardSourceScenarioID = scenario.id
     }
 
+    func copyCardsAsCloneFromContext(_ contextCard: SceneCard) {
+        let cards = cloneCopySourceCards(contextCard: contextCard)
+        guard !cards.isEmpty else { return }
+        let payload = CloneCardClipboardPayload(
+            sourceScenarioID: scenario.id,
+            items: cards.map { card in
+                CloneCardClipboardItem(
+                    sourceCardID: card.id,
+                    cloneGroupID: card.cloneGroupID,
+                    content: card.content,
+                    colorHex: card.colorHex,
+                    isAICandidate: card.isAICandidate
+                )
+            }
+        )
+        guard persistCloneCardPayloadToClipboard(payload) else { return }
+        clearCutCardTreeBuffer()
+    }
+
+    func cloneCopySourceCards(contextCard: SceneCard) -> [SceneCard] {
+        if selectedCardIDs.count > 1, selectedCardIDs.contains(contextCard.id) {
+            let selected = selectedCardIDs.compactMap { findCard(by: $0) }
+            guard selected.count == selectedCardIDs.count else { return [contextCard] }
+            return sortedCardsByCanvasOrder(selected)
+        }
+        return [contextCard]
+    }
+
+    func sortedCardsByCanvasOrder(_ cards: [SceneCard]) -> [SceneCard] {
+        let rank = buildCanvasRank()
+        return cards.sorted { lhs, rhs in
+            let l = rank[lhs.id] ?? (Int.max, Int.max)
+            let r = rank[rhs.id] ?? (Int.max, Int.max)
+            if l.0 != r.0 { return l.0 < r.0 }
+            if l.1 != r.1 { return l.1 < r.1 }
+            return lhs.createdAt < rhs.createdAt
+        }
+    }
+
+    func handlePasteShortcut() {
+        if pasteCutCardTreeIfPossible() {
+            return
+        }
+        if let clonePayload = loadCopiedCloneCardPayload(), !clonePayload.items.isEmpty {
+            pendingCloneCardPastePayload = clonePayload
+            pendingCardTreePastePayload = nil
+            showCloneCardPasteDialog = true
+            return
+        }
+        if let cardTreePayload = loadCopiedCardTreePayload(), !cardTreePayload.roots.isEmpty {
+            pendingCardTreePastePayload = cardTreePayload
+            pendingCloneCardPastePayload = nil
+            showCloneCardPasteDialog = true
+        }
+    }
+
+    func applyPendingPastePlacement(as placement: ClonePastePlacement) {
+        if let payload = pendingCloneCardPastePayload {
+            pendingCloneCardPastePayload = nil
+            pendingCardTreePastePayload = nil
+            showCloneCardPasteDialog = false
+            pasteCloneCardPayload(payload, placement: placement)
+            return
+        }
+        if let payload = pendingCardTreePastePayload {
+            pendingCloneCardPastePayload = nil
+            pendingCardTreePastePayload = nil
+            showCloneCardPasteDialog = false
+            pasteCardTreePayload(payload, placement: placement)
+            return
+        }
+        pendingCloneCardPastePayload = nil
+        pendingCardTreePastePayload = nil
+        showCloneCardPasteDialog = false
+    }
+
+    func cancelPendingPastePlacement() {
+        pendingCloneCardPastePayload = nil
+        pendingCardTreePastePayload = nil
+        showCloneCardPasteDialog = false
+    }
+
+    func applyPendingCloneCardPaste(as placement: ClonePastePlacement) {
+        applyPendingPastePlacement(as: placement)
+    }
+
+    func cancelPendingCloneCardPaste() {
+        cancelPendingPastePlacement()
+    }
+
+    func pasteCloneCardPayload(
+        _ payload: CloneCardClipboardPayload,
+        placement: ClonePastePlacement
+    ) {
+        guard !payload.items.isEmpty else { return }
+
+        let prevState = captureScenarioState()
+        let destination = resolvePasteDestination(for: placement)
+        let destinationParent = destination.parent
+        let insertionIndex = destination.insertionIndex
+
+        let destinationSiblings = destinationParent?.sortedChildren ?? scenario.rootCards
+        for sibling in destinationSiblings where sibling.orderIndex >= insertionIndex {
+            sibling.orderIndex += payload.items.count
+        }
+
+        var insertedCards: [SceneCard] = []
+        insertedCards.reserveCapacity(payload.items.count)
+
+        for (offset, item) in payload.items.enumerated() {
+            let source = resolveClonePasteSource(item, sourceScenarioID: payload.sourceScenarioID)
+            let newCard = SceneCard(
+                content: source.content,
+                orderIndex: insertionIndex + offset,
+                createdAt: Date(),
+                parent: destinationParent,
+                scenario: scenario,
+                category: destinationParent?.category,
+                isFloating: false,
+                isArchived: false,
+                lastSelectedChildID: nil,
+                colorHex: source.colorHex,
+                cloneGroupID: source.cloneGroupID,
+                isAICandidate: source.isAICandidate
+            )
+            scenario.cards.append(newCard)
+            insertedCards.append(newCard)
+        }
+
+        normalizeIndices(parent: destinationParent)
+        scenario.bumpCardsVersion()
+        selectedCardIDs = Set(insertedCards.map { $0.id })
+        if let first = insertedCards.first {
+            changeActiveCard(to: first)
+        }
+        commitCardMutation(
+            previousState: prevState,
+            actionName: "클론 카드 붙여넣기"
+        )
+    }
+
+    func resolvePasteDestination(for placement: ClonePastePlacement) -> (parent: SceneCard?, insertionIndex: Int) {
+        guard let active = activeCardID.flatMap({ findCard(by: $0) }) else {
+            return (nil, scenario.rootCards.count)
+        }
+
+        switch placement {
+        case .child:
+            return (active, active.children.count)
+        case .sibling:
+            return (active.parent, active.orderIndex + 1)
+        }
+    }
+
+    func resolveClonePasteDestination(for placement: ClonePastePlacement) -> (parent: SceneCard?, insertionIndex: Int) {
+        resolvePasteDestination(for: placement)
+    }
+
+    func resolveClonePasteSource(
+        _ item: CloneCardClipboardItem,
+        sourceScenarioID: UUID
+    ) -> (content: String, colorHex: String?, isAICandidate: Bool, cloneGroupID: UUID) {
+        if sourceScenarioID == scenario.id,
+           let sourceCard = findCard(by: item.sourceCardID),
+           !sourceCard.isArchived {
+            let resolvedGroupID: UUID
+            if let existing = sourceCard.cloneGroupID {
+                resolvedGroupID = existing
+            } else {
+                let created = item.cloneGroupID ?? UUID()
+                sourceCard.cloneGroupID = created
+                resolvedGroupID = created
+            }
+            return (
+                content: sourceCard.content,
+                colorHex: sourceCard.colorHex,
+                isAICandidate: sourceCard.isAICandidate,
+                cloneGroupID: resolvedGroupID
+            )
+        }
+
+        return (
+            content: item.content,
+            colorHex: item.colorHex,
+            isAICandidate: item.isAICandidate,
+            cloneGroupID: item.cloneGroupID ?? UUID()
+        )
+    }
+
     func pasteCopiedCardTree() {
         if pasteCutCardTreeIfPossible() {
             return
@@ -1037,10 +1297,18 @@ extension ScenarioWriterView {
 
         guard let payload = loadCopiedCardTreePayload() else { return }
         guard !payload.roots.isEmpty else { return }
+        pasteCardTreePayload(payload, placement: .child)
+    }
+
+    func pasteCardTreePayload(
+        _ payload: CardTreeClipboardPayload,
+        placement: ClonePastePlacement
+    ) {
+        guard !payload.roots.isEmpty else { return }
 
         let prevState = captureScenarioState()
 
-        let destination = resolvedCardTreePasteDestination()
+        let destination = resolvePasteDestination(for: placement)
         let destinationParent = destination.parent
         let insertionIndex = destination.insertionIndex
 
@@ -1085,11 +1353,32 @@ extension ScenarioWriterView {
         guard let data = try? encoder.encode(payload) else { return false }
 
         copiedCardTreePayloadData = data
+        copiedCloneCardPayloadData = nil
+        pendingCloneCardPastePayload = nil
+        pendingCardTreePastePayload = nil
+        showCloneCardPasteDialog = false
 
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.declareTypes([waCardTreePasteboardType], owner: nil)
         pasteboard.setData(data, forType: waCardTreePasteboardType)
+        return true
+    }
+
+    func persistCloneCardPayloadToClipboard(_ payload: CloneCardClipboardPayload) -> Bool {
+        let encoder = JSONEncoder()
+        guard let data = try? encoder.encode(payload) else { return false }
+
+        copiedCloneCardPayloadData = data
+        copiedCardTreePayloadData = nil
+        pendingCloneCardPastePayload = nil
+        pendingCardTreePastePayload = nil
+        showCloneCardPasteDialog = false
+
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.declareTypes([waCloneCardPasteboardType], owner: nil)
+        pasteboard.setData(data, forType: waCloneCardPasteboardType)
         return true
     }
 
@@ -1174,6 +1463,24 @@ extension ScenarioWriterView {
 
         if let cached = copiedCardTreePayloadData,
            let payload = try? decoder.decode(CardTreeClipboardPayload.self, from: cached) {
+            return payload
+        }
+
+        return nil
+    }
+
+    func loadCopiedCloneCardPayload() -> CloneCardClipboardPayload? {
+        let decoder = JSONDecoder()
+        let pasteboard = NSPasteboard.general
+
+        if let data = pasteboard.data(forType: waCloneCardPasteboardType),
+           let payload = try? decoder.decode(CloneCardClipboardPayload.self, from: data) {
+            copiedCloneCardPayloadData = data
+            return payload
+        }
+
+        if let cached = copiedCloneCardPayloadData,
+           let payload = try? decoder.decode(CloneCardClipboardPayload.self, from: cached) {
             return payload
         }
 

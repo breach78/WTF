@@ -14,6 +14,7 @@ extension ScenarioWriterView {
         let isArchived: Bool
         let lastSelectedChildID: UUID?
         let colorHex: String?
+        let cloneGroupID: UUID?
     }
 
     struct ScenarioState {
@@ -53,7 +54,8 @@ extension ScenarioWriterView {
                 isFloating: card.isFloating,
                 isArchived: card.isArchived,
                 lastSelectedChildID: card.lastSelectedChildID,
-                colorHex: card.colorHex
+                colorHex: card.colorHex,
+                cloneGroupID: card.cloneGroupID
             ))
         }
         return ScenarioState(
@@ -79,7 +81,8 @@ extension ScenarioWriterView {
                 isFloating: s.isFloating,
                 isArchived: s.isArchived,
                 lastSelectedChildID: s.lastSelectedChildID,
-                colorHex: s.colorHex
+                colorHex: s.colorHex,
+                cloneGroupID: s.cloneGroupID
             )
         }
         var map: [UUID: SceneCard] = [:]

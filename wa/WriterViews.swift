@@ -64,6 +64,8 @@ struct ScenarioWriterView: View {
     @AppStorage("mainWorkspaceZoomScale") var mainWorkspaceZoomScale: Double = 1.0
     @AppStorage("geminiModelID") var geminiModelID: String = "gemini-3.1-pro-preview"
     @AppStorage("focusModeWindowBackgroundActive") var focusModeWindowBackgroundActive: Bool = false
+    @AppStorage("autoBackupEnabledOnQuit") var autoBackupEnabledOnQuit: Bool = true
+    @AppStorage("autoBackupDirectoryPath") var autoBackupDirectoryPath: String = ""
     @AppStorage("lastEditedScenarioID") var lastEditedScenarioID: String = ""
     @AppStorage("lastEditedCardID") var lastEditedCardID: String = ""
 
@@ -227,13 +229,22 @@ struct ScenarioWriterView: View {
     @State var mainEditTabArmCardID: UUID? = nil
     @State var mainEditTabArmAt: Date = .distantPast
     @State var copiedCardTreePayloadData: Data? = nil
+    @State var copiedCloneCardPayloadData: Data? = nil
     @State var cutCardRootIDs: [UUID] = []
     @State var cutCardSourceScenarioID: UUID? = nil
+    @State var pendingCloneCardPastePayload: CloneCardClipboardPayload? = nil
+    @State var pendingCardTreePastePayload: CardTreeClipboardPayload? = nil
+    @State var showCloneCardPasteDialog: Bool = false
+    @State var clonePasteDialogSelection: ClonePastePlacement = .child
     @State var historyBarMeasuredHeight: CGFloat = 0
     @State var historyRetentionLastAppliedCount: Int = 0
     @State var caretEnsureBurstWorkItems: [DispatchWorkItem] = []
     @State var inactivePaneSnapshotState = InactivePaneSnapshotState()
     @State var scenarioTimestampSuppressionActive: Bool = false
+    @State var editingSessionHadTextMutation: Bool = false
+    @State var pendingEditEndAutoBackupWorkItem: DispatchWorkItem? = nil
+    @State var isEditEndAutoBackupRunning: Bool = false
+    @State var hasPendingEditEndAutoBackupRequest: Bool = false
     @FocusState var isNamedSnapshotNoteEditorFocused: Bool
     let focusTypingIdleInterval: TimeInterval = 1.5
     let focusOffsetNormalizationMinInterval: TimeInterval = 0.08
@@ -391,6 +402,7 @@ struct ScenarioWriterView: View {
             }
             .onKeyPress(phases: [.down, .repeat]) { press in
                 if !acceptsKeyboardInput { return .handled }
+                if showCloneCardPasteDialog { return handleClonePasteDialogKeyPress(press) }
                 if isPreviewingHistory { return .ignored }
                 return handleGlobalKeyPress(press)
             }
@@ -431,6 +443,21 @@ struct ScenarioWriterView: View {
                 Button("확인", role: .cancel) { isMainViewFocused = true }
             } message: {
                 Text(exportMessage ?? "")
+            }
+            .overlay {
+                if showCloneCardPasteDialog {
+                    cloneCardPasteDialogOverlay
+                }
+            }
+            .onChange(of: showCloneCardPasteDialog) { _, isShown in
+                if isShown {
+                    resetClonePasteDialogSelection()
+                    return
+                }
+                if !isShown {
+                    pendingCloneCardPastePayload = nil
+                    pendingCardTreePastePayload = nil
+                }
             }
 
         return commandBound
@@ -513,6 +540,9 @@ struct ScenarioWriterView: View {
     func handleWorkspaceDisappear() {
         releaseScenarioTimestampSuppressionIfNeeded()
         cancelInactivePaneSnapshotRefresh()
+        pendingEditEndAutoBackupWorkItem?.cancel()
+        pendingEditEndAutoBackupWorkItem = nil
+        hasPendingEditEndAutoBackupRequest = false
         focusModeWindowBackgroundActive = false
         stopHistoryKeyMonitor()
         stopFocusModeKeyMonitor()
@@ -576,6 +606,19 @@ struct ScenarioWriterView: View {
         if let newID {
             persistLastEditedCard(newID)
         }
+        if oldID != nil, newID == nil {
+            if editingSessionHadTextMutation {
+                scheduleEditEndAutoBackup()
+            }
+            editingSessionHadTextMutation = false
+        } else if oldID == nil, newID != nil {
+            pendingEditEndAutoBackupWorkItem?.cancel()
+            pendingEditEndAutoBackupWorkItem = nil
+            hasPendingEditEndAutoBackupRequest = false
+            editingSessionHadTextMutation = false
+        } else if oldID != nil, oldID != newID {
+            editingSessionHadTextMutation = false
+        }
         syncScenarioTimestampSuppressionIfNeeded()
         guard acceptsKeyboardInput else { return }
         guard !showFocusMode else { return }
@@ -619,6 +662,53 @@ struct ScenarioWriterView: View {
             guard editingCardID == newID else { return }
             if let textView = NSApp.keyWindow?.firstResponder as? NSTextView {
                 normalizeMainEditorTextViewOffsetIfNeeded(textView, reason: "edit-change")
+            }
+        }
+    }
+
+    func markEditingSessionTextMutation() {
+        editingSessionHadTextMutation = true
+    }
+
+    func scheduleEditEndAutoBackup() {
+        guard autoBackupEnabledOnQuit else { return }
+        pendingEditEndAutoBackupWorkItem?.cancel()
+        let work = DispatchWorkItem { startEditEndAutoBackupNow() }
+        pendingEditEndAutoBackupWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0, execute: work)
+    }
+
+    func startEditEndAutoBackupNow() {
+        pendingEditEndAutoBackupWorkItem = nil
+        guard autoBackupEnabledOnQuit else { return }
+        let backupDirectoryURL = WorkspaceAutoBackupService.resolvedBackupDirectoryURL(from: autoBackupDirectoryPath)
+        let workspaceURL = store.folderURL
+
+        if isEditEndAutoBackupRunning {
+            hasPendingEditEndAutoBackupRequest = true
+            return
+        }
+
+        store.flushPendingSaves()
+        isEditEndAutoBackupRunning = true
+
+        Task.detached(priority: .utility) {
+            do {
+                let result = try WorkspaceAutoBackupService.createCompressedBackupAndPrune(
+                    workspaceURL: workspaceURL,
+                    backupDirectoryURL: backupDirectoryURL
+                )
+                print("Edit-end auto backup created: \(result.archiveURL.path), pruned \(result.deletedCount) file(s)")
+            } catch {
+                print("Edit-end auto backup failed: \(error.localizedDescription)")
+            }
+
+            await MainActor.run {
+                isEditEndAutoBackupRunning = false
+                if hasPendingEditEndAutoBackupRequest {
+                    hasPendingEditEndAutoBackupRequest = false
+                    scheduleEditEndAutoBackup()
+                }
             }
         }
     }
@@ -1009,6 +1099,99 @@ struct ScenarioWriterView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
         .padding(.bottom, bottomInset)
+    }
+
+    var cloneCardPasteDialogOverlay: some View {
+        ZStack {
+            Color.black.opacity(0.12)
+                .ignoresSafeArea()
+                .onTapGesture {
+                    cancelPendingPastePlacement()
+                }
+
+            VStack(alignment: .leading, spacing: 12) {
+                Text("카드 붙여넣기")
+                    .font(.system(size: 16, weight: .semibold))
+                Text("붙여넣을 위치를 선택하세요.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+
+                VStack(spacing: 8) {
+                    clonePasteDialogOptionRow(placement: .child)
+                    clonePasteDialogOptionRow(placement: .sibling)
+                }
+
+                Text("↑/↓ 선택 · Enter 확인 · Esc 취소")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(16)
+            .frame(width: 320)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color(nsColor: .windowBackgroundColor))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(Color(nsColor: .separatorColor).opacity(0.35), lineWidth: 1)
+            )
+            .shadow(color: Color.black.opacity(0.25), radius: 20, y: 8)
+        }
+        .zIndex(1000)
+        .allowsHitTesting(true)
+    }
+
+    @ViewBuilder
+    func clonePasteDialogOptionRow(placement: ClonePastePlacement) -> some View {
+        let isEnabled = isClonePastePlacementEnabled(placement)
+        let isSelected = showCloneCardPasteDialog && clonePasteDialogSelection == placement
+
+        Button {
+            guard isEnabled else { return }
+            clonePasteDialogSelection = placement
+            applyPendingPastePlacement(as: placement)
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: clonePasteDialogOptionIcon(placement))
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(isEnabled ? Color.accentColor : Color.secondary.opacity(0.7))
+                Text(clonePasteDialogOptionTitle(placement))
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(isEnabled ? Color.primary : Color.secondary.opacity(0.75))
+                Spacer()
+                if isSelected {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Color.accentColor)
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(isSelected ? Color.accentColor.opacity(0.20) : Color.clear)
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(!isEnabled)
+    }
+
+    func clonePasteDialogOptionTitle(_ placement: ClonePastePlacement) -> String {
+        switch placement {
+        case .child:
+            return "자식 카드로 붙여넣기"
+        case .sibling:
+            return "형제 카드로 붙여넣기"
+        }
+    }
+
+    func clonePasteDialogOptionIcon(_ placement: ClonePastePlacement) -> String {
+        switch placement {
+        case .child:
+            return "arrow.right"
+        case .sibling:
+            return "arrow.down"
+        }
     }
 
     // MARK: - Main Canvas

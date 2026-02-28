@@ -1256,7 +1256,8 @@ extension ScenarioWriterView {
                 previous.orderIndex != changed.orderIndex ||
                 previous.category != changed.category ||
                 previous.isFloating != changed.isFloating ||
-                previous.isArchived != changed.isArchived {
+                previous.isArchived != changed.isArchived ||
+                previous.cloneGroupID != changed.cloneGroupID {
                 return HistoryPromotionDecision(isPromoted: true, reason: "structure-move")
             }
         }
@@ -1621,7 +1622,18 @@ extension ScenarioWriterView {
         scenario.cards = []
         var idMapping: [UUID: SceneCard] = [:]
         for snap in targetCardSnapshots {
-            let newCard = SceneCard(id: snap.cardID, content: snap.content, orderIndex: snap.orderIndex, createdAt: Date(), parent: nil, scenario: scenario, category: snap.category, isFloating: snap.isFloating, isArchived: snap.isArchived)
+            let newCard = SceneCard(
+                id: snap.cardID,
+                content: snap.content,
+                orderIndex: snap.orderIndex,
+                createdAt: Date(),
+                parent: nil,
+                scenario: scenario,
+                category: snap.category,
+                isFloating: snap.isFloating,
+                isArchived: snap.isArchived,
+                cloneGroupID: snap.cloneGroupID
+            )
             scenario.cards.append(newCard)
             idMapping[snap.cardID] = newCard
         }

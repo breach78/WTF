@@ -122,6 +122,7 @@ enum DropTarget: Equatable {
 }
 
 let waCardTreePasteboardType = NSPasteboard.PasteboardType("com.riwoong.wa.cardTree")
+let waCloneCardPasteboardType = NSPasteboard.PasteboardType("com.riwoong.wa.cloneCard")
 
 struct CardTreeClipboardNode: Codable {
     let content: String
@@ -132,6 +133,29 @@ struct CardTreeClipboardNode: Codable {
 
 struct CardTreeClipboardPayload: Codable {
     let roots: [CardTreeClipboardNode]
+}
+
+struct CloneCardClipboardItem: Codable {
+    let sourceCardID: UUID
+    let cloneGroupID: UUID?
+    let content: String
+    let colorHex: String?
+    let isAICandidate: Bool
+}
+
+struct CloneCardClipboardPayload: Codable {
+    let sourceScenarioID: UUID
+    let items: [CloneCardClipboardItem]
+}
+
+enum ClonePastePlacement {
+    case child
+    case sibling
+}
+
+struct ClonePeerMenuDestination: Identifiable {
+    let id: UUID
+    let title: String
 }
 
 // MARK: - AI 카드 생성 타입

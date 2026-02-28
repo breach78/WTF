@@ -24,6 +24,8 @@ final class Scenario: ObservableObject, Identifiable, Hashable {
     private var cachedChildrenByParent: [UUID: [SceneCard]] = [:]
     private var cachedCardsByID: [UUID: SceneCard] = [:]
     private var cachedCardLocationByID: [UUID: (level: Int, index: Int)] = [:]
+    private var cachedCloneMembersByGroup: [UUID: [SceneCard]] = [:]
+    private var activeCloneSyncGroupIDs: Set<UUID> = []
     private var cachedSortedSnapshots: [HistorySnapshot]?
     private var cachedLevels: [[SceneCard]] = []
     private var timestampTrackingSuppressionCount: Int = 0
@@ -159,6 +161,52 @@ final class Scenario: ObservableObject, Identifiable, Hashable {
         return cachedChildrenByParent[parentID] ?? []
     }
 
+    func clonePeers(for cardID: UUID, excluding excludedCardID: UUID? = nil) -> [SceneCard] {
+        rebuildIndexIfNeeded()
+        guard let card = cachedCardsByID[cardID],
+              let cloneGroupID = card.cloneGroupID,
+              let members = cachedCloneMembersByGroup[cloneGroupID] else { return [] }
+        return members.filter { member in
+            member.id != cardID && member.id != excludedCardID
+        }
+    }
+
+    func isCardCloned(_ cardID: UUID) -> Bool {
+        rebuildIndexIfNeeded()
+        guard let card = cachedCardsByID[cardID],
+              let cloneGroupID = card.cloneGroupID,
+              let members = cachedCloneMembersByGroup[cloneGroupID] else { return false }
+        return members.count > 1
+    }
+
+    func propagateCloneContent(from sourceCard: SceneCard, content: String) {
+        guard let cloneGroupID = sourceCard.cloneGroupID else { return }
+        rebuildIndexIfNeeded()
+        guard let members = cachedCloneMembersByGroup[cloneGroupID], members.count > 1 else { return }
+        guard !activeCloneSyncGroupIDs.contains(cloneGroupID) else { return }
+
+        activeCloneSyncGroupIDs.insert(cloneGroupID)
+        defer { activeCloneSyncGroupIDs.remove(cloneGroupID) }
+
+        for member in members where member.id != sourceCard.id {
+            member.applyCloneSynchronizedContent(content)
+        }
+    }
+
+    func propagateCloneColor(from sourceCard: SceneCard, colorHex: String?) {
+        guard let cloneGroupID = sourceCard.cloneGroupID else { return }
+        rebuildIndexIfNeeded()
+        guard let members = cachedCloneMembersByGroup[cloneGroupID], members.count > 1 else { return }
+        guard !activeCloneSyncGroupIDs.contains(cloneGroupID) else { return }
+
+        activeCloneSyncGroupIDs.insert(cloneGroupID)
+        defer { activeCloneSyncGroupIDs.remove(cloneGroupID) }
+
+        for member in members where member.id != sourceCard.id {
+            member.applyCloneSynchronizedColor(colorHex)
+        }
+    }
+
     var allLevels: [[SceneCard]] {
         rebuildIndexIfNeeded()
         return cachedLevels
@@ -169,9 +217,13 @@ final class Scenario: ObservableObject, Identifiable, Hashable {
         var roots: [SceneCard] = []
         var childrenByParent: [UUID: [SceneCard]] = [:]
         var byID: [UUID: SceneCard] = Dictionary(minimumCapacity: cards.count)
+        var cloneMembersByGroup: [UUID: [SceneCard]] = [:]
         for card in cards {
             byID[card.id] = card
             guard !card.isArchived else { continue }
+            if let cloneGroupID = card.cloneGroupID {
+                cloneMembersByGroup[cloneGroupID, default: []].append(card)
+            }
             if let parent = card.parent {
                 childrenByParent[parent.id, default: []].append(card)
             } else if !card.isFloating {
@@ -185,6 +237,7 @@ final class Scenario: ObservableObject, Identifiable, Hashable {
         cachedRoots = roots
         cachedChildrenByParent = childrenByParent
         cachedCardsByID = byID
+        cachedCloneMembersByGroup = cloneMembersByGroup
         // Build levels hierarchy
         var levels: [[SceneCard]] = [roots]
         var curr = roots
@@ -210,7 +263,13 @@ final class Scenario: ObservableObject, Identifiable, Hashable {
 @MainActor
 final class SceneCard: ObservableObject, Identifiable {
     let id: UUID
-    @Published var content: String { didSet { scenario?.markModified() } }
+    @Published var content: String {
+        didSet {
+            guard !isApplyingCloneSynchronization else { return }
+            scenario?.propagateCloneContent(from: self, content: content)
+            scenario?.markModified()
+        }
+    }
     @Published var orderIndex: Int {
         didSet {
             scenario?.bumpCardsVersion()
@@ -239,10 +298,23 @@ final class SceneCard: ObservableObject, Identifiable {
         }
     }
     @Published var lastSelectedChildID: UUID?
-    @Published var colorHex: String? { didSet { scenario?.markModified() } }
+    @Published var colorHex: String? {
+        didSet {
+            guard !isApplyingCloneSynchronization else { return }
+            scenario?.propagateCloneColor(from: self, colorHex: colorHex)
+            scenario?.markModified()
+        }
+    }
+    @Published var cloneGroupID: UUID? {
+        didSet {
+            scenario?.bumpCardsVersion()
+            scenario?.markModified()
+        }
+    }
     @Published var isAICandidate: Bool
+    private var isApplyingCloneSynchronization: Bool = false
 
-    init(id: UUID = UUID(), content: String = "", orderIndex: Int = 0, createdAt: Date = Date(), parent: SceneCard? = nil, scenario: Scenario? = nil, category: String? = nil, isFloating: Bool = false, isArchived: Bool = false, lastSelectedChildID: UUID? = nil, colorHex: String? = nil, isAICandidate: Bool = false) {
+    init(id: UUID = UUID(), content: String = "", orderIndex: Int = 0, createdAt: Date = Date(), parent: SceneCard? = nil, scenario: Scenario? = nil, category: String? = nil, isFloating: Bool = false, isArchived: Bool = false, lastSelectedChildID: UUID? = nil, colorHex: String? = nil, cloneGroupID: UUID? = nil, isAICandidate: Bool = false) {
         self.id = id
         self.content = content
         self.orderIndex = orderIndex
@@ -254,7 +326,22 @@ final class SceneCard: ObservableObject, Identifiable {
         self.isArchived = isArchived
         self.lastSelectedChildID = lastSelectedChildID
         self.colorHex = colorHex
+        self.cloneGroupID = cloneGroupID
         self.isAICandidate = isAICandidate
+    }
+
+    fileprivate func applyCloneSynchronizedContent(_ newContent: String) {
+        guard content != newContent else { return }
+        isApplyingCloneSynchronization = true
+        content = newContent
+        isApplyingCloneSynchronization = false
+    }
+
+    fileprivate func applyCloneSynchronizedColor(_ newColorHex: String?) {
+        guard colorHex != newColorHex else { return }
+        isApplyingCloneSynchronization = true
+        colorHex = newColorHex
+        isApplyingCloneSynchronization = false
     }
 
     var children: [SceneCard] {
@@ -323,6 +410,7 @@ struct CardSnapshot: Codable, Equatable {
     let category: String?
     let isFloating: Bool
     let isArchived: Bool
+    let cloneGroupID: UUID?
 
     init(from card: SceneCard) {
         self.cardID = card.id
@@ -332,6 +420,7 @@ struct CardSnapshot: Codable, Equatable {
         self.category = card.category
         self.isFloating = card.isFloating
         self.isArchived = card.isArchived
+        self.cloneGroupID = card.cloneGroupID
     }
 }
 
@@ -488,7 +577,20 @@ final class FileStore: ObservableObject {
                     var cardMap: [UUID: SceneCard] = Dictionary(minimumCapacity: result.cardRecords.count)
                     for r in result.cardRecords {
                         let content = result.cardContents[r.id] ?? ""
-                        let card = SceneCard(id: r.id, content: content, orderIndex: r.orderIndex, createdAt: r.createdAt, parent: nil, scenario: scenario, category: r.category, isFloating: r.isFloating, isArchived: r.isArchived ?? false, lastSelectedChildID: r.lastSelectedChildID, colorHex: r.colorHex)
+                        let card = SceneCard(
+                            id: r.id,
+                            content: content,
+                            orderIndex: r.orderIndex,
+                            createdAt: r.createdAt,
+                            parent: nil,
+                            scenario: scenario,
+                            category: r.category,
+                            isFloating: r.isFloating,
+                            isArchived: r.isArchived ?? false,
+                            lastSelectedChildID: r.lastSelectedChildID,
+                            colorHex: r.colorHex,
+                            cloneGroupID: r.cloneGroupID
+                        )
                         cardMap[r.id] = card
                         scenario.cards.append(card)
                         lastSavedCardContent[s.id, default: [:]][r.id] = content
@@ -607,7 +709,8 @@ final class FileStore: ObservableObject {
                         isArchived: card.isArchived,
                         lastSelectedChildID: card.lastSelectedChildID,
                         schemaVersion: currentSchemaVersion,
-                        colorHex: card.colorHex
+                        colorHex: card.colorHex,
+                        cloneGroupID: card.cloneGroupID
                     )
                 }
                 let historyRecords = scenario.snapshots.map { snap in
@@ -868,6 +971,7 @@ final class FileStore: ObservableObject {
                 isArchived: false,
                 lastSelectedChildID: nil,
                 colorHex: source.colorHex,
+                cloneGroupID: source.cloneGroupID,
                 isAICandidate: false
             )
             idMap[source.id] = clone
@@ -1025,6 +1129,7 @@ struct CardRecord: Codable {
     let lastSelectedChildID: UUID?
     let schemaVersion: Int?
     let colorHex: String?
+    let cloneGroupID: UUID?
 }
 
 struct HistorySnapshotRecord: Codable {
