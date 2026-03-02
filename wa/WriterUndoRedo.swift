@@ -390,143 +390,38 @@ extension ScenarioWriterView {
         in text: NSString,
         delta: (prefix: Int, oldChangedLength: Int, newChangedLength: Int, inserted: String)
     ) -> Bool {
-        guard delta.newChangedLength > 0 else { return false }
-        let start = delta.prefix
-        let end = delta.prefix + delta.newChangedLength
-        if start < 0 || end > text.length || start >= end { return false }
-
-        var i = start
-        while i < end {
-            let unit = text.character(at: i)
-            if unit == 10 || unit == 13 { // \n or \r
-                if lineHasSignificantContentBeforeBreak(in: text, breakIndex: i) {
-                    return true
-                }
-            }
-            i += 1
-        }
-        return false
+        sharedHasParagraphBreakBoundary(in: text, delta: delta)
     }
 
     func lineHasSignificantContentBeforeBreak(in text: NSString, breakIndex: Int) -> Bool {
-        guard breakIndex > 0 else { return false }
-        var i = breakIndex - 1
-        while i >= 0 {
-            let unit = text.character(at: i)
-            if unit == 10 || unit == 13 { // \n or \r
-                return false
-            }
-            if let scalar = UnicodeScalar(unit),
-               CharacterSet.whitespacesAndNewlines.contains(scalar) {
-                if i == 0 { break }
-                i -= 1
-                continue
-            }
-            return true
-        }
-        return false
+        sharedLineHasSignificantContentBeforeBreak(in: text, breakIndex: breakIndex)
     }
 
     func containsSentenceEndingPeriodBoundary(
         in text: NSString,
         delta: (prefix: Int, oldChangedLength: Int, newChangedLength: Int, inserted: String)
     ) -> Bool {
-        guard delta.newChangedLength > 0 else { return false }
-        let start = delta.prefix
-        let end = delta.prefix + delta.newChangedLength
-        if start < 0 || end > text.length || start >= end { return false }
-
-        var i = start
-        while i < end {
-            let unit = text.character(at: i)
-            if unit == 46 || unit == 12290 { // "." or "。"
-                if isSentenceEndingPeriod(at: i, in: text) {
-                    return true
-                }
-            }
-            i += 1
-        }
-        return false
+        sharedHasSentenceEndingPeriodBoundaryExtended(in: text, delta: delta)
     }
 
     func isSentenceEndingPeriod(at index: Int, in text: NSString) -> Bool {
-        // Decimal number (e.g. 3.14) should not split.
-        if isDigitAtUTF16Index(text, index: index - 1) && isDigitAtUTF16Index(text, index: index + 1) {
-            return false
-        }
-
-        // Next significant char determines sentence end.
-        // Allow trailing spaces and closing quotes/brackets.
-        var i = index + 1
-        while i < text.length {
-            let unit = text.character(at: i)
-            if unit == 10 || unit == 13 { // newline
-                return true
-            }
-            if isWhitespaceUnit(unit) || isClosingPunctuationUnit(unit) {
-                i += 1
-                continue
-            }
-            return false
-        }
-        // End of document after period
-        return true
+        sharedIsSentenceEndingPeriod(at: index, in: text)
     }
 
     func isWhitespaceUnit(_ unit: unichar) -> Bool {
-        guard let scalar = UnicodeScalar(unit) else { return false }
-        return CharacterSet.whitespacesAndNewlines.contains(scalar)
+        sharedIsWhitespaceUnit(unit)
     }
 
     func isDigitAtUTF16Index(_ text: NSString, index: Int) -> Bool {
-        guard index >= 0, index < text.length else { return false }
-        let unit = text.character(at: index)
-        guard let scalar = UnicodeScalar(unit) else { return false }
-        return CharacterSet.decimalDigits.contains(scalar)
+        sharedIsDigitAtUTF16Index(text, index: index)
     }
 
     func isClosingPunctuationUnit(_ unit: unichar) -> Bool {
-        switch unit {
-        case 41, 93, 125, 34, 39: // ) ] } " '
-            return true
-        case 12289, 12290, 12291, 12299, 12301, 12303, 12305: // 、。〃》」』】 etc
-            return true
-        case 8217, 8221: // ' "
-            return true
-        default:
-            return false
-        }
+        sharedIsClosingPunctuationUnit(unit)
     }
 
     func utf16ChangeDelta(oldValue: String, newValue: String) -> (prefix: Int, oldChangedLength: Int, newChangedLength: Int, inserted: String) {
-        let oldText = oldValue as NSString
-        let newText = newValue as NSString
-        let oldLength = oldText.length
-        let newLength = newText.length
-
-        var prefix = 0
-        let limit = min(oldLength, newLength)
-        while prefix < limit && oldText.character(at: prefix) == newText.character(at: prefix) {
-            prefix += 1
-        }
-
-        var oldSuffix = oldLength
-        var newSuffix = newLength
-        while oldSuffix > prefix && newSuffix > prefix &&
-                oldText.character(at: oldSuffix - 1) == newText.character(at: newSuffix - 1) {
-            oldSuffix -= 1
-            newSuffix -= 1
-        }
-
-        let oldChangedLength = max(0, oldSuffix - prefix)
-        let newChangedLength = max(0, newSuffix - prefix)
-        let inserted: String
-        if newChangedLength > 0 {
-            inserted = newText.substring(with: NSRange(location: prefix, length: newChangedLength))
-        } else {
-            inserted = ""
-        }
-        return (prefix, oldChangedLength, newChangedLength, inserted)
+        sharedUTF16ChangeDeltaValue(oldValue: oldValue, newValue: newValue)
     }
 
     // MARK: - Focus Undo/Redo

@@ -139,7 +139,7 @@ extension ScenarioWriterView {
         let isTimelineSelected = selectedCardIDs.contains(card.id)
         let isTimelineMultiSelected = selectedCardIDs.count > 1 && isTimelineSelected
         let isTimelineEmptyCard = card.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        let isPlotLineCard = card.category == "플롯"
+        let isPlotLineCard = card.category == ScenarioCardCategory.plot
         let canSummarizeChildren = canSummarizeDirectChildren(for: card)
         let isCloneLinked = scenario.isCardCloned(card.id)
         let clonePeerDestinations = isCloneLinked ? clonePeerMenuDestinations(for: card) : []
@@ -398,7 +398,7 @@ extension ScenarioWriterView {
     @ViewBuilder
     func cardRow(_ card: SceneCard, proxy: ScrollViewProxy) -> some View {
         let isAICandidate = aiCandidateState.cardIDs.contains(card.id) || card.isAICandidate
-        let isPlotLineCard = card.category == "플롯"
+        let isPlotLineCard = card.category == ScenarioCardCategory.plot
         let canCreateUpperCard = canCreateUpperCardFromSelection(contextCard: card)
         let canSummarizeChildren = canSummarizeDirectChildren(for: card)
         let isCloneLinked = scenario.isCardCloned(card.id)
@@ -883,44 +883,72 @@ extension ScenarioWriterView {
 
     // MARK: - Finish Editing
 
-    func finishEditing() {
+    struct FinishEditingContext {
+        let cardID: UUID
+        let inFocusMode: Bool
+        let skipMainFocusRestore: Bool
+        let startContent: String
+        let startState: ScenarioState?
+        let wasNewCard: Bool
+        let newCardPrevState: ScenarioState?
+    }
+
+    func takeFinishEditingContext() -> FinishEditingContext? {
         let inFocusMode = showFocusMode
         let skipMainFocusRestore = suppressMainFocusRestoreAfterFinishEditing
         suppressMainFocusRestoreAfterFinishEditing = false
         if inFocusMode {
             finalizeFocusTypingCoalescing(reason: "finish-editing")
         }
-        guard let id = editingCardID else { return }
+        guard let id = editingCardID else { return nil }
         if !inFocusMode {
             rememberMainCaretLocation(for: id)
         }
-        let startContent = editingStartContent
-        let startState = editingStartState
-        let wasNewCard = editingIsNewCard
-        let newCardPrevState = pendingNewCardPrevState
-        // Re-entrant finish events can arrive from multiple view layers.
-        // Clear edit state first so the same edit cannot be committed twice.
+        let context = FinishEditingContext(
+            cardID: id,
+            inFocusMode: inFocusMode,
+            skipMainFocusRestore: skipMainFocusRestore,
+            startContent: editingStartContent,
+            startState: editingStartState,
+            wasNewCard: editingIsNewCard,
+            newCardPrevState: pendingNewCardPrevState
+        )
+        resetEditingTransientState()
+        return context
+    }
+
+    func resetEditingTransientState() {
         editingCardID = nil
         editingStartContent = ""
         editingIsNewCard = false
         editingStartState = nil
         pendingNewCardPrevState = nil
-        let apply = {
-            commitFinishedEditingIfNeeded(
-                id: id,
-                inFocusMode: inFocusMode,
-                startContent: startContent,
-                startState: startState,
-                wasNewCard: wasNewCard,
-                newCardPrevState: newCardPrevState
-            )
-            restoreMainFocusAfterFinishEditingIfNeeded(skipMainFocusRestore: skipMainFocusRestore)
-        }
+    }
+
+    func runFinishEditingCommit(_ apply: @escaping () -> Void) {
         if Thread.isMainThread {
             apply()
         } else {
             DispatchQueue.main.async { apply() }
         }
+    }
+
+    func finishEditing() {
+        guard let context = takeFinishEditingContext() else { return }
+        // Re-entrant finish events can arrive from multiple view layers.
+        // Clear edit state first so the same edit cannot be committed twice.
+        let apply = {
+            commitFinishedEditingIfNeeded(
+                id: context.cardID,
+                inFocusMode: context.inFocusMode,
+                startContent: context.startContent,
+                startState: context.startState,
+                wasNewCard: context.wasNewCard,
+                newCardPrevState: context.newCardPrevState
+            )
+            restoreMainFocusAfterFinishEditingIfNeeded(skipMainFocusRestore: context.skipMainFocusRestore)
+        }
+        runFinishEditingCommit(apply)
     }
 
     func commitFinishedEditingIfNeeded(

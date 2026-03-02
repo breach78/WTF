@@ -1,5 +1,4 @@
 import SwiftUI
-import UniformTypeIdentifiers
 import AppKit
 
 final class WeakTextViewBox {
@@ -341,7 +340,15 @@ struct ScenarioWriterView: View {
     }
 
     func configuredWorkspaceRoot(for geometry: GeometryProxy) -> some View {
-        let focusedLayout = workspaceLayout(for: geometry)
+        workspaceCommandBoundRoot(
+            workspaceLifecycleBoundRoot(
+                workspaceFocusedRoot(for: geometry)
+            )
+        )
+    }
+
+    func workspaceFocusedRoot(for geometry: GeometryProxy) -> some View {
+        workspaceLayout(for: geometry)
             .focusable()
             .focused($isMainViewFocused)
             .focusEffectDisabled()
@@ -350,8 +357,10 @@ struct ScenarioWriterView: View {
                     Color.clear.preference(key: WorkspaceRootSizePreferenceKey.self, value: proxy.size)
                 }
             )
+    }
 
-        let lifecycleBound = focusedLayout
+    func workspaceLifecycleBoundRoot<Content: View>(_ root: Content) -> some View {
+        root
             .simultaneousGesture(TapGesture().onEnded {
                 activateSplitPaneIfNeeded()
             })
@@ -394,8 +403,10 @@ struct ScenarioWriterView: View {
             .onChange(of: focusModeEditorCardID) { _, newID in
                 handleFocusModeEditorCardIDChange(newID)
             }
+    }
 
-        let commandBound = lifecycleBound
+    func workspaceCommandBoundRoot<Content: View>(_ root: Content) -> some View {
+        root
             .onReceive(NotificationCenter.default.publisher(for: .waUndoRequested)) { _ in
                 handleUndoRequestNotification()
             }
@@ -470,8 +481,6 @@ struct ScenarioWriterView: View {
                     pendingCardTreePastePayload = nil
                 }
             }
-
-        return commandBound
     }
 
     func handleWorkspaceAppear() {

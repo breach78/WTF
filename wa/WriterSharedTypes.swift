@@ -3,6 +3,12 @@ import AppKit
 
 let focusModeBodySafetyInset: CGFloat = 8
 
+enum ScenarioCardCategory {
+    static let plot = "플롯"
+    static let note = "노트"
+    static let uncategorized = "미분류"
+}
+
 enum FocusModeLayoutMetrics {
     static let focusModeContentPadding: CGFloat = 143
     static let focusModeLineFragmentPadding: CGFloat = 5
@@ -76,6 +82,205 @@ func normalizeGeminiModelIDValue(_ raw: String) -> String {
     default:
         return trimmed
     }
+}
+
+// MARK: - Shared Text Processing Utilities
+
+typealias TextChangeDelta = (prefix: Int, oldChangedLength: Int, newChangedLength: Int, inserted: String)
+
+func sharedUTF16ChangeDeltaValue(oldValue: String, newValue: String) -> TextChangeDelta {
+    let oldText = oldValue as NSString
+    let newText = newValue as NSString
+    let oldLength = oldText.length
+    let newLength = newText.length
+
+    var prefix = 0
+    let limit = min(oldLength, newLength)
+    while prefix < limit && oldText.character(at: prefix) == newText.character(at: prefix) {
+        prefix += 1
+    }
+
+    var oldSuffix = oldLength
+    var newSuffix = newLength
+    while oldSuffix > prefix && newSuffix > prefix &&
+            oldText.character(at: oldSuffix - 1) == newText.character(at: newSuffix - 1) {
+        oldSuffix -= 1
+        newSuffix -= 1
+    }
+
+    let oldChangedLength = max(0, oldSuffix - prefix)
+    let newChangedLength = max(0, newSuffix - prefix)
+    let inserted: String
+    if newChangedLength > 0 {
+        inserted = newText.substring(with: NSRange(location: prefix, length: newChangedLength))
+    } else {
+        inserted = ""
+    }
+    return (prefix, oldChangedLength, newChangedLength, inserted)
+}
+
+func sharedHasParagraphBreakBoundary(in text: NSString, delta: TextChangeDelta) -> Bool {
+    guard delta.newChangedLength > 0 else { return false }
+    let start = delta.prefix
+    let end = delta.prefix + delta.newChangedLength
+    if start < 0 || end > text.length || start >= end { return false }
+
+    var i = start
+    while i < end {
+        let unit = text.character(at: i)
+        if unit == 10 || unit == 13 {
+            if sharedLineHasSignificantContentBeforeBreak(in: text, breakIndex: i) {
+                return true
+            }
+        }
+        i += 1
+    }
+    return false
+}
+
+func sharedLineHasSignificantContentBeforeBreak(in text: NSString, breakIndex: Int) -> Bool {
+    guard breakIndex > 0 else { return false }
+    var i = breakIndex - 1
+    while i >= 0 {
+        let unit = text.character(at: i)
+        if unit == 10 || unit == 13 {
+            return false
+        }
+        if let scalar = UnicodeScalar(unit), CharacterSet.whitespacesAndNewlines.contains(scalar) {
+            if i == 0 { break }
+            i -= 1
+            continue
+        }
+        return true
+    }
+    return false
+}
+
+func sharedHasSentenceEndingPeriodBoundarySimple(in text: NSString, delta: TextChangeDelta) -> Bool {
+    guard delta.newChangedLength > 0 else { return false }
+    let start = delta.prefix
+    let end = delta.prefix + delta.newChangedLength
+    if start < 0 || end > text.length || start >= end { return false }
+
+    var i = start
+    while i < end {
+        let unit = text.character(at: i)
+        if unit == 46 || unit == 12290 {
+            let nextIndex = i + 1
+            if nextIndex >= text.length {
+                return true
+            }
+            let nextUnit = text.character(at: nextIndex)
+            if let scalar = UnicodeScalar(nextUnit), CharacterSet.whitespacesAndNewlines.contains(scalar) {
+                return true
+            }
+        }
+        i += 1
+    }
+    return false
+}
+
+func sharedHasSentenceEndingPeriodBoundaryExtended(in text: NSString, delta: TextChangeDelta) -> Bool {
+    guard delta.newChangedLength > 0 else { return false }
+    let start = delta.prefix
+    let end = delta.prefix + delta.newChangedLength
+    if start < 0 || end > text.length || start >= end { return false }
+
+    var i = start
+    while i < end {
+        let unit = text.character(at: i)
+        if unit == 46 || unit == 12290 {
+            if sharedIsSentenceEndingPeriod(at: i, in: text) {
+                return true
+            }
+        }
+        i += 1
+    }
+    return false
+}
+
+func sharedIsSentenceEndingPeriod(at index: Int, in text: NSString) -> Bool {
+    if sharedIsDigitAtUTF16Index(text, index: index - 1) && sharedIsDigitAtUTF16Index(text, index: index + 1) {
+        return false
+    }
+
+    var i = index + 1
+    while i < text.length {
+        let unit = text.character(at: i)
+        if unit == 10 || unit == 13 {
+            return true
+        }
+        if sharedIsWhitespaceUnit(unit) || sharedIsClosingPunctuationUnit(unit) {
+            i += 1
+            continue
+        }
+        return false
+    }
+    return true
+}
+
+func sharedIsWhitespaceUnit(_ unit: unichar) -> Bool {
+    guard let scalar = UnicodeScalar(unit) else { return false }
+    return CharacterSet.whitespacesAndNewlines.contains(scalar)
+}
+
+func sharedIsDigitAtUTF16Index(_ text: NSString, index: Int) -> Bool {
+    guard index >= 0, index < text.length else { return false }
+    let unit = text.character(at: index)
+    guard let scalar = UnicodeScalar(unit) else { return false }
+    return CharacterSet.decimalDigits.contains(scalar)
+}
+
+func sharedIsClosingPunctuationUnit(_ unit: unichar) -> Bool {
+    switch unit {
+    case 41, 93, 125, 34, 39:
+        return true
+    case 12289, 12290, 12291, 12299, 12301, 12303, 12305:
+        return true
+    case 8217, 8221:
+        return true
+    default:
+        return false
+    }
+}
+
+func sharedClampTextValue(_ text: String, maxLength: Int, preserveLineBreak: Bool = false) -> String {
+    var normalized = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    if !preserveLineBreak {
+        normalized = normalized.replacingOccurrences(of: "\n", with: " / ")
+    }
+    normalized = normalized.replacingOccurrences(of: "\t", with: " ")
+    if normalized.isEmpty { return "(비어 있음)" }
+    if normalized.count <= maxLength { return normalized }
+    let index = normalized.index(normalized.startIndex, offsetBy: maxLength)
+    return String(normalized[..<index]) + "..."
+}
+
+func sharedSearchTokensValue(from text: String) -> [String] {
+    let allowed = text.lowercased().unicodeScalars.map { scalar -> Character in
+        if CharacterSet.alphanumerics.contains(scalar) || (scalar.value >= 0xAC00 && scalar.value <= 0xD7A3) {
+            return Character(scalar)
+        }
+        return " "
+    }
+    let normalized = String(allowed)
+    let words = normalized.split(whereSeparator: { $0.isWhitespace }).map(String.init)
+    var tokens: [String] = []
+    tokens.reserveCapacity(words.count * 2)
+    for word in words {
+        let trimmed = word.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count >= 2 else { continue }
+        tokens.append(trimmed)
+        if trimmed.unicodeScalars.contains(where: { $0.value >= 0xAC00 && $0.value <= 0xD7A3 }) {
+            let chars = Array(trimmed)
+            if chars.count >= 2 {
+                for index in 0..<(chars.count - 1) {
+                    tokens.append(String(chars[index...index + 1]))
+                }
+            }
+        }
+    }
+    return tokens
 }
 
 enum CaretScrollCoordinator {

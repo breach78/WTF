@@ -197,28 +197,7 @@ final class ReferenceCardStore: ObservableObject {
     }
 
     private func utf16ChangeDelta(oldValue: String, newValue: String) -> (prefix: Int, oldChangedLength: Int, newChangedLength: Int, inserted: String) {
-        let oldUTF16 = Array(oldValue.utf16)
-        let newUTF16 = Array(newValue.utf16)
-        let oldCount = oldUTF16.count
-        let newCount = newUTF16.count
-
-        var prefix = 0
-        let minCount = min(oldCount, newCount)
-        while prefix < minCount && oldUTF16[prefix] == newUTF16[prefix] {
-            prefix += 1
-        }
-
-        var oldSuffix = oldCount
-        var newSuffix = newCount
-        while oldSuffix > prefix && newSuffix > prefix && oldUTF16[oldSuffix - 1] == newUTF16[newSuffix - 1] {
-            oldSuffix -= 1
-            newSuffix -= 1
-        }
-
-        let oldChangedLength = oldSuffix - prefix
-        let newChangedLength = newSuffix - prefix
-        let inserted = String(decoding: newUTF16[prefix..<newSuffix], as: UTF16.self)
-        return (prefix, oldChangedLength, newChangedLength, inserted)
+        sharedUTF16ChangeDeltaValue(oldValue: oldValue, newValue: newValue)
     }
 
     private func isStrongTextBoundaryChange(
@@ -237,67 +216,18 @@ final class ReferenceCardStore: ObservableObject {
         in text: NSString,
         delta: (prefix: Int, oldChangedLength: Int, newChangedLength: Int, inserted: String)
     ) -> Bool {
-        guard delta.newChangedLength > 0 else { return false }
-        let start = delta.prefix
-        let end = delta.prefix + delta.newChangedLength
-        if start < 0 || end > text.length || start >= end { return false }
-
-        var i = start
-        while i < end {
-            let unit = text.character(at: i)
-            if unit == 10 || unit == 13 {
-                if lineHasSignificantContentBeforeBreak(in: text, breakIndex: i) {
-                    return true
-                }
-            }
-            i += 1
-        }
-        return false
+        sharedHasParagraphBreakBoundary(in: text, delta: delta)
     }
 
     private func lineHasSignificantContentBeforeBreak(in text: NSString, breakIndex: Int) -> Bool {
-        guard breakIndex > 0 else { return false }
-        var i = breakIndex - 1
-        while i >= 0 {
-            let unit = text.character(at: i)
-            if unit == 10 || unit == 13 {
-                return false
-            }
-            if let scalar = UnicodeScalar(unit), CharacterSet.whitespacesAndNewlines.contains(scalar) {
-                if i == 0 { break }
-                i -= 1
-                continue
-            }
-            return true
-        }
-        return false
+        sharedLineHasSignificantContentBeforeBreak(in: text, breakIndex: breakIndex)
     }
 
     private func containsSentenceEndingPeriodBoundary(
         in text: NSString,
         delta: (prefix: Int, oldChangedLength: Int, newChangedLength: Int, inserted: String)
     ) -> Bool {
-        guard delta.newChangedLength > 0 else { return false }
-        let start = delta.prefix
-        let end = delta.prefix + delta.newChangedLength
-        if start < 0 || end > text.length || start >= end { return false }
-
-        var i = start
-        while i < end {
-            let unit = text.character(at: i)
-            if unit == 46 || unit == 12290 {
-                let nextIndex = i + 1
-                if nextIndex >= text.length {
-                    return true
-                }
-                let nextUnit = text.character(at: nextIndex)
-                if let scalar = UnicodeScalar(nextUnit), CharacterSet.whitespacesAndNewlines.contains(scalar) {
-                    return true
-                }
-            }
-            i += 1
-        }
-        return false
+        sharedHasSentenceEndingPeriodBoundarySimple(in: text, delta: delta)
     }
 
     private func entryID(scenarioID: UUID, cardID: UUID) -> String {

@@ -476,8 +476,6 @@ final class FileStore: ObservableObject {
     }
 
     nonisolated private var scenariosURL: URL { folderURL.appendingPathComponent(scenariosFile) }
-    nonisolated private var cardsURL: URL { folderURL.appendingPathComponent(cardsFile) }
-    nonisolated private var historyURL: URL { folderURL.appendingPathComponent(historyFile) }
 
     private struct ScenarioLoadResult {
         let scenarioID: UUID
@@ -886,8 +884,8 @@ final class FileStore: ObservableObject {
             scenario.cards = cloneCards(from: template, into: scenario)
         } else {
             let rootCard = SceneCard(content: title, orderIndex: 0, scenario: scenario)
-            let plotCard = SceneCard(content: "플롯", orderIndex: 0, parent: rootCard, scenario: scenario, category: "플롯")
-            let noteCard = SceneCard(content: "노트", orderIndex: 1, parent: rootCard, scenario: scenario, category: "노트")
+            let plotCard = SceneCard(content: ScenarioCardCategory.plot, orderIndex: 0, parent: rootCard, scenario: scenario, category: ScenarioCardCategory.plot)
+            let noteCard = SceneCard(content: ScenarioCardCategory.note, orderIndex: 1, parent: rootCard, scenario: scenario, category: ScenarioCardCategory.note)
             scenario.cards = [rootCard, plotCard, noteCard]
         }
         scenario.snapshots = []
@@ -938,8 +936,8 @@ final class FileStore: ObservableObject {
         let scenario = Scenario(title: "제목 없음")
         _ = ensureScenarioFolder(for: scenario.id)
         let rootCard = SceneCard(content: "제목 없음", orderIndex: 0, scenario: scenario)
-        let plotCard = SceneCard(content: "플롯", orderIndex: 0, parent: rootCard, scenario: scenario, category: "플롯")
-        let noteCard = SceneCard(content: "노트", orderIndex: 1, parent: rootCard, scenario: scenario, category: "노트")
+        let plotCard = SceneCard(content: ScenarioCardCategory.plot, orderIndex: 0, parent: rootCard, scenario: scenario, category: ScenarioCardCategory.plot)
+        let noteCard = SceneCard(content: ScenarioCardCategory.note, orderIndex: 1, parent: rootCard, scenario: scenario, category: ScenarioCardCategory.note)
         scenario.cards = [rootCard, plotCard, noteCard]
         scenario.bumpCardsVersion()
         scenarios = [scenario]
