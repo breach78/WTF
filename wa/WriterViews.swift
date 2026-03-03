@@ -110,6 +110,8 @@ struct ScenarioWriterView: View {
     @State var showExportAlert: Bool = false
 
     @State var searchText: String = ""
+    @State var linkedCardsFilterEnabled: Bool = false
+    @State var linkedCardAnchorID: UUID? = nil
     @FocusState var isSearchFocused: Bool
     @FocusState var isNamedSnapshotSearchFocused: Bool
     @FocusState var focusModeEditorCardID: UUID?
@@ -367,6 +369,9 @@ struct ScenarioWriterView: View {
             .onAppear {
                 handleWorkspaceAppear()
             }
+            .onChange(of: showTimeline) { _, isShown in
+                handleTimelineVisibilityChange(isShown)
+            }
             .onChange(of: showHistoryBar) { _, isShown in
                 handleHistoryBarVisibilityChange(isShown)
             }
@@ -485,6 +490,7 @@ struct ScenarioWriterView: View {
 
     func handleWorkspaceAppear() {
         if activeCardID == nil, let startupCard = startupActiveCard() { changeActiveCard(to: startupCard) }
+        syncSplitPaneActiveCardState(activeCardID)
         isMainViewFocused = true
         if scenario.sortedSnapshots.isEmpty { takeSnapshot(force: true) }
         let snapshotCountBeforeRetention = scenario.snapshots.count
@@ -497,6 +503,17 @@ struct ScenarioWriterView: View {
         refreshInactivePaneSnapshotNow()
         updateHistoryKeyMonitor()
         syncScenarioTimestampSuppressionIfNeeded()
+    }
+
+    func handleTimelineVisibilityChange(_ isShown: Bool) {
+        if !isShown {
+            linkedCardsFilterEnabled = false
+            linkedCardAnchorID = nil
+        } else if linkedCardsFilterEnabled {
+            if let current = activeCardID, findCard(by: current) != nil {
+                linkedCardAnchorID = current
+            }
+        }
     }
 
     func handleHistoryBarVisibilityChange(_ isShown: Bool) {
@@ -537,6 +554,10 @@ struct ScenarioWriterView: View {
     }
 
     func handleActiveCardIDChange(_ newID: UUID?) {
+        syncSplitPaneActiveCardState(newID)
+        if linkedCardsFilterEnabled, let newID, findCard(by: newID) != nil {
+            linkedCardAnchorID = newID
+        }
         guard acceptsKeyboardInput else { return }
         synchronizeActiveRelationState(for: newID)
     }
@@ -1470,6 +1491,11 @@ struct ScenarioWriterView: View {
             deadline: .now() + inactivePaneSyncThrottleInterval,
             execute: workItem
         )
+    }
+
+    private func syncSplitPaneActiveCardState(_ cardID: UUID?) {
+        guard splitModeEnabled else { return }
+        scenario.setSplitPaneActiveCard(cardID, for: splitPaneID)
     }
 
     private func startupActiveCard() -> SceneCard? {

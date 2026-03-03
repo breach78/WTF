@@ -18,6 +18,12 @@ final class Scenario: ObservableObject, Identifiable, Hashable {
             markModified()
         }
     }
+    @Published var linkedCardEditDatesByFocusCardID: [UUID: [UUID: Date]] {
+        didSet {
+            rebuildLinkedTargetCardCache()
+            markModified()
+        }
+    }
     @Published private(set) var cardsVersion: Int = 0
     private var cachedVersion: Int = -1
     private var cachedRoots: [SceneCard] = []
@@ -34,8 +40,19 @@ final class Scenario: ObservableObject, Identifiable, Hashable {
     private var pendingModifiedWorkItem: DispatchWorkItem?
     private var lastAppliedModifiedAt: Date = .distantPast
     private let modifiedTimestampDebounceInterval: TimeInterval = 0.14
+    private var cachedLinkedTargetCardIDs: Set<UUID> = []
+    var splitPaneActiveCardByPaneID: [Int: UUID] = [:]
 
-    init(id: UUID = UUID(), title: String = "새 시나리오", isTemplate: Bool = false, timestamp: Date = Date(), changeCountSinceLastSnapshot: Int = 0, cards: [SceneCard] = [], snapshots: [HistorySnapshot] = []) {
+    init(
+        id: UUID = UUID(),
+        title: String = "새 시나리오",
+        isTemplate: Bool = false,
+        timestamp: Date = Date(),
+        changeCountSinceLastSnapshot: Int = 0,
+        cards: [SceneCard] = [],
+        snapshots: [HistorySnapshot] = [],
+        linkedCardEditDatesByFocusCardID: [UUID: [UUID: Date]] = [:]
+    ) {
         self.id = id
         self.title = title
         self.isTemplate = isTemplate
@@ -43,7 +60,9 @@ final class Scenario: ObservableObject, Identifiable, Hashable {
         self.changeCountSinceLastSnapshot = changeCountSinceLastSnapshot
         self.cards = cards
         self.snapshots = snapshots
+        self.linkedCardEditDatesByFocusCardID = linkedCardEditDatesByFocusCardID
         self.lastAppliedModifiedAt = timestamp
+        rebuildLinkedTargetCardCache()
     }
 
     var rootCards: [SceneCard] {
@@ -205,6 +224,130 @@ final class Scenario: ObservableObject, Identifiable, Hashable {
         for member in members where member.id != sourceCard.id {
             member.applyCloneSynchronizedColor(colorHex)
         }
+    }
+
+    func recordLinkedCard(focusCardID: UUID, linkedCardID: UUID, at date: Date = Date()) {
+        guard focusCardID != linkedCardID else { return }
+        let validIDs = Set(cards.map(\.id))
+        guard validIDs.contains(focusCardID), validIDs.contains(linkedCardID) else { return }
+
+        var byLinked = linkedCardEditDatesByFocusCardID[focusCardID] ?? [:]
+        if let previous = byLinked[linkedCardID], previous >= date {
+            return
+        }
+        byLinked[linkedCardID] = date
+        linkedCardEditDatesByFocusCardID[focusCardID] = byLinked
+    }
+
+    func linkedCards(for focusCardID: UUID) -> [(cardID: UUID, lastEditedAt: Date)] {
+        guard let byLinked = linkedCardEditDatesByFocusCardID[focusCardID], !byLinked.isEmpty else {
+            return []
+        }
+        let validIDs = Set(cards.map(\.id))
+        return byLinked
+            .filter { validIDs.contains($0.key) }
+            .map { (cardID: $0.key, lastEditedAt: $0.value) }
+            .sorted {
+                if $0.lastEditedAt != $1.lastEditedAt {
+                    return $0.lastEditedAt > $1.lastEditedAt
+                }
+                return $0.cardID.uuidString < $1.cardID.uuidString
+            }
+    }
+
+    func linkedCardEditDate(focusCardID: UUID, linkedCardID: UUID) -> Date? {
+        linkedCardEditDatesByFocusCardID[focusCardID]?[linkedCardID]
+    }
+
+    func hasLinkedCards(_ focusCardID: UUID) -> Bool {
+        guard let byLinked = linkedCardEditDatesByFocusCardID[focusCardID] else { return false }
+        return !byLinked.isEmpty
+    }
+
+    func isLinkedCard(_ cardID: UUID) -> Bool {
+        cachedLinkedTargetCardIDs.contains(cardID)
+    }
+
+    func disconnectLinkedCard(focusCardID: UUID, linkedCardID: UUID) {
+        guard var byLinked = linkedCardEditDatesByFocusCardID[focusCardID] else { return }
+        guard byLinked.removeValue(forKey: linkedCardID) != nil else { return }
+        if byLinked.isEmpty {
+            linkedCardEditDatesByFocusCardID.removeValue(forKey: focusCardID)
+        } else {
+            linkedCardEditDatesByFocusCardID[focusCardID] = byLinked
+        }
+    }
+
+    func setLinkedCardRecords(_ records: [LinkedCardRecord]) {
+        var map: [UUID: [UUID: Date]] = [:]
+        for record in records {
+            var byLinked = map[record.focusCardID] ?? [:]
+            if let existing = byLinked[record.linkedCardID], existing >= record.lastEditedAt {
+                continue
+            }
+            byLinked[record.linkedCardID] = record.lastEditedAt
+            map[record.focusCardID] = byLinked
+        }
+        linkedCardEditDatesByFocusCardID = map
+        pruneLinkedCards(validCardIDs: Set(cards.map(\.id)))
+    }
+
+    func linkedCardRecords() -> [LinkedCardRecord] {
+        linkedCardEditDatesByFocusCardID
+            .flatMap { focusID, byLinked in
+                byLinked.map { linkedID, lastEditedAt in
+                    LinkedCardRecord(
+                        focusCardID: focusID,
+                        linkedCardID: linkedID,
+                        lastEditedAt: lastEditedAt
+                    )
+                }
+            }
+            .sorted {
+                if $0.focusCardID != $1.focusCardID {
+                    return $0.focusCardID.uuidString < $1.focusCardID.uuidString
+                }
+                if $0.lastEditedAt != $1.lastEditedAt {
+                    return $0.lastEditedAt > $1.lastEditedAt
+                }
+                return $0.linkedCardID.uuidString < $1.linkedCardID.uuidString
+            }
+    }
+
+    func pruneLinkedCards(validCardIDs: Set<UUID>) {
+        var cleaned: [UUID: [UUID: Date]] = [:]
+        for (focusID, byLinked) in linkedCardEditDatesByFocusCardID {
+            guard validCardIDs.contains(focusID) else { continue }
+            let validLinks = byLinked.filter { validCardIDs.contains($0.key) && $0.key != focusID }
+            if !validLinks.isEmpty {
+                cleaned[focusID] = validLinks
+            }
+        }
+        if cleaned != linkedCardEditDatesByFocusCardID {
+            linkedCardEditDatesByFocusCardID = cleaned
+        }
+    }
+
+    func setSplitPaneActiveCard(_ cardID: UUID?, for paneID: Int) {
+        guard paneID == 1 || paneID == 2 else { return }
+        if let cardID {
+            splitPaneActiveCardByPaneID[paneID] = cardID
+        } else {
+            splitPaneActiveCardByPaneID.removeValue(forKey: paneID)
+        }
+    }
+
+    func splitPaneActiveCardID(for paneID: Int) -> UUID? {
+        splitPaneActiveCardByPaneID[paneID]
+    }
+
+    private func rebuildLinkedTargetCardCache() {
+        var ids: Set<UUID> = []
+        ids.reserveCapacity(linkedCardEditDatesByFocusCardID.count * 2)
+        for byLinked in linkedCardEditDatesByFocusCardID.values {
+            ids.formUnion(byLinked.keys)
+        }
+        cachedLinkedTargetCardIDs = ids
     }
 
     var allLevels: [[SceneCard]] {
@@ -426,7 +569,7 @@ struct CardSnapshot: Codable, Equatable {
 
 @MainActor
 final class FileStore: ObservableObject {
-    private let currentSchemaVersion = 2
+    private let currentSchemaVersion = 3
     @Published var scenarios: [Scenario] = []
     let folderURL: URL
 
@@ -434,6 +577,7 @@ final class FileStore: ObservableObject {
     private let scenariosFile = "scenarios.json"
     private let cardsFile = "cards_index.json"
     private let historyFile = "history.json"
+    private let linkedCardsFile = "linked_cards.json"
     private let aiThreadsFile = "ai_threads.json"
     private let aiEmbeddingIndexFile = "ai_embedding_index.json"
     private let aiVectorIndexFile = "ai_vector_index.sqlite"
@@ -446,6 +590,7 @@ final class FileStore: ObservableObject {
         let folderName: String
         let cardRecordsData: Data
         let historyRecordsData: Data
+        let linkedCardsData: Data
         let cardContentsByID: [UUID: String]
         let validCardIDs: Set<UUID>
     }
@@ -467,6 +612,7 @@ final class FileStore: ObservableObject {
     private nonisolated(unsafe) var lastSavedCardsIndexData: [UUID: Data] = [:]
     private nonisolated(unsafe) var lastSavedHistoryData: [UUID: Data] = [:]
     private nonisolated(unsafe) var lastSavedCardContent: [UUID: [UUID: String]] = [:]
+    private nonisolated(unsafe) var lastSavedLinkedCardsData: [UUID: Data] = [:]
     private nonisolated(unsafe) var lastSavedAIThreadsData: [UUID: Data] = [:]
     private nonisolated(unsafe) var lastSavedAIEmbeddingIndexData: [UUID: Data] = [:]
 
@@ -481,6 +627,7 @@ final class FileStore: ObservableObject {
         let scenarioID: UUID
         let cardRecords: [CardRecord]
         let historyRecords: [HistorySnapshotRecord]
+        let linkedCardRecords: [LinkedCardRecord]
         let cardContents: [UUID: String]
     }
 
@@ -534,6 +681,7 @@ final class FileStore: ObservableObject {
                     
                     let scenarioCardsURL = scenarioFolder.appendingPathComponent(self.cardsFile)
                     let scenarioHistoryURL = scenarioFolder.appendingPathComponent(self.historyFile)
+                    let scenarioLinkedCardsURL = scenarioFolder.appendingPathComponent(self.linkedCardsFile)
 
                     group.addTask {
                         let perDecoder = JSONDecoder()
@@ -541,6 +689,7 @@ final class FileStore: ObservableObject {
 
                         guard let cardRecords: [CardRecord] = (try? self.readJSONSync(url: scenarioCardsURL, decoder: perDecoder)) else { return nil }
                         let historyRecords: [HistorySnapshotRecord] = (try? self.readJSONSync(url: scenarioHistoryURL, decoder: perDecoder)) ?? []
+                        let linkedCardRecords: [LinkedCardRecord] = (try? self.readJSONSync(url: scenarioLinkedCardsURL, decoder: perDecoder)) ?? []
 
                         var cardContents: [UUID: String] = Dictionary(minimumCapacity: cardRecords.count)
                         for r in cardRecords {
@@ -552,6 +701,7 @@ final class FileStore: ObservableObject {
                             scenarioID: scenarioID,
                             cardRecords: cardRecords,
                             historyRecords: historyRecords,
+                            linkedCardRecords: linkedCardRecords,
                             cardContents: cardContents
                         )
                     }
@@ -617,6 +767,7 @@ final class FileStore: ObservableObject {
                         ))
                     }
                     scenario.snapshots = snapshots
+                    scenario.setLinkedCardRecords(result.linkedCardRecords)
                 }
             }
 
@@ -726,10 +877,13 @@ final class FileStore: ObservableObject {
                         schemaVersion: currentSchemaVersion
                     )
                 }
+                let validCardIDs = Set(scenario.cards.map(\.id))
+                scenario.pruneLinkedCards(validCardIDs: validCardIDs)
+                let linkedCardRecords = scenario.linkedCardRecords()
                 let cardRecordsData = try encoder.encode(cardRecords)
                 let historyRecordsData = try encoder.encode(historyRecords)
+                let linkedCardsData = try encoder.encode(linkedCardRecords)
                 let cardContentsByID = Dictionary(uniqueKeysWithValues: scenario.cards.map { ($0.id, $0.content) })
-                let validCardIDs = Set(cardContentsByID.keys)
 
                 scenarioPayloads.append(
                     ScenarioSavePayload(
@@ -737,6 +891,7 @@ final class FileStore: ObservableObject {
                         folderName: folderName,
                         cardRecordsData: cardRecordsData,
                         historyRecordsData: historyRecordsData,
+                        linkedCardsData: linkedCardsData,
                         cardContentsByID: cardContentsByID,
                         validCardIDs: validCardIDs
                     )
@@ -770,8 +925,10 @@ final class FileStore: ObservableObject {
         let scenarioID: UUID
         var cardsIndexWritten: Bool = false
         var historyIndexWritten: Bool = false
+        var linkedCardsWritten: Bool = false
         var cardRecordsData: Data
         var historyRecordsData: Data
+        var linkedCardsData: Data
         var cardContentWriteCount: Int = 0
         var deletedCardFileCount: Int = 0
         var updatedContentCache: [UUID: String]
@@ -796,6 +953,7 @@ final class FileStore: ObservableObject {
             for scenarioPayload in payload.scenarioPayloads {
                 let prevCardsData = lastSavedCardsIndexData[scenarioPayload.scenarioID]
                 let prevHistoryData = lastSavedHistoryData[scenarioPayload.scenarioID]
+                let prevLinkedCardsData = lastSavedLinkedCardsData[scenarioPayload.scenarioID]
                 let prevContentCache = lastSavedCardContent[scenarioPayload.scenarioID] ?? [:]
 
                 group.enter()
@@ -809,6 +967,7 @@ final class FileStore: ObservableObject {
                         scenarioID: scenarioPayload.scenarioID,
                         cardRecordsData: scenarioPayload.cardRecordsData,
                         historyRecordsData: scenarioPayload.historyRecordsData,
+                        linkedCardsData: scenarioPayload.linkedCardsData,
                         updatedContentCache: prevContentCache
                     )
 
@@ -822,6 +981,12 @@ final class FileStore: ObservableObject {
                     if prevHistoryData != scenarioPayload.historyRecordsData {
                         try? scenarioPayload.historyRecordsData.write(to: historyURL, options: .atomic)
                         result.historyIndexWritten = true
+                    }
+
+                    let linkedCardsURL = scenarioFolder.appendingPathComponent(self.linkedCardsFile)
+                    if prevLinkedCardsData != scenarioPayload.linkedCardsData {
+                        try? scenarioPayload.linkedCardsData.write(to: linkedCardsURL, options: .atomic)
+                        result.linkedCardsWritten = true
                     }
 
                     for (cardID, content) in scenarioPayload.cardContentsByID {
@@ -855,13 +1020,18 @@ final class FileStore: ObservableObject {
                 if r.historyIndexWritten {
                     lastSavedHistoryData[r.scenarioID] = r.historyRecordsData
                 }
+                if r.linkedCardsWritten {
+                    lastSavedLinkedCardsData[r.scenarioID] = r.linkedCardsData
+                }
                 lastSavedCardContent[r.scenarioID] = r.updatedContentCache
             }
 
             lastSavedCardsIndexData = lastSavedCardsIndexData.filter { activeScenarioIDs.contains($0.key) }
             lastSavedHistoryData = lastSavedHistoryData.filter { activeScenarioIDs.contains($0.key) }
             lastSavedCardContent = lastSavedCardContent.filter { activeScenarioIDs.contains($0.key) }
+            lastSavedLinkedCardsData = lastSavedLinkedCardsData.filter { activeScenarioIDs.contains($0.key) }
             lastSavedAIThreadsData = lastSavedAIThreadsData.filter { activeScenarioIDs.contains($0.key) }
+            lastSavedAIEmbeddingIndexData = lastSavedAIEmbeddingIndexData.filter { activeScenarioIDs.contains($0.key) }
 
         } catch { }
     }
@@ -873,6 +1043,7 @@ final class FileStore: ObservableObject {
             self.lastSavedScenarioRecordsData = payload.scenarioRecordsData
             self.lastSavedCardsIndexData = Dictionary(uniqueKeysWithValues: payload.scenarioPayloads.map { ($0.scenarioID, $0.cardRecordsData) })
             self.lastSavedHistoryData = Dictionary(uniqueKeysWithValues: payload.scenarioPayloads.map { ($0.scenarioID, $0.historyRecordsData) })
+            self.lastSavedLinkedCardsData = Dictionary(uniqueKeysWithValues: payload.scenarioPayloads.map { ($0.scenarioID, $0.linkedCardsData) })
             self.lastSavedCardContent = Dictionary(uniqueKeysWithValues: payload.scenarioPayloads.map { ($0.scenarioID, $0.cardContentsByID) })
         }
     }
@@ -912,13 +1083,16 @@ final class FileStore: ObservableObject {
             try? fileManager.removeItem(at: folder)
             scenarioFolderByID.removeValue(forKey: scenario.id)
         }
+        lastSavedLinkedCardsData.removeValue(forKey: scenario.id)
         lastSavedAIThreadsData.removeValue(forKey: scenario.id)
+        lastSavedAIEmbeddingIndexData.removeValue(forKey: scenario.id)
         saveAll(immediate: true)
     }
 
     func removeCard(_ card: SceneCard, from scenario: Scenario) {
         let idsToRemove = collectCardIDs(from: card, scenario: scenario)
         scenario.cards.removeAll { idsToRemove.contains($0.id) }
+        scenario.pruneLinkedCards(validCardIDs: Set(scenario.cards.map(\.id)))
         scenario.bumpCardsVersion()
         scenario.changeCountSinceLastSnapshot = 0
         saveAll(immediate: true)
@@ -1142,4 +1316,10 @@ struct HistorySnapshotRecord: Codable {
     let promotionReason: String?
     let noteCardID: UUID?
     let schemaVersion: Int?
+}
+
+struct LinkedCardRecord: Codable, Equatable {
+    let focusCardID: UUID
+    let linkedCardID: UUID
+    let lastEditedAt: Date
 }

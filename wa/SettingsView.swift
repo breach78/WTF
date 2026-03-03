@@ -19,6 +19,60 @@ struct SettingsView: View {
         var id: String { value }
     }
 
+    private enum SettingsCategory: String, CaseIterable, Identifiable {
+        case workEnvironment
+        case appearance
+        case ai
+        case export
+        case dataBackup
+        case aboutLegal
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .workEnvironment: return "작업 환경"
+            case .appearance: return "외관"
+            case .ai: return "AI"
+            case .export: return "출력"
+            case .dataBackup: return "데이터 및 백업"
+            case .aboutLegal: return "정보 및 법적"
+            }
+        }
+
+        var systemImage: String {
+            switch self {
+            case .workEnvironment: return "slider.horizontal.3"
+            case .appearance: return "paintpalette"
+            case .ai: return "brain"
+            case .export: return "doc.richtext"
+            case .dataBackup: return "externaldrive.badge.timemachine"
+            case .aboutLegal: return "info.circle"
+            }
+        }
+
+        var descriptionText: String {
+            switch self {
+            case .workEnvironment:
+                return "편집/포커스/단축키처럼 자주 바꾸는 작업 관련 설정입니다."
+            case .appearance:
+                return "색상 테마와 카드/배경 팔레트를 관리합니다."
+            case .ai:
+                return "Gemini 모델과 API 키를 설정합니다."
+            case .export:
+                return "PDF 출력 포맷별 옵션을 조정합니다."
+            case .dataBackup:
+                return "작업 파일 경로와 자동 백업 정책을 관리합니다."
+            case .aboutLegal:
+                return "앱 정보와 폰트 라이선스를 확인합니다."
+            }
+        }
+
+        static let primary: [SettingsCategory] = [.workEnvironment, .appearance, .ai, .export, .dataBackup]
+        static let secondary: [SettingsCategory] = [.aboutLegal]
+        static let searchOrder: [SettingsCategory] = primary + secondary
+    }
+
     private enum ColorThemePreset: String, CaseIterable, Identifiable {
         case warmPaper
         case mintFog
@@ -152,6 +206,14 @@ struct SettingsView: View {
         let darkCardRelated: String
     }
 
+    private enum PendingConfirmation: String, Identifiable {
+        case resetWorkspace
+        case deleteAPIKey
+        case resetColors
+
+        var id: String { rawValue }
+    }
+
     @AppStorage("backgroundColorHex") private var backgroundColorHex: String = "F4F2EE"
     @AppStorage("darkBackgroundColorHex") private var darkBackgroundColorHex: String = "111418"
     @AppStorage("cardBaseColorHex") private var cardBaseColorHex: String = "FFFFFF"
@@ -192,6 +254,9 @@ struct SettingsView: View {
     @State private var selectedGeminiModelOption: String = "gemini-3.1-pro-preview"
     @State private var autoBackupStatusMessage: String? = nil
     @State private var autoBackupStatusIsError: Bool = false
+    @State private var selectedCategory: SettingsCategory? = .workEnvironment
+    @State private var settingsSearchQuery: String = ""
+    @State private var pendingConfirmation: PendingConfirmation?
 
     private let customGeminiModelToken = "__custom__"
     private let geminiModelOptions: [GeminiModelOption] = [
@@ -207,9 +272,9 @@ struct SettingsView: View {
         "Sans Mono CJK Final Draft Bold.otf"
     ]
     private let oflLicenseURL = URL(string: "https://openfontlicense.org/open-font-license-official-text/")!
-    
+
     var onUpdateStore: () -> Void
-    
+
     private var currentStoragePath: String {
         guard let bookmark = storageBookmark else { return "설정되지 않음" }
         var isStale = false
@@ -225,6 +290,12 @@ struct SettingsView: View {
             return WorkspaceAutoBackupService.defaultBackupDirectoryURL().path
         }
         return NSString(string: trimmed).expandingTildeInPath
+    }
+
+    private var appVersionLabel: String {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "-"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "-"
+        return "\(version) (\(build))"
     }
 
     private var shortcutSections: [ShortcutSection] {
@@ -277,34 +348,30 @@ struct SettingsView: View {
         ]
     }
 
-    private enum SettingsTab: String, CaseIterable, Identifiable {
-        case settings
-        case shortcuts
-
-        var id: String { rawValue }
+    private var normalizedSearchQuery: String {
+        settingsSearchQuery
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+            .lowercased()
     }
 
-    @State private var selectedSettingsTab: SettingsTab = .settings
+    private var isSearching: Bool {
+        !normalizedSearchQuery.isEmpty
+    }
 
     private enum SettingsLayout {
-        static let windowWidth: CGFloat = 1120
-        static let windowHeight: CGFloat = 700
-        static let contentPadding: CGFloat = 12
-        static let columnSpacing: CGFloat = 10
+        static let windowWidth: CGFloat = 1160
+        static let windowHeight: CGFloat = 760
+        static let sidebarWidth: CGFloat = 240
+        static let sidebarSectionSpacing: CGFloat = 14
+        static let sidebarRowSpacing: CGFloat = 4
+        static let contentPadding: CGFloat = 14
         static let cardSpacing: CGFloat = 12
         static let cardContentSpacing: CGFloat = 6
         static let cardPadding: CGFloat = 10
         static let cardCornerRadius: CGFloat = 12
         static let titleCornerRadius: CGFloat = 8
         static let cardTitleFontSize: CGFloat = 14
-    }
-
-    private var shortcutLeftSections: [ShortcutSection] {
-        Array(shortcutSections.prefix(2))
-    }
-
-    private var shortcutRightSections: [ShortcutSection] {
-        Array(shortcutSections.dropFirst(2))
     }
 
     private var oflLicenseText: String {
@@ -389,8 +456,605 @@ struct SettingsView: View {
         """
     }
 
+    var body: some View {
+        HStack(spacing: 0) {
+            sidebar
+            Divider()
+            detailContent
+                .searchable(text: $settingsSearchQuery, placement: .toolbar, prompt: "설정 검색")
+        }
+        .frame(width: SettingsLayout.windowWidth, height: SettingsLayout.windowHeight)
+        .onAppear {
+            if selectedCategory == nil {
+                selectedCategory = .workEnvironment
+            }
+            refreshGeminiAPIKeyStatus()
+            syncGeminiModelOptionSelection()
+            loadCustomColorThemePresets()
+            initializeAutoBackupSettingsIfNeeded()
+        }
+        .sheet(isPresented: $showSaveColorPresetSheet) {
+            saveColorPresetSheet
+        }
+        .alert(item: $pendingConfirmation) { confirmation in
+            switch confirmation {
+            case .resetWorkspace:
+                return Alert(
+                    title: Text("작업 파일 초기화"),
+                    message: Text("현재 작업 파일 연결을 해제하고 다시 선택하도록 초기화합니다."),
+                    primaryButton: .destructive(Text("초기화")) {
+                        storageBookmark = nil
+                        forceWorkspaceReset = true
+                    },
+                    secondaryButton: .cancel(Text("취소"))
+                )
+            case .deleteAPIKey:
+                return Alert(
+                    title: Text("Gemini API 키 삭제"),
+                    message: Text("저장된 키를 삭제하면 AI 기능을 다시 사용하려면 키를 재입력해야 합니다."),
+                    primaryButton: .destructive(Text("삭제")) {
+                        deleteGeminiAPIKey()
+                    },
+                    secondaryButton: .cancel(Text("취소"))
+                )
+            case .resetColors:
+                return Alert(
+                    title: Text("색상 초기화"),
+                    message: Text("현재 카드/배경 색상 값을 기본값으로 되돌립니다."),
+                    primaryButton: .destructive(Text("초기화")) {
+                        resetColorsToDefaults()
+                    },
+                    secondaryButton: .cancel(Text("취소"))
+                )
+            }
+        }
+    }
+
+    private var sidebar: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: SettingsLayout.sidebarSectionSpacing) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("설정")
+                        .font(.headline)
+                    Text("카테고리")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+
+                sidebarSection(title: "설정", categories: SettingsCategory.primary)
+                sidebarSection(title: "정보", categories: SettingsCategory.secondary)
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+        }
+        .frame(width: SettingsLayout.sidebarWidth, alignment: .topLeading)
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private func sidebarSection(title: String, categories: [SettingsCategory]) -> some View {
+        VStack(alignment: .leading, spacing: SettingsLayout.sidebarRowSpacing) {
+            Text(title)
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .padding(.leading, 6)
+
+            ForEach(categories) { category in
+                Button {
+                    selectCategory(category)
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: category.systemImage)
+                            .frame(width: 16)
+                        Text(category.title)
+                            .lineLimit(1)
+                        Spacer(minLength: 6)
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(selectedCategory == category ? Color.accentColor.opacity(0.18) : Color.clear)
+                    )
+                }
+                .buttonStyle(.plain)
+                .contentShape(Rectangle())
+            }
+        }
+    }
+
+    private func selectCategory(_ category: SettingsCategory) {
+        selectedCategory = category
+        if isSearching {
+            settingsSearchQuery = ""
+        }
+    }
+
     @ViewBuilder
-    private func oflFontLicenseCard() -> some View {
+    private var detailContent: some View {
+        if isSearching {
+            searchResultsView
+        } else if let selectedCategory {
+            categoryView(for: selectedCategory, showHeader: true)
+        } else {
+            ContentUnavailableView("카테고리를 선택하세요", systemImage: "sidebar.left")
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    private var searchResultsView: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: SettingsLayout.cardSpacing + 6) {
+                Text("검색 결과")
+                    .font(.title3.weight(.semibold))
+                Text("\"\(settingsSearchQuery)\"에 해당하는 설정만 표시합니다.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+
+                ForEach(SettingsCategory.searchOrder) { category in
+                    if hasVisibleCards(in: category) {
+                        VStack(alignment: .leading, spacing: SettingsLayout.cardSpacing) {
+                            Text(category.title)
+                                .font(.headline)
+                                .padding(.top, 2)
+                            categoryCards(for: category)
+                        }
+                    }
+                }
+
+                if !SettingsCategory.searchOrder.contains(where: { hasVisibleCards(in: $0) }) {
+                    ContentUnavailableView(
+                        "검색 결과가 없습니다",
+                        systemImage: "magnifyingglass",
+                        description: Text("다른 키워드를 입력하거나 카테고리를 직접 탐색해 보세요.")
+                    )
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 32)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .padding(SettingsLayout.contentPadding)
+            .controlSize(.small)
+        }
+    }
+
+    private func categoryView(for category: SettingsCategory, showHeader: Bool) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: SettingsLayout.cardSpacing) {
+                if showHeader {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(category.title)
+                            .font(.title3.weight(.semibold))
+                        Text(category.descriptionText)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(.bottom, 2)
+                }
+
+                categoryCards(for: category)
+            }
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .padding(SettingsLayout.contentPadding)
+            .controlSize(.small)
+        }
+    }
+
+    @ViewBuilder
+    private func categoryCards(for category: SettingsCategory) -> some View {
+        switch category {
+        case .workEnvironment:
+            workEnvironmentCards
+        case .appearance:
+            appearanceCards
+        case .ai:
+            aiCards
+        case .export:
+            exportCards
+        case .dataBackup:
+            dataBackupCards
+        case .aboutLegal:
+            aboutLegalCards
+        }
+    }
+
+    @ViewBuilder
+    private var workEnvironmentCards: some View {
+        if cardMatches(
+            title: "빠른 설정",
+            keywords: ["행간", "자동 백업", "타이프라이터", "자주", "빠른", "quick"]
+        ) {
+            quickSettingsCard
+        }
+        if cardMatches(title: "편집기 설정", keywords: ["메인", "행간", "카드 간격", "editor"]) {
+            editorSettingsCard
+        }
+        if cardMatches(title: "포커스 모드 설정", keywords: ["포커스", "타이프라이터", "기준선", "focus"]) {
+            focusModeSettingsCard
+        }
+
+        ForEach(shortcutSections) { section in
+            if shortcutSectionMatches(section) {
+                shortcutSectionCard(section)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var appearanceCards: some View {
+        if cardMatches(title: "색상 테마 프리셋", keywords: ["색상", "테마", "프리셋", "palette", "theme"]) {
+            colorThemePresetCard
+        }
+        if cardMatches(title: "색상 설정", keywords: ["라이트", "다크", "배경", "카드", "custom color"]) {
+            colorSettingsCard
+        }
+        if cardMatches(title: "색상 초기화", keywords: ["기본값", "reset", "restore default"]) {
+            colorResetCard
+        }
+    }
+
+    @ViewBuilder
+    private var aiCards: some View {
+        if cardMatches(title: "AI 설정", keywords: ["gemini", "모델", "API 키", "keychain", "ai"]) {
+            aiSettingsCard
+        }
+    }
+
+    @ViewBuilder
+    private var exportCards: some View {
+        if cardMatches(title: "출력 설정", keywords: ["PDF", "중앙정렬식", "한국식", "폰트", "정렬", "export"]) {
+            exportSettingsCard
+        }
+    }
+
+    @ViewBuilder
+    private var dataBackupCards: some View {
+        if cardMatches(title: "데이터 저장소", keywords: ["작업 파일", "workspace", "저장 경로"]) {
+            workspaceCard
+        }
+        if cardMatches(title: "자동 백업", keywords: ["백업", "보관", "zip", "backup"]) {
+            autoBackupCard
+        }
+    }
+
+    @ViewBuilder
+    private var aboutLegalCards: some View {
+        if cardMatches(title: "앱 정보", keywords: ["버전", "정보", "about"]) {
+            settingsCard(title: "앱 정보") {
+                Text("앱 버전: \(appVersionLabel)")
+                    .font(.system(size: 11, design: .monospaced))
+                Text("이 화면의 설정은 변경 즉시 저장됩니다.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+
+        if cardMatches(title: "폰트 라이선스 (OFL)", keywords: ["라이선스", "법적", "폰트", "ofl"]) {
+            oflFontLicenseCard
+        }
+    }
+
+    private var quickSettingsCard: some View {
+        settingsCard(title: "빠른 설정") {
+            Text("자주 변경하는 항목을 한곳에서 조정합니다.")
+                .font(.caption)
+                .foregroundColor(.secondary)
+
+            Toggle("앱 종료 시 자동 백업", isOn: $autoBackupEnabledOnQuit)
+            Toggle("포커스 타이프라이터 모드", isOn: $focusTypewriterEnabled)
+
+            Text("메인 모드 행간: \(String(format: "%.2f", mainCardLineSpacingValue))")
+            Slider(value: $mainCardLineSpacingValue, in: 1.0...8.0, step: 0.05)
+
+            Text("포커스 모드 행간: \(String(format: "%.2f", focusModeLineSpacingValue))")
+            Slider(value: $focusModeLineSpacingValue, in: 0.0...6.0, step: 0.05)
+        }
+    }
+
+    private var editorSettingsCard: some View {
+        settingsCard(title: "편집기 설정") {
+            Text("메인 모드 행간 (임시): \(String(format: "%.2f", mainCardLineSpacingValue))")
+            Slider(value: $mainCardLineSpacingValue, in: 1.0...8.0, step: 0.05)
+
+            Text("카드 위아래 간격: \(Int(mainCardVerticalGap.rounded()))")
+            Slider(value: $mainCardVerticalGap, in: 0.0...28.0, step: 1.0)
+
+            Text("기본값은 0이며, 필요할 때만 행 간격을 넓혀 보이게 합니다.")
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .lineLimit(2)
+        }
+    }
+
+    private var focusModeSettingsCard: some View {
+        settingsCard(title: "포커스 모드 설정") {
+            Toggle("타이프라이터 모드 사용", isOn: $focusTypewriterEnabled)
+
+            Picker("타이프라이터 기준선", selection: $focusTypewriterBaseline) {
+                Text("중앙 50%")
+                    .tag(0.50)
+                Text("기본 60%")
+                    .tag(0.60)
+                Text("아래 66%")
+                    .tag(0.66)
+            }
+            .pickerStyle(.segmented)
+            .disabled(!focusTypewriterEnabled)
+
+            if !focusTypewriterEnabled {
+                Text("기준선 조정은 타이프라이터 모드가 켜져 있을 때만 적용됩니다.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .lineLimit(2)
+            }
+
+            Text(focusTypewriterEnabled ? "현재 타이프라이터 모드가 켜져 있습니다." : "현재 타이프라이터 모드가 꺼져 있습니다.")
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .lineLimit(2)
+        }
+    }
+
+    private var workspaceCard: some View {
+        settingsCard(title: "데이터 저장소") {
+            Text("현재 저장 경로")
+                .font(.caption)
+                .foregroundColor(.secondary)
+            Text(currentStoragePath)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundColor(.secondary)
+                .lineLimit(2)
+                .truncationMode(.middle)
+
+            Button("기존 작업 파일 열기...") {
+                openWorkspaceFile()
+            }
+
+            Button("새 작업 파일 만들기...") {
+                createWorkspaceFile()
+            }
+
+            Button("작업 파일 초기화 (다시 선택)", role: .destructive) {
+                pendingConfirmation = .resetWorkspace
+            }
+        }
+    }
+
+    private var autoBackupCard: some View {
+        settingsCard(title: "자동 백업") {
+            Toggle("앱 종료 시 자동 백업", isOn: $autoBackupEnabledOnQuit)
+
+            Text("백업 폴더")
+                .font(.caption)
+                .foregroundColor(.secondary)
+            Text(currentAutoBackupPath)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundColor(.secondary)
+                .lineLimit(2)
+                .truncationMode(.middle)
+
+            HStack(spacing: 8) {
+                Button("백업 폴더 선택...") {
+                    selectAutoBackupDirectory()
+                }
+                .disabled(!autoBackupEnabledOnQuit)
+
+                Button("기본 위치로") {
+                    autoBackupDirectoryPath = WorkspaceAutoBackupService.defaultBackupDirectoryURL().path
+                    setAutoBackupStatus("기본 백업 경로를 적용했습니다.", isError: false)
+                }
+                .disabled(!autoBackupEnabledOnQuit)
+            }
+
+            if !autoBackupEnabledOnQuit {
+                Text("자동 백업이 꺼져 있어 폴더 설정은 백업 활성화 후 적용됩니다.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
+            Text("보관 정책: 최신 10개 + 이후 일 1개(7일) + 주 1개(4주까지) + 이후 월 1개")
+                .font(.system(size: 11))
+                .foregroundColor(.secondary)
+                .lineLimit(3)
+
+            Text("백업 파일명: 작업이름-YYYY-MM-DD-HH-mm-ss.wtf.zip")
+                .font(.system(size: 11))
+                .foregroundColor(.secondary)
+                .lineLimit(2)
+
+            Text("압축 해제 시 작업이름.wtf 컨테이너로 복원됩니다.")
+                .font(.system(size: 11))
+                .foregroundColor(.secondary)
+                .lineLimit(2)
+
+            if let message = autoBackupStatusMessage {
+                Text(message)
+                    .font(.system(size: 11))
+                    .foregroundColor(autoBackupStatusIsError ? .red : .secondary)
+                    .lineLimit(2)
+            }
+        }
+    }
+
+    private var exportSettingsCard: some View {
+        settingsCard(title: "출력 설정") {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("중앙정렬식 PDF")
+                    .font(.subheadline.weight(.semibold))
+                Text("폰트 크기: \(String(format: "%.1f", exportCenteredFontSize))pt")
+                Slider(value: $exportCenteredFontSize, in: 8...20, step: 0.5)
+                Toggle("헤딩 볼드", isOn: $exportCenteredSceneHeadingBold)
+                Toggle("캐릭터 볼드", isOn: $exportCenteredCharacterBold)
+                Toggle("오른쪽 씬 번호 표시", isOn: $exportCenteredShowRightSceneNumber)
+
+                Divider()
+
+                Text("한국식 PDF")
+                    .font(.subheadline.weight(.semibold))
+                Text("폰트 크기: \(String(format: "%.1f", exportKoreanFontSize))pt")
+                Slider(value: $exportKoreanFontSize, in: 8...20, step: 0.5)
+                Toggle("씬 헤딩 볼드", isOn: $exportKoreanSceneBold)
+                Toggle("캐릭터 볼드", isOn: $exportKoreanCharacterBold)
+                Picker("캐릭터 정렬", selection: $exportKoreanCharacterAlignment) {
+                    Text("오른쪽")
+                        .tag("right")
+                    Text("왼쪽")
+                        .tag("left")
+                }
+                .pickerStyle(.segmented)
+            }
+        }
+    }
+
+    private var aiSettingsCard: some View {
+        settingsCard(title: "AI 설정") {
+            Text("Gemini 모델")
+                .font(.caption)
+                .foregroundColor(.secondary)
+            Picker("모델 선택", selection: $selectedGeminiModelOption) {
+                ForEach(geminiModelOptions) { option in
+                    Text(option.title)
+                        .tag(option.value)
+                }
+                Text("직접 입력")
+                    .tag(customGeminiModelToken)
+            }
+            .pickerStyle(.menu)
+            .onChange(of: selectedGeminiModelOption) { _, newValue in
+                guard newValue != customGeminiModelToken else { return }
+                geminiModelID = newValue
+            }
+
+            TextField("예: gemini-3.1-pro-preview", text: $geminiModelID)
+                .textFieldStyle(.roundedBorder)
+                .onChange(of: geminiModelID) { _, _ in
+                    syncGeminiModelOptionSelection()
+                }
+
+            Text("Gemini 3.1 Pro의 API 모델 ID는 gemini-3.1-pro-preview 입니다. 404가 뜨면 다른 모델을 선택하세요.")
+                .font(.system(size: 11))
+                .foregroundColor(.secondary)
+                .lineLimit(2)
+
+            Text("Gemini API 키")
+                .font(.caption)
+                .foregroundColor(.secondary)
+            SecureField(hasGeminiAPIKey ? "새 키를 입력하면 덮어씁니다" : "API 키 입력", text: $geminiAPIKeyInput)
+                .textFieldStyle(.roundedBorder)
+
+            HStack(spacing: 8) {
+                Button(hasGeminiAPIKey ? "키 업데이트" : "키 저장") {
+                    saveGeminiAPIKey()
+                }
+                .disabled(geminiAPIKeyInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                Button("키 삭제", role: .destructive) {
+                    pendingConfirmation = .deleteAPIKey
+                }
+                .disabled(!hasGeminiAPIKey)
+            }
+
+            Text(hasGeminiAPIKey ? "현재 API 키가 저장되어 있습니다." : "현재 저장된 API 키가 없습니다.")
+                .font(.system(size: 11))
+                .foregroundColor(.secondary)
+                .lineLimit(2)
+
+            if let message = aiSettingsStatusMessage {
+                Text(message)
+                    .font(.system(size: 11))
+                    .foregroundColor(aiSettingsStatusIsError ? .red : .secondary)
+                    .lineLimit(2)
+            }
+        }
+    }
+
+    private var colorThemePresetCard: some View {
+        settingsCard(title: "색상 테마 프리셋") {
+            Picker("프리셋", selection: $selectedColorThemePresetID) {
+                ForEach(ColorThemePreset.allCases) { preset in
+                    Text(preset.title)
+                        .tag(preset.rawValue)
+                }
+                ForEach(customColorThemePresets) { preset in
+                    Text("사용자: \(preset.title)")
+                        .tag(preset.id)
+                }
+            }
+            .pickerStyle(.menu)
+
+            HStack(spacing: 8) {
+                Button("선택한 프리셋 적용") {
+                    applySelectedColorThemePreset()
+                }
+
+                Button("프리셋으로 저장") {
+                    newColorPresetName = ""
+                    saveColorPresetError = nil
+                    showSaveColorPresetSheet = true
+                }
+            }
+
+            Text("라이트/다크 모드는 유지하고 카드/배경 팔레트만 교체합니다.")
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .lineLimit(2)
+        }
+    }
+
+    private var colorSettingsCard: some View {
+        settingsCard(title: "색상 설정") {
+            themedColorPickerRow(
+                title: "앱 배경 색",
+                lightHex: $backgroundColorHex,
+                darkHex: $darkBackgroundColorHex,
+                lightFallback: Color(red: 0.96, green: 0.95, blue: 0.93),
+                darkFallback: Color(red: 0.07, green: 0.08, blue: 0.10)
+            )
+            themedColorPickerRow(
+                title: "카드 기본 색",
+                lightHex: $cardBaseColorHex,
+                darkHex: $darkCardBaseColorHex,
+                lightFallback: Color.white,
+                darkFallback: Color(red: 0.10, green: 0.13, blue: 0.16)
+            )
+            themedColorPickerRow(
+                title: "선택 카드 색",
+                lightHex: $cardActiveColorHex,
+                darkHex: $darkCardActiveColorHex,
+                lightFallback: Color(red: 0.75, green: 0.84, blue: 1.0),
+                darkFallback: Color(red: 0.16, green: 0.23, blue: 0.31)
+            )
+            themedColorPickerRow(
+                title: "연결 카드 색",
+                lightHex: $cardRelatedColorHex,
+                darkHex: $darkCardRelatedColorHex,
+                lightFallback: Color(red: 0.87, green: 0.92, blue: 1.0),
+                darkFallback: Color(red: 0.14, green: 0.18, blue: 0.25)
+            )
+        }
+    }
+
+    private var colorResetCard: some View {
+        settingsCard(title: "색상 초기화") {
+            Button("카드/배경 색 기본값으로", role: .destructive) {
+                pendingConfirmation = .resetColors
+            }
+        }
+    }
+
+    private func shortcutSectionCard(_ section: ShortcutSection) -> some View {
+        settingsCard(title: "단축키 - \(section.title)") {
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(section.items) { item in
+                    shortcutRow(item)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var oflFontLicenseCard: some View {
         settingsCard(title: "폰트 라이선스 (OFL)") {
             Text("앱에 포함된 아래 폰트 파일은 SIL Open Font License 1.1 조건으로 배포됩니다.")
                 .font(.system(size: 11))
@@ -422,314 +1086,49 @@ struct SettingsView: View {
         }
     }
 
-    var body: some View {
-        TabView(selection: $selectedSettingsTab) {
-            threeColumnContent(
-                first: {
-                    settingsCard(title: "편집기 설정") {
-                        Text("메인 모드 행간 (임시): \(String(format: "%.2f", mainCardLineSpacingValue))")
-                        Slider(value: $mainCardLineSpacingValue, in: 1.0...8.0, step: 0.05)
-
-                        Text("카드 위아래 간격: \(Int(mainCardVerticalGap.rounded()))")
-                        Slider(value: $mainCardVerticalGap, in: 0.0...28.0, step: 1.0)
-                        Text("기본값은 0이며, 필요할 때만 행 간격을 넓혀 보이게 합니다.")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                            .lineLimit(2)
-
-                        Text("포커스 모드 행간 (임시): \(String(format: "%.2f", focusModeLineSpacingValue))")
-                        Slider(value: $focusModeLineSpacingValue, in: 0.0...6.0, step: 0.05)
-                    }
-
-                    settingsCard(title: "포커스 모드 설정") {
-                        Text("타이프라이터 토글은 상단 메뉴 > 화면에서 변경합니다.")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                            .lineLimit(2)
-
-                        Picker("타이프라이터 기준선", selection: $focusTypewriterBaseline) {
-                            Text("중앙 50%").tag(0.50)
-                            Text("기본 60%").tag(0.60)
-                            Text("아래 66%").tag(0.66)
-                        }
-                        .pickerStyle(.segmented)
-                        .disabled(!focusTypewriterEnabled)
-
-                        Text(focusTypewriterEnabled ? "현재 타이프라이터 모드가 켜져 있습니다." : "현재 타이프라이터 모드가 꺼져 있습니다.")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                            .lineLimit(2)
-                    }
-
-                    settingsCard(title: "데이터 저장소") {
-                        Text("현재 저장 경로:")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                        Text(currentStoragePath)
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundColor(.secondary)
-                            .lineLimit(2)
-                            .truncationMode(.middle)
-
-                        Button("기존 작업 파일 열기...") {
-                            openWorkspaceFile()
-                        }
-
-                        Button("새 작업 파일 만들기...") {
-                            createWorkspaceFile()
-                        }
-
-                        Button("작업 파일 초기화 (다시 선택)") {
-                            storageBookmark = nil
-                            forceWorkspaceReset = true
-                        }
-                    }
-
-                    settingsCard(title: "자동 백업") {
-                        Toggle("앱 종료 시 자동 백업", isOn: $autoBackupEnabledOnQuit)
-
-                        Text("백업 폴더")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                        Text(currentAutoBackupPath)
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundColor(.secondary)
-                            .lineLimit(2)
-                            .truncationMode(.middle)
-
-                        HStack(spacing: 8) {
-                            Button("백업 폴더 선택...") {
-                                selectAutoBackupDirectory()
-                            }
-                            Button("기본 위치로") {
-                                autoBackupDirectoryPath = WorkspaceAutoBackupService.defaultBackupDirectoryURL().path
-                                setAutoBackupStatus("기본 백업 경로를 적용했습니다.", isError: false)
-                            }
-                        }
-
-                        Text("보관 정책: 최신 10개 + 이후 일 1개(7일) + 주 1개(4주까지) + 이후 월 1개")
-                            .font(.system(size: 11))
-                            .foregroundColor(.secondary)
-                            .lineLimit(3)
-
-                        Text("백업 파일명: 작업이름-YYYY-MM-DD-HH-mm-ss.wtf.zip")
-                            .font(.system(size: 11))
-                            .foregroundColor(.secondary)
-                            .lineLimit(2)
-                        Text("압축 해제 시 작업이름.wtf 컨테이너로 복원됩니다.")
-                            .font(.system(size: 11))
-                            .foregroundColor(.secondary)
-                            .lineLimit(2)
-
-                        if let message = autoBackupStatusMessage {
-                            Text(message)
-                                .font(.system(size: 11))
-                                .foregroundColor(autoBackupStatusIsError ? .red : .secondary)
-                                .lineLimit(2)
-                        }
-                    }
-
-                    oflFontLicenseCard()
-                },
-                second: {
-                    settingsCard(title: "출력 설정") {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("중앙정렬식 PDF")
-                                .font(.subheadline.weight(.semibold))
-                            Text("폰트 크기: \(String(format: "%.1f", exportCenteredFontSize))pt")
-                            Slider(value: $exportCenteredFontSize, in: 8...20, step: 0.5)
-                            Toggle("헤딩 볼드", isOn: $exportCenteredSceneHeadingBold)
-                            Toggle("캐릭터 볼드", isOn: $exportCenteredCharacterBold)
-                            Toggle("오른쪽 씬 번호 표시", isOn: $exportCenteredShowRightSceneNumber)
-
-                            Divider()
-
-                            Text("한국식 PDF")
-                                .font(.subheadline.weight(.semibold))
-                            Text("폰트 크기: \(String(format: "%.1f", exportKoreanFontSize))pt")
-                            Slider(value: $exportKoreanFontSize, in: 8...20, step: 0.5)
-                            Toggle("씬 헤딩 볼드", isOn: $exportKoreanSceneBold)
-                            Toggle("캐릭터 볼드", isOn: $exportKoreanCharacterBold)
-                            Picker("캐릭터 정렬", selection: $exportKoreanCharacterAlignment) {
-                                Text("오른쪽").tag("right")
-                                Text("왼쪽").tag("left")
-                            }
-                            .pickerStyle(.segmented)
-                        }
-                    }
-
-                    settingsCard(title: "AI 설정") {
-                        Text("Gemini 모델")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                        Picker("모델 선택", selection: $selectedGeminiModelOption) {
-                            ForEach(geminiModelOptions) { option in
-                                Text(option.title).tag(option.value)
-                            }
-                            Text("직접 입력").tag(customGeminiModelToken)
-                        }
-                        .pickerStyle(.menu)
-                        .onChange(of: selectedGeminiModelOption) { _, newValue in
-                            guard newValue != customGeminiModelToken else { return }
-                            geminiModelID = newValue
-                        }
-
-                        TextField("예: gemini-3.1-pro-preview", text: $geminiModelID)
-                            .textFieldStyle(.roundedBorder)
-                            .onChange(of: geminiModelID) { _, _ in
-                                syncGeminiModelOptionSelection()
-                            }
-
-                        Text("Gemini 3.1 Pro의 API 모델 ID는 gemini-3.1-pro-preview 입니다. 404가 뜨면 상단 메뉴에서 다른 모델을 선택하세요.")
-                            .font(.system(size: 11))
-                            .foregroundColor(.secondary)
-                            .lineLimit(2)
-
-                        Text("Gemini API 키")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                        SecureField(hasGeminiAPIKey ? "새 키를 입력하면 덮어씁니다" : "API 키 입력", text: $geminiAPIKeyInput)
-                            .textFieldStyle(.roundedBorder)
-
-                        HStack(spacing: 8) {
-                            Button(hasGeminiAPIKey ? "키 업데이트" : "키 저장") {
-                                saveGeminiAPIKey()
-                            }
-                            .disabled(geminiAPIKeyInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-
-                            Button("키 삭제", role: .destructive) {
-                                deleteGeminiAPIKey()
-                            }
-                            .disabled(!hasGeminiAPIKey)
-                        }
-
-                        Text(hasGeminiAPIKey ? "현재 API 키가 저장되어 있습니다." : "현재 저장된 API 키가 없습니다.")
-                            .font(.system(size: 11))
-                            .foregroundColor(.secondary)
-                            .lineLimit(2)
-
-                        if let message = aiSettingsStatusMessage {
-                            Text(message)
-                                .font(.system(size: 11))
-                                .foregroundColor(aiSettingsStatusIsError ? .red : .secondary)
-                                .lineLimit(2)
-                        }
-                    }
-                },
-                third: {
-                    settingsCard(title: "색상 테마 프리셋") {
-                        Picker("프리셋", selection: $selectedColorThemePresetID) {
-                            ForEach(ColorThemePreset.allCases) { preset in
-                                Text(preset.title).tag(preset.rawValue)
-                            }
-                            ForEach(customColorThemePresets) { preset in
-                                Text("사용자: \(preset.title)").tag(preset.id)
-                            }
-                        }
-                        .pickerStyle(.menu)
-
-                        Button("선택한 프리셋 적용") {
-                            applySelectedColorThemePreset()
-                        }
-
-                        Text("라이트/다크 모드는 그대로 유지하며 카드/배경 색 팔레트만 교체합니다.")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                            .lineLimit(2)
-                    }
-
-                    settingsCard(title: "색상 설정") {
-                        HStack {
-                            Text("현재 색상을 이름 있는 프리셋으로 저장할 수 있습니다.")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                            Spacer()
-                            Button("프리셋으로 저장") {
-                                newColorPresetName = ""
-                                saveColorPresetError = nil
-                                showSaveColorPresetSheet = true
-                            }
-                        }
-                        themedColorPickerRow(
-                            title: "앱 배경 색",
-                            lightHex: $backgroundColorHex,
-                            darkHex: $darkBackgroundColorHex,
-                            lightFallback: Color(red: 0.96, green: 0.95, blue: 0.93),
-                            darkFallback: Color(red: 0.07, green: 0.08, blue: 0.10)
-                        )
-                        themedColorPickerRow(
-                            title: "카드 기본 색",
-                            lightHex: $cardBaseColorHex,
-                            darkHex: $darkCardBaseColorHex,
-                            lightFallback: Color.white,
-                            darkFallback: Color(red: 0.10, green: 0.13, blue: 0.16)
-                        )
-                        themedColorPickerRow(
-                            title: "선택 카드 색",
-                            lightHex: $cardActiveColorHex,
-                            darkHex: $darkCardActiveColorHex,
-                            lightFallback: Color(red: 0.75, green: 0.84, blue: 1.0),
-                            darkFallback: Color(red: 0.16, green: 0.23, blue: 0.31)
-                        )
-                        themedColorPickerRow(
-                            title: "연결 카드 색",
-                            lightHex: $cardRelatedColorHex,
-                            darkHex: $darkCardRelatedColorHex,
-                            lightFallback: Color(red: 0.87, green: 0.92, blue: 1.0),
-                            darkFallback: Color(red: 0.14, green: 0.18, blue: 0.25)
-                        )
-                    }
-
-                    settingsCard(title: "색상 초기화") {
-                        Button("카드/배경 색 기본값으로") { resetColorsToDefaults() }
-                    }
-                }
-            )
-            .padding(SettingsLayout.contentPadding)
-            .controlSize(.small)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .tabItem { Label("설정", systemImage: "gearshape.2") }
-            .tag(SettingsTab.settings)
-
-            twoColumnContent(
-                left: {
-                    ForEach(shortcutLeftSections) { section in
-                        settingsCard(title: section.title) {
-                            VStack(alignment: .leading, spacing: 6) {
-                                ForEach(section.items) { item in
-                                    shortcutRow(item)
-                                }
-                            }
-                        }
-                    }
-                },
-                right: {
-                    ForEach(shortcutRightSections) { section in
-                        settingsCard(title: section.title) {
-                            VStack(alignment: .leading, spacing: 6) {
-                                ForEach(section.items) { item in
-                                    shortcutRow(item)
-                                }
-                            }
-                        }
-                    }
-                }
-            )
-            .padding(SettingsLayout.contentPadding)
-            .controlSize(.small)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .tabItem { Label("단축키", systemImage: "keyboard") }
-            .tag(SettingsTab.shortcuts)
+    private func hasVisibleCards(in category: SettingsCategory) -> Bool {
+        switch category {
+        case .workEnvironment:
+            if cardMatches(title: "빠른 설정", keywords: ["행간", "자동 백업", "타이프라이터", "자주", "빠른", "quick"]) { return true }
+            if cardMatches(title: "편집기 설정", keywords: ["메인", "행간", "카드 간격", "editor"]) { return true }
+            if cardMatches(title: "포커스 모드 설정", keywords: ["포커스", "타이프라이터", "기준선", "focus"]) { return true }
+            return shortcutSections.contains(where: shortcutSectionMatches)
+        case .appearance:
+            return cardMatches(title: "색상 테마 프리셋", keywords: ["색상", "테마", "프리셋", "palette", "theme"]) ||
+                cardMatches(title: "색상 설정", keywords: ["라이트", "다크", "배경", "카드", "custom color"]) ||
+                cardMatches(title: "색상 초기화", keywords: ["기본값", "reset", "restore default"])
+        case .ai:
+            return cardMatches(title: "AI 설정", keywords: ["gemini", "모델", "API 키", "keychain", "ai"])
+        case .export:
+            return cardMatches(title: "출력 설정", keywords: ["PDF", "중앙정렬식", "한국식", "폰트", "정렬", "export"])
+        case .dataBackup:
+            return cardMatches(title: "데이터 저장소", keywords: ["작업 파일", "workspace", "저장 경로"]) ||
+                cardMatches(title: "자동 백업", keywords: ["백업", "보관", "zip", "backup"])
+        case .aboutLegal:
+            return cardMatches(title: "앱 정보", keywords: ["버전", "정보", "about"]) ||
+                cardMatches(title: "폰트 라이선스 (OFL)", keywords: ["라이선스", "법적", "폰트", "ofl"])
         }
-        .frame(width: SettingsLayout.windowWidth, height: SettingsLayout.windowHeight)
-        .onAppear {
-            refreshGeminiAPIKeyStatus()
-            syncGeminiModelOptionSelection()
-            loadCustomColorThemePresets()
-            initializeAutoBackupSettingsIfNeeded()
+    }
+
+    private func cardMatches(title: String, keywords: [String] = []) -> Bool {
+        guard isSearching else { return true }
+        let haystack = ([title] + keywords)
+            .joined(separator: " ")
+            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+            .lowercased()
+        return haystack.contains(normalizedSearchQuery)
+    }
+
+    private func shortcutSectionMatches(_ section: ShortcutSection) -> Bool {
+        guard isSearching else { return true }
+        if cardMatches(title: section.title, keywords: ["단축키", "shortcut", "keyboard"]) {
+            return true
         }
-        .sheet(isPresented: $showSaveColorPresetSheet) {
-            saveColorPresetSheet
+        return section.items.contains { item in
+            cardMatches(
+                title: item.action,
+                keywords: [item.keys, section.title, "단축키", "shortcut", "keyboard"]
+            )
         }
     }
 
@@ -765,48 +1164,6 @@ struct SettingsView: View {
                 .stroke(Color.primary.opacity(0.14), lineWidth: 1)
         )
         .frame(maxWidth: .infinity, alignment: .topLeading)
-    }
-
-    @ViewBuilder
-    private func threeColumnContent<First: View, Second: View, Third: View>(
-        @ViewBuilder first: () -> First,
-        @ViewBuilder second: () -> Second,
-        @ViewBuilder third: () -> Third
-    ) -> some View {
-        HStack(alignment: .top, spacing: SettingsLayout.columnSpacing) {
-            VStack(alignment: .leading, spacing: SettingsLayout.cardSpacing) {
-                first()
-            }
-            .frame(maxWidth: .infinity, alignment: .topLeading)
-
-            VStack(alignment: .leading, spacing: SettingsLayout.cardSpacing) {
-                second()
-            }
-            .frame(maxWidth: .infinity, alignment: .topLeading)
-
-            VStack(alignment: .leading, spacing: SettingsLayout.cardSpacing) {
-                third()
-            }
-            .frame(maxWidth: .infinity, alignment: .topLeading)
-        }
-    }
-
-    @ViewBuilder
-    private func twoColumnContent<Left: View, Right: View>(
-        @ViewBuilder left: () -> Left,
-        @ViewBuilder right: () -> Right
-    ) -> some View {
-        HStack(alignment: .top, spacing: SettingsLayout.columnSpacing) {
-            VStack(alignment: .leading, spacing: SettingsLayout.cardSpacing) {
-                left()
-            }
-            .frame(maxWidth: .infinity, alignment: .topLeading)
-
-            VStack(alignment: .leading, spacing: SettingsLayout.cardSpacing) {
-                right()
-            }
-            .frame(maxWidth: .infinity, alignment: .topLeading)
-        }
     }
 
     @ViewBuilder

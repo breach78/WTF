@@ -714,6 +714,10 @@ extension ScenarioWriterView {
 
     @ViewBuilder
     var timelineView: some View {
+        let timelineCards = filteredTimelineCards()
+        let timelineEmptyState = timelineEmptyState()
+        let anchorCandidate = linkedCardsAnchorCandidateID()
+        let canEnableLinkedCardFilter = anchorCandidate != nil
         VStack(alignment: .leading, spacing: 0) {
             HStack {
                 Image(systemName: "magnifyingglass").foregroundColor(appearance == "light" ? .black.opacity(0.6) : .white.opacity(0.8))
@@ -724,6 +728,27 @@ extension ScenarioWriterView {
             .padding(10).background(appearance == "light" ? Color.black.opacity(0.05) : Color.white.opacity(0.08)).cornerRadius(8).padding([.horizontal, .top], 12)
 
             HStack {
+                Button {
+                    toggleLinkedCardsFilter()
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "link")
+                        Text("연결 카드")
+                    }
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(linkedCardsFilterEnabled ? .white : .primary)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(
+                        linkedCardsFilterEnabled
+                        ? Color.accentColor
+                        : (appearance == "light" ? Color.black.opacity(0.08) : Color.white.opacity(0.14))
+                    )
+                    .cornerRadius(6)
+                }
+                .buttonStyle(.plain)
+                .disabled(!linkedCardsFilterEnabled && !canEnableLinkedCardFilter)
+
                 Spacer()
                 Menu {
                     Button("클립보드에 복사") { exportToClipboard() }
@@ -748,17 +773,26 @@ extension ScenarioWriterView {
             }
             .padding([.horizontal, .top], 12)
 
-            Text(searchText.isEmpty ? "전체 카드 (최신순)" : "검색 결과").font(.system(size: 12, weight: .bold)).foregroundStyle(appearance == "light" ? .black.opacity(0.5) : .white.opacity(0.7)).padding(.horizontal, 16).padding(.top, 16).padding(.bottom, 8)
+            Text(timelineSectionTitle())
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(appearance == "light" ? .black.opacity(0.5) : .white.opacity(0.7))
+                .padding(.horizontal, 16)
+                .padding(.top, 16)
+                .padding(.bottom, 8)
             Divider().background(appearance == "light" ? Color.black.opacity(0.1) : Color.white.opacity(0.1))
 
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(spacing: 8) {
-                        let allCards = scenario.cards.sorted { $0.createdAt > $1.createdAt }
-                        let filteredTimeline = allCards.filter { matchesSearch($0) }
-                        ForEach(filteredTimeline) { card in timelineRow(card) }
-                        if filteredTimeline.isEmpty {
-                            ContentUnavailableView(searchText.isEmpty ? "카드가 없습니다" : "'\(searchText)' 검색 결과 없음", systemImage: searchText.isEmpty ? "tray" : "magnifyingglass").foregroundStyle(appearance == "light" ? .black.opacity(0.3) : .white.opacity(0.5)).scaleEffect(0.7).padding(.top, 40)
+                        ForEach(timelineCards) { card in timelineRow(card) }
+                        if timelineCards.isEmpty {
+                            ContentUnavailableView(
+                                timelineEmptyState.title,
+                                systemImage: timelineEmptyState.systemImage
+                            )
+                            .foregroundStyle(appearance == "light" ? .black.opacity(0.3) : .white.opacity(0.5))
+                            .scaleEffect(0.7)
+                            .padding(.top, 40)
                         }
                     }
                     .padding(12)
@@ -766,6 +800,96 @@ extension ScenarioWriterView {
                 .onChange(of: activeCardID) { _, newID in if let id = newID { withAnimation(quickEaseAnimation) { proxy.scrollTo("timeline-\(id)", anchor: .center) } } }
             }
         }
+    }
+
+    func linkedCardsAnchorCandidateID() -> UUID? {
+        if let anchorID = linkedCardAnchorID, findCard(by: anchorID) != nil {
+            return anchorID
+        }
+        if let activeID = activeCardID, findCard(by: activeID) != nil {
+            return activeID
+        }
+        if let editingID = editingCardID, findCard(by: editingID) != nil {
+            return editingID
+        }
+        if let previousID = lastActiveCardID, findCard(by: previousID) != nil {
+            return previousID
+        }
+        return scenario.rootCards.first?.id
+    }
+
+    func resolvedLinkedCardsAnchorID() -> UUID? {
+        guard linkedCardsFilterEnabled else { return nil }
+        if let anchorID = linkedCardAnchorID, findCard(by: anchorID) != nil {
+            return anchorID
+        }
+        return linkedCardsAnchorCandidateID()
+    }
+
+    func toggleLinkedCardsFilter() {
+        if linkedCardsFilterEnabled {
+            linkedCardsFilterEnabled = false
+            linkedCardAnchorID = nil
+            return
+        }
+        guard let anchorID = linkedCardsAnchorCandidateID() else { return }
+        linkedCardAnchorID = anchorID
+        linkedCardsFilterEnabled = true
+    }
+
+    func disconnectLinkedCardFromAnchor(linkedCardID: UUID) {
+        guard let anchorID = resolvedLinkedCardsAnchorID() else { return }
+        scenario.disconnectLinkedCard(focusCardID: anchorID, linkedCardID: linkedCardID)
+        store.saveAll()
+    }
+
+    func filteredTimelineCards() -> [SceneCard] {
+        if linkedCardsFilterEnabled {
+            guard let anchorID = resolvedLinkedCardsAnchorID() else { return [] }
+            let linkedEntries = scenario.linkedCards(for: anchorID)
+            if linkedEntries.isEmpty { return [] }
+            let linkedDateByID = Dictionary(uniqueKeysWithValues: linkedEntries.map { ($0.cardID, $0.lastEditedAt) })
+            return linkedEntries
+                .compactMap { entry in findCard(by: entry.cardID) }
+                .filter { matchesSearch($0) }
+                .sorted { lhs, rhs in
+                    let leftDate = linkedDateByID[lhs.id] ?? .distantPast
+                    let rightDate = linkedDateByID[rhs.id] ?? .distantPast
+                    if leftDate != rightDate { return leftDate > rightDate }
+                    if lhs.createdAt != rhs.createdAt { return lhs.createdAt > rhs.createdAt }
+                    return lhs.id.uuidString < rhs.id.uuidString
+                }
+        }
+
+        return scenario.cards
+            .sorted { lhs, rhs in
+                if lhs.createdAt != rhs.createdAt { return lhs.createdAt > rhs.createdAt }
+                return lhs.id.uuidString < rhs.id.uuidString
+            }
+            .filter { matchesSearch($0) }
+    }
+
+    func timelineSectionTitle() -> String {
+        if linkedCardsFilterEnabled {
+            return searchText.isEmpty ? "연결 카드 (최근 편집순)" : "연결 카드 검색 결과"
+        }
+        return searchText.isEmpty ? "전체 카드 (최신순)" : "검색 결과"
+    }
+
+    func timelineEmptyState() -> (title: String, systemImage: String) {
+        if linkedCardsFilterEnabled {
+            if resolvedLinkedCardsAnchorID() == nil {
+                return ("기준 카드가 없습니다", "link.badge.plus")
+            }
+            if searchText.isEmpty {
+                return ("연결 카드가 없습니다", "link")
+            }
+            return ("'\(searchText)' 검색 결과 없음", "magnifyingglass")
+        }
+        if searchText.isEmpty {
+            return ("카드가 없습니다", "tray")
+        }
+        return ("'\(searchText)' 검색 결과 없음", "magnifyingglass")
     }
 
     func namedSnapshotIndex(forNoteCardID noteCardID: UUID) -> Int? {

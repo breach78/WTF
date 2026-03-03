@@ -218,6 +218,8 @@ extension ScenarioWriterView {
     func focusModeCardBlock(_ card: SceneCard) -> some View {
         let isActiveCard = activeCardID == card.id
         let isCloneLinked = scenario.isCardCloned(card.id)
+        let hasLinkedCards = scenario.hasLinkedCards(card.id)
+        let isLinkedCard = scenario.isLinkedCard(card.id)
         FocusModeCardEditor(
             card: card,
             isActive: isActiveCard,
@@ -237,6 +239,28 @@ extension ScenarioWriterView {
                     .fill(appearance == "light" ? Color.black.opacity(0.48) : Color.white.opacity(0.85))
                     .frame(width: 8, height: 8)
                     .allowsHitTesting(false)
+            }
+        }
+        .overlay(alignment: .topTrailing) {
+            HStack(spacing: 3) {
+                if hasLinkedCards {
+                    Rectangle()
+                        .fill(appearance == "light" ? Color.black.opacity(0.48) : Color.white.opacity(0.85))
+                        .frame(width: 8, height: 8)
+                        .allowsHitTesting(false)
+                }
+                if isLinkedCard {
+                    Path { path in
+                        // Right-angle isosceles triangle with the right angle at top-right.
+                        path.move(to: CGPoint(x: 0, y: 0))
+                        path.addLine(to: CGPoint(x: 8, y: 0))
+                        path.addLine(to: CGPoint(x: 8, y: 8))
+                        path.closeSubpath()
+                    }
+                    .fill(appearance == "light" ? Color.black.opacity(0.48) : Color.white.opacity(0.85))
+                    .frame(width: 8, height: 8)
+                    .allowsHitTesting(false)
+                }
             }
         }
     }
@@ -584,14 +608,17 @@ extension ScenarioWriterView {
     }
 
     func startFocusModeScrollMonitor() {
-        if focusModeScrollMonitor != nil { return }
-
-        var monitors: [Any] = []
-        if let eventMonitor = createFocusModeScrollWheelMonitor() {
-            monitors.append(eventMonitor)
+        // In split mode this monitor can interact poorly with pane focus handoff.
+        // Disable it there to keep focus-mode entry stable, especially on the right pane.
+        guard !splitModeEnabled else {
+            stopFocusModeScrollMonitor()
+            return
         }
-        monitors.append(createFocusModeBoundsObserver())
-        focusModeScrollMonitor = monitors
+        if focusModeScrollMonitor != nil { return }
+        // Keep only the scroll-wheel monitor here.
+        // The global bounds observer path can flood main-thread notifications
+        // and stall focus-mode entry on some environments.
+        focusModeScrollMonitor = createFocusModeScrollWheelMonitor()
     }
 
     private func createFocusModeScrollWheelMonitor() -> Any? {
@@ -601,6 +628,7 @@ extension ScenarioWriterView {
     }
 
     private func handleFocusModeScrollWheelEvent(_ event: NSEvent) -> NSEvent? {
+        guard !splitModeEnabled else { return event }
         guard acceptsKeyboardInput else { return event }
         guard showFocusMode else { return event }
         let shouldNormalize = event.phase == .ended || event.momentumPhase == .ended

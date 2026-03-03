@@ -142,6 +142,16 @@ extension ScenarioWriterView {
         let isPlotLineCard = card.category == ScenarioCardCategory.plot
         let canSummarizeChildren = canSummarizeDirectChildren(for: card)
         let isCloneLinked = scenario.isCardCloned(card.id)
+        let hasLinkedCards = scenario.hasLinkedCards(card.id)
+        let isLinkedCard = scenario.isLinkedCard(card.id)
+        let disconnectAnchorID = resolvedLinkedCardsAnchorID()
+        let canDisconnectLinkedCard =
+            linkedCardsFilterEnabled &&
+            disconnectAnchorID != nil &&
+            scenario.linkedCardEditDate(
+                focusCardID: disconnectAnchorID!,
+                linkedCardID: card.id
+            ) != nil
         let clonePeerDestinations = isCloneLinked ? clonePeerMenuDestinations(for: card) : []
         CardItem(
             card: card,
@@ -158,11 +168,11 @@ extension ScenarioWriterView {
             measuredWidth: nil,
             onSelect: {
                 if openHistoryFromNamedSnapshotNoteCard(card) { return }
-                handleCardTap(card)
+                handleTimelineCardSelect(card)
             },
             onDoubleClick: {
                 if openHistoryFromNamedSnapshotNoteCard(card) { return }
-                beginCardEditing(card)
+                handleTimelineCardDoubleClick(card)
             },
             onEndEdit: { finishEditing() },
             onContentChange: nil,
@@ -196,6 +206,11 @@ extension ScenarioWriterView {
             showsEmptyCardBulkDeleteMenuOnly: isTimelineEmptyCard,
             onBulkDeleteEmptyCards: isTimelineEmptyCard ? { performHardDeleteAllTimelineEmptyLeafCards() } : nil,
             isCloneLinked: isCloneLinked,
+            hasLinkedCards: hasLinkedCards,
+            isLinkedCard: isLinkedCard,
+            onDisconnectLinkedCard: canDisconnectLinkedCard ? {
+                disconnectLinkedCardFromAnchor(linkedCardID: card.id)
+            } : nil,
             onCloneCard: { copyCardsAsCloneFromContext(card) },
             clonePeerDestinations: clonePeerDestinations,
             onNavigateToClonePeer: { targetID in navigateToCloneCard(targetID) }
@@ -402,6 +417,8 @@ extension ScenarioWriterView {
         let canCreateUpperCard = canCreateUpperCardFromSelection(contextCard: card)
         let canSummarizeChildren = canSummarizeDirectChildren(for: card)
         let isCloneLinked = scenario.isCardCloned(card.id)
+        let hasLinkedCards = scenario.hasLinkedCards(card.id)
+        let isLinkedCard = scenario.isLinkedCard(card.id)
         let clonePeerDestinations = isCloneLinked ? clonePeerMenuDestinations(for: card) : []
         CardItem(
             card: card,
@@ -454,6 +471,8 @@ extension ScenarioWriterView {
             onTranscriptionMode: { startDictationMode(from: card) },
             isTranscriptionBusy: dictationIsRecording || dictationIsProcessing,
             isCloneLinked: isCloneLinked,
+            hasLinkedCards: hasLinkedCards,
+            isLinkedCard: isLinkedCard,
             onCloneCard: { copyCardsAsCloneFromContext(card) },
             clonePeerDestinations: clonePeerDestinations,
             onNavigateToClonePeer: { targetID in navigateToCloneCard(targetID) }
@@ -850,6 +869,9 @@ extension ScenarioWriterView {
                 lastActiveCardID = activeCardID
             }
             activeCardID = card.id
+            if splitModeEnabled {
+                scenario.setSplitPaneActiveCard(card.id, for: splitPaneID)
+            }
             card.parent?.lastSelectedChildID = card.id
             synchronizeActiveRelationState(for: card.id)
             if shouldFocusMain { isMainViewFocused = true }
@@ -1112,19 +1134,42 @@ extension ScenarioWriterView {
         wasNewCard: Bool,
         newCardPrevState: ScenarioState?
     ) {
+        let contentChanged = startContent != card.content
         if !isApplyingUndo {
             if !inFocusMode {
                 if wasNewCard, let prev = newCardPrevState {
                     pushUndoState(prev, actionName: "카드 추가")
-                } else if let prev = startState, startContent != card.content {
+                } else if let prev = startState, contentChanged {
                     pushUndoState(prev, actionName: "텍스트 편집")
                 }
             }
         }
+        recordLinkedCardEditIfNeeded(editedCardID: id, contentChanged: contentChanged)
         if inFocusMode {
             focusLastCommittedContentByCard[id] = card.content
         }
         persistCardMutation()
+    }
+
+    func recordLinkedCardEditIfNeeded(editedCardID: UUID, contentChanged: Bool) {
+        guard contentChanged else { return }
+        guard splitModeEnabled, splitPaneID == 2 else { return }
+        guard let focusCardID = resolvedFocusCardIDForLinkedEditRecording() else { return }
+        guard focusCardID != editedCardID else { return }
+        scenario.recordLinkedCard(focusCardID: focusCardID, linkedCardID: editedCardID)
+    }
+
+    func resolvedFocusCardIDForLinkedEditRecording() -> UUID? {
+        if linkedCardsFilterEnabled,
+           let anchorID = resolvedLinkedCardsAnchorID(),
+           findCard(by: anchorID) != nil {
+            return anchorID
+        }
+        if let leftPaneID = scenario.splitPaneActiveCardID(for: 1),
+           findCard(by: leftPaneID) != nil {
+            return leftPaneID
+        }
+        return nil
     }
 
     func restoreMainFocusAfterFinishEditingIfNeeded(skipMainFocusRestore: Bool) {
@@ -1646,6 +1691,8 @@ extension ScenarioWriterView {
             } else { 
                 exitPreviewMode()
                 searchText = ""
+                linkedCardsFilterEnabled = false
+                linkedCardAnchorID = nil
                 isSearchFocused = false
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { isMainViewFocused = true } 
             } 
@@ -1665,7 +1712,13 @@ extension ScenarioWriterView {
         }
     }
     func closeSearch() {
-        withAnimation(quickEaseAnimation) { showTimeline = false; searchText = ""; isSearchFocused = false }
+        withAnimation(quickEaseAnimation) {
+            showTimeline = false
+            searchText = ""
+            linkedCardsFilterEnabled = false
+            linkedCardAnchorID = nil
+            isSearchFocused = false
+        }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
             isMainViewFocused = true
         }
@@ -2100,6 +2153,7 @@ extension ScenarioWriterView {
 
     func applyHardDeleteMutations(_ idsToRemove: Set<UUID>) {
         scenario.cards.removeAll { idsToRemove.contains($0.id) }
+        scenario.pruneLinkedCards(validCardIDs: Set(scenario.cards.map(\.id)))
         for snapshot in scenario.snapshots {
             snapshot.cardSnapshots.removeAll { snap in
                 idsToRemove.contains(snap.cardID) || (snap.parentID.map { idsToRemove.contains($0) } ?? false)
@@ -2153,6 +2207,39 @@ extension ScenarioWriterView {
     }
 
     // MARK: - Delete Selection & Card Tap
+
+    func handleTimelineCardSelect(_ card: SceneCard) {
+        if linkedCardsFilterEnabled {
+            beginTimelineLinkedCardEditing(card)
+            return
+        }
+        handleCardTap(card)
+    }
+
+    func handleTimelineCardDoubleClick(_ card: SceneCard) {
+        if linkedCardsFilterEnabled {
+            beginTimelineLinkedCardEditing(card)
+            return
+        }
+        beginCardEditing(card)
+    }
+
+    func beginTimelineLinkedCardEditing(_ card: SceneCard) {
+        let anchorCard = resolvedLinkedCardsAnchorID().flatMap { findCard(by: $0) }
+        finishEditing()
+        keyboardRangeSelectionAnchorCardID = nil
+
+        if let anchorCard, activeCardID != anchorCard.id {
+            changeActiveCard(to: anchorCard, shouldFocusMain: false, deferToMainAsync: false, force: true)
+        }
+
+        selectedCardIDs = [card.id]
+        editingCardID = card.id
+        editingStartContent = card.content
+        editingStartState = captureScenarioState()
+        editingIsNewCard = false
+        isMainViewFocused = true
+    }
 
     func deleteSelectedCard() {
         let anySelection = !selectedCardIDs.isEmpty || activeCardID != nil

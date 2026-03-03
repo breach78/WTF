@@ -361,6 +361,9 @@ struct CardItem: View {
     var showsEmptyCardBulkDeleteMenuOnly: Bool = false
     var onBulkDeleteEmptyCards: (() -> Void)? = nil
     var isCloneLinked: Bool = false
+    var hasLinkedCards: Bool = false
+    var isLinkedCard: Bool = false
+    var onDisconnectLinkedCard: (() -> Void)? = nil
     var onCloneCard: (() -> Void)? = nil
     var clonePeerDestinations: [ClonePeerMenuDestination] = []
     var onNavigateToClonePeer: ((UUID) -> Void)? = nil
@@ -653,15 +656,37 @@ struct CardItem: View {
             }
         }
         .overlay(alignment: .topTrailing) {
-            if isSummarizingChildren {
-                ProgressView()
-                    .controlSize(.small)
-                    .padding(8)
-                    .background(appearance == "light" ? Color.white.opacity(0.92) : Color.black.opacity(0.42))
-                    .clipShape(Capsule())
-                    .padding(.top, 6)
-                    .padding(.trailing, 8)
-                    .allowsHitTesting(false)
+            ZStack(alignment: .topTrailing) {
+                HStack(spacing: 3) {
+                    if hasLinkedCards {
+                        Rectangle()
+                            .fill(appearance == "light" ? Color.black.opacity(0.48) : Color.white.opacity(0.85))
+                            .frame(width: 8, height: 8)
+                            .allowsHitTesting(false)
+                    }
+                    if isLinkedCard {
+                        Path { path in
+                            // Right-angle isosceles triangle with the right angle at top-right.
+                            path.move(to: CGPoint(x: 0, y: 0))
+                            path.addLine(to: CGPoint(x: 8, y: 0))
+                            path.addLine(to: CGPoint(x: 8, y: 8))
+                            path.closeSubpath()
+                        }
+                        .fill(appearance == "light" ? Color.black.opacity(0.48) : Color.white.opacity(0.85))
+                        .frame(width: 8, height: 8)
+                        .allowsHitTesting(false)
+                    }
+                }
+                if isSummarizingChildren {
+                    ProgressView()
+                        .controlSize(.small)
+                        .padding(8)
+                        .background(appearance == "light" ? Color.white.opacity(0.92) : Color.black.opacity(0.42))
+                        .clipShape(Capsule())
+                        .padding(.top, 6)
+                        .padding(.trailing, 8)
+                        .allowsHitTesting(false)
+                }
             }
         }
         .overlay(alignment: .topLeading) {
@@ -683,6 +708,10 @@ struct CardItem: View {
             }
         }
         .contextMenu {
+            if let onDisconnectLinkedCard {
+                Button("연결 끊기", role: .destructive) { onDisconnectLinkedCard() }
+                Divider()
+            }
             if showsEmptyCardBulkDeleteMenuOnly {
                 if hasAIMenuActions {
                     Menu("AI") {
