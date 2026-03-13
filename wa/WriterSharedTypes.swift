@@ -10,10 +10,16 @@ enum ScenarioCardCategory {
 }
 
 enum FocusModeLayoutMetrics {
+    static let focusModePreferredCardWidth: CGFloat = 916
+    static let focusModeOuterHorizontalPadding: CGFloat = 32
     static let focusModeContentPadding: CGFloat = 143
     static let focusModeLineFragmentPadding: CGFloat = 5
     static var focusModeHorizontalPadding: CGFloat {
         max(0, focusModeContentPadding - focusModeLineFragmentPadding)
+    }
+
+    static func resolvedTextWidth(for cardWidth: CGFloat) -> CGFloat {
+        max(1, cardWidth - (focusModeHorizontalPadding * 2))
     }
 }
 
@@ -25,6 +31,32 @@ enum MainEditorLayoutMetrics {
     }
     static var mainEditorEffectiveInset: CGFloat {
         mainEditorHorizontalPadding + mainEditorLineFragmentPadding
+    }
+}
+
+enum MainCanvasLayoutMetrics {
+    static let columnWidth: CGFloat = 416
+    static let columnHorizontalPadding: CGFloat = 6
+
+    static var cardWidth: CGFloat {
+        max(1, columnWidth - (columnHorizontalPadding * 2))
+    }
+
+    static var textWidth: CGFloat {
+        max(1, cardWidth - (MainEditorLayoutMetrics.mainEditorHorizontalPadding * 2))
+    }
+}
+
+enum TimelinePanelLayoutMetrics {
+    static let panelWidth: CGFloat = 416
+    static let contentHorizontalPadding: CGFloat = 12
+
+    static var cardWidth: CGFloat {
+        max(1, panelWidth - (contentHorizontalPadding * 2))
+    }
+
+    static var textWidth: CGFloat {
+        max(1, cardWidth - (MainEditorLayoutMetrics.mainEditorHorizontalPadding * 2))
     }
 }
 
@@ -788,16 +820,6 @@ struct FocusModeCardRootHeightKey: PreferenceKey {
     }
 }
 
-struct FocusModeCardWidthPreferenceKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        let next = nextValue()
-        if next > 0 {
-            value = next
-        }
-    }
-}
-
 struct FocusModeCardFramePreferenceKey: PreferenceKey {
     static var defaultValue: [UUID: CGRect] = [:]
     static func reduce(value: inout [UUID: CGRect], nextValue: () -> [UUID: CGRect]) {
@@ -806,13 +828,6 @@ struct FocusModeCardFramePreferenceKey: PreferenceKey {
 }
 
 struct MainCardHeightPreferenceKey: PreferenceKey {
-    static var defaultValue: [UUID: CGFloat] = [:]
-    static func reduce(value: inout [UUID: CGFloat], nextValue: () -> [UUID: CGFloat]) {
-        value.merge(nextValue(), uniquingKeysWith: { _, new in new })
-    }
-}
-
-struct MainCardWidthPreferenceKey: PreferenceKey {
     static var defaultValue: [UUID: CGFloat] = [:]
     static func reduce(value: inout [UUID: CGFloat], nextValue: () -> [UUID: CGFloat]) {
         value.merge(nextValue(), uniquingKeysWith: { _, new in new })

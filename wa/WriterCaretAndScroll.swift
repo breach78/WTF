@@ -201,7 +201,7 @@ extension ScenarioWriterView {
         guard textView.string == card.content else { return }
 
         prepareMainEditorTextViewForLineSpacing(textView)
-        configureMainEditorTextContainerWidth(textView, editingID: editingID)
+        configureMainEditorTextContainerWidth(textView)
 
         let context = resolveMainEditorLineSpacingContext(
             textView: textView,
@@ -268,11 +268,10 @@ extension ScenarioWriterView {
         }
     }
 
-    private func configureMainEditorTextContainerWidth(_ textView: NSTextView, editingID: UUID) {
+    private func configureMainEditorTextContainerWidth(_ textView: NSTextView) {
         guard let textContainer = textView.textContainer else { return }
 
         let viewportWidth = textView.enclosingScrollView?.contentView.bounds.width ?? textView.bounds.width
-        let measuredCardWidth = mainCardWidths[editingID] ?? 0
         textContainer.lineBreakMode = .byWordWrapping
         textContainer.maximumNumberOfLines = 0
         if abs(textContainer.lineFragmentPadding - mainEditorLineFragmentPadding) > 0.01 {
@@ -283,9 +282,8 @@ extension ScenarioWriterView {
         }
         textContainer.heightTracksTextView = false
 
-        let expectedTextWidthFromCard = max(0, measuredCardWidth - (mainEditorHorizontalPadding * 2))
-        let candidateWidth = expectedTextWidthFromCard > 1 ? expectedTextWidthFromCard : viewportWidth
-        let targetWidth = max(1, min(viewportWidth, candidateWidth))
+        let preferredWidth = MainCanvasLayoutMetrics.textWidth
+        let targetWidth = max(1, min(viewportWidth, preferredWidth))
         if viewportWidth > 1 {
             assert(targetWidth <= viewportWidth + 0.5, "Main editor container width exceeded viewport")
         }

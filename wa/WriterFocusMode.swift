@@ -72,19 +72,20 @@ extension ScenarioWriterView {
 
     @ViewBuilder
     private func focusModeCanvasScrollContent(size: CGSize, cards: [SceneCard]) -> some View {
+        let cardWidth = resolvedFocusModeCardWidth(forCanvasWidth: size.width)
         VStack(spacing: 0) {
             Color.clear.frame(height: max(48, size.height * 0.08))
-            focusModeCardsColumn(cards: cards)
+            focusModeCardsColumn(cards: cards, cardWidth: cardWidth)
             Color.clear.frame(height: max(72, size.height * 0.12))
         }
         .frame(maxWidth: .infinity)
     }
 
     @ViewBuilder
-    private func focusModeCardsColumn(cards: [SceneCard]) -> some View {
+    private func focusModeCardsColumn(cards: [SceneCard], cardWidth: CGFloat) -> some View {
         VStack(spacing: 0) {
             ForEach(Array(cards.enumerated()), id: \.element.id) { index, card in
-                focusModeCardBlock(card)
+                focusModeCardBlock(card, cardWidth: cardWidth)
                     .id(focusModeCardScrollID(card.id))
                 if index < cards.count - 1 {
                     focusModeCardDivider(card: card, nextCard: cards[index + 1])
@@ -93,8 +94,8 @@ extension ScenarioWriterView {
         }
         .background(focusModeCardsBackgroundColor)
         .overlay(Rectangle().stroke(focusModeCardsBorderColor, lineWidth: 1))
-        .frame(maxWidth: 916)
-        .padding(.horizontal, 32)
+        .frame(width: cardWidth)
+        .padding(.horizontal, FocusModeLayoutMetrics.focusModeOuterHorizontalPadding)
     }
 
     @ViewBuilder
@@ -207,7 +208,9 @@ extension ScenarioWriterView {
 
     private func handleFocusModeCanvasWidthChange(oldWidth: CGFloat, newWidth: CGFloat) {
         guard showFocusMode else { return }
-        let widthChanged = abs(newWidth - oldWidth) > 0.5
+        let oldResolvedWidth = resolvedFocusModeCardWidth(forCanvasWidth: oldWidth)
+        let newResolvedWidth = resolvedFocusModeCardWidth(forCanvasWidth: newWidth)
+        let widthChanged = abs(newResolvedWidth - oldResolvedWidth) > 0.5
         if widthChanged {
             focusObservedBodyHeightByCardID.removeAll()
             requestFocusModeOffsetNormalization(includeActive: false, force: true, reason: "canvas-width-change")
@@ -215,7 +218,7 @@ extension ScenarioWriterView {
     }
 
     @ViewBuilder
-    func focusModeCardBlock(_ card: SceneCard) -> some View {
+    func focusModeCardBlock(_ card: SceneCard, cardWidth: CGFloat) -> some View {
         let isActiveCard = activeCardID == card.id
         let isCloneLinked = scenario.isCardCloned(card.id)
         let hasLinkedCards = scenario.hasLinkedCards(card.id)
@@ -223,6 +226,7 @@ extension ScenarioWriterView {
         FocusModeCardEditor(
             card: card,
             isActive: isActiveCard,
+            cardWidth: cardWidth,
             fontSize: fontSize,
             appearance: appearance,
             horizontalInset: FocusModeLayoutMetrics.focusModeHorizontalPadding,
@@ -263,6 +267,11 @@ extension ScenarioWriterView {
                 }
             }
         }
+    }
+
+    private func resolvedFocusModeCardWidth(forCanvasWidth canvasWidth: CGFloat) -> CGFloat {
+        _ = canvasWidth
+        return FocusModeLayoutMetrics.focusModePreferredCardWidth
     }
 
     func activateFocusModeCardFromClick(_ card: SceneCard) {
@@ -362,7 +371,9 @@ extension ScenarioWriterView {
     private func handleFocusEscapeShortcut(_ event: NSEvent, flags: NSEvent.ModifierFlags) -> Bool {
         guard isPlainFocusEscape(event, flags: flags) else { return false }
         DispatchQueue.main.async {
-            toggleFocusMode()
+            guard showFocusMode else { return }
+            guard editingCardID != nil else { return }
+            finishEditing()
         }
         return true
     }
@@ -702,8 +713,10 @@ extension ScenarioWriterView {
     }
 
     func focusModeTargetContainerWidth(for textView: NSTextView) -> CGFloat {
-        let viewportWidth = textView.enclosingScrollView?.contentView.bounds.width ?? textView.bounds.width
-        return max(1, viewportWidth)
+        _ = textView
+        return FocusModeLayoutMetrics.resolvedTextWidth(
+            for: FocusModeLayoutMetrics.focusModePreferredCardWidth
+        )
     }
 
     @discardableResult
@@ -1760,10 +1773,15 @@ extension ScenarioWriterView {
         var targetY = defaultTargetY
         let startRect = selectionRects.startRect
         let endRect = selectionRects.endRect
-        if endRect.maxY > viewport.maxVisibleY {
-            targetY = endRect.maxY - (viewport.visible.height - viewport.bottomPadding)
-        } else if startRect.minY < viewport.minVisibleY {
-            targetY = max(viewport.minY, startRect.minY - viewport.topPadding)
+        let minimalTopRevealPadding: CGFloat = 8
+        let focusModeLineHeight = max(1, CGFloat(fontSize * 1.2) + CGFloat(focusModeLineSpacingValue))
+        let collapsedBottomRevealPadding = max(24, ceil(focusModeLineHeight * 3))
+        let collapsedMaxVisibleY = viewport.visible.maxY - collapsedBottomRevealPadding
+        let collapsedMinVisibleY = viewport.visible.minY + minimalTopRevealPadding
+        if endRect.maxY > collapsedMaxVisibleY {
+            targetY = endRect.maxY - (viewport.visible.height - collapsedBottomRevealPadding)
+        } else if startRect.minY < collapsedMinVisibleY {
+            targetY = max(viewport.minY, startRect.minY - minimalTopRevealPadding)
         }
         return targetY
     }
@@ -2437,8 +2455,6 @@ extension ScenarioWriterView {
         finishEditing()
         focusModeEditorCardID = nil
         clearFocusBoundaryArm()
-        stopFocusModeKeyMonitor()
-        restoreMainKeyboardFocus()
     }
 
     private func applyFocusModeVisibilityState(entering: Bool) {

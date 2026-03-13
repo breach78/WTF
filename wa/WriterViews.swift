@@ -63,6 +63,7 @@ struct ScenarioWriterView: View {
     @AppStorage("exportKoreanCharacterAlignment") var exportKoreanCharacterAlignment: String = "right"
     @AppStorage("focusTypewriterEnabled") var focusTypewriterEnabled: Bool = false
     @AppStorage("focusTypewriterBaseline") var focusTypewriterBaseline: Double = 0.60
+    @AppStorage("focusModeLineSpacingValueTemp") var focusModeLineSpacingValue: Double = 4.5
     @AppStorage("mainCardLineSpacingValueV2") var mainCardLineSpacingValue: Double = 5.0
     @AppStorage("mainWorkspaceZoomScale") var mainWorkspaceZoomScale: Double = 1.0
     @AppStorage("geminiModelID") var geminiModelID: String = "gemini-3.1-pro-preview"
@@ -232,7 +233,6 @@ struct ScenarioWriterView: View {
     @State var mainBoundaryChildRightArmAt: Date = .distantPast
     @State var keyboardRangeSelectionAnchorCardID: UUID? = nil
     @State var mainCardHeights: [UUID: CGFloat] = [:]
-    @State var mainCardWidths: [UUID: CGFloat] = [:]
     @State var mainBottomRevealCardID: UUID? = nil
     @State var mainBottomRevealTick: Int = 0
     @State var mainEditTabArmCardID: UUID? = nil
@@ -279,9 +279,9 @@ struct ScenarioWriterView: View {
         .timingCurve(0.25, 0.10, 0.25, 1.00, duration: 0.24)
     }
 
-    let timelineWidth: CGFloat = 416
+    let timelineWidth: CGFloat = TimelinePanelLayoutMetrics.panelWidth
     let historyOverlayBottomInset: CGFloat = 88
-    let columnWidth: CGFloat = 416
+    let columnWidth: CGFloat = MainCanvasLayoutMetrics.columnWidth
 
     var clampedMainWorkspaceZoomScale: CGFloat {
         CGFloat(min(max(mainWorkspaceZoomScale, 0.70), 1.60))

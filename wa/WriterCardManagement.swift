@@ -163,9 +163,9 @@ extension ScenarioWriterView {
             isDescendant: false,
             isEditing: acceptsKeyboardInput && editingCardID == card.id,
             dropTarget: nil,
+            preferredTextMeasureWidth: TimelinePanelLayoutMetrics.textWidth,
             forceNamedSnapshotNoteStyle: isNamedNote,
             forceCustomColorVisibility: isAICandidate,
-            measuredWidth: nil,
             onSelect: {
                 if openHistoryFromNamedSnapshotNoteCard(card) { return }
                 handleTimelineCardSelect(card)
@@ -277,7 +277,8 @@ extension ScenarioWriterView {
                         }
                         .frame(height: screenHeight * 0.7)
                     }
-                    .padding(.horizontal, 6).frame(width: columnWidth)
+                    .padding(.horizontal, MainCanvasLayoutMetrics.columnHorizontalPadding)
+                    .frame(width: columnWidth)
                 }
                 .onChange(of: activeCardID) { _, newID in
                     guard !showFocusMode else { return }
@@ -317,21 +318,6 @@ extension ScenarioWriterView {
                         DispatchQueue.main.async {
                             scrollToFocus(in: cards, parent: parent, proxy: proxy, viewportHeight: screenHeight, animated: false)
                         }
-                    }
-                }
-                .onPreferenceChange(MainCardWidthPreferenceKey.self) { widths in
-                    guard !showFocusMode else { return }
-                    guard acceptsKeyboardInput else { return }
-                    let previousWidths = mainCardWidths
-                    mainCardWidths.merge(widths, uniquingKeysWith: { _, new in new })
-                    guard let editingID = editingCardID else { return }
-                    let oldWidth = previousWidths[editingID] ?? 0
-                    let newWidth = mainCardWidths[editingID] ?? 0
-                    guard abs(newWidth - oldWidth) > 0.25 else { return }
-                    DispatchQueue.main.async {
-                        guard !showFocusMode else { return }
-                        guard editingCardID == editingID else { return }
-                        applyMainEditorLineSpacingIfNeeded()
                     }
                 }
                 .onChange(of: mainBottomRevealTick) { _, _ in
@@ -430,10 +416,10 @@ extension ScenarioWriterView {
             isDescendant: activeDescendantIDs.contains(card.id),
             isEditing: !showFocusMode && acceptsKeyboardInput && editingCardID == card.id,
             dropTarget: activeDropTarget,
+            preferredTextMeasureWidth: MainCanvasLayoutMetrics.textWidth,
             forceNamedSnapshotNoteStyle: false,
             forceCustomColorVisibility: isAICandidate,
-            measuredWidth: mainCardWidths[card.id],
-            onSelect: { handleCardTap(card) },
+            onSelect: { handleMainWorkspaceCardClick(card) },
             onDoubleClick: {
                 beginCardEditing(card)
             },
@@ -482,10 +468,6 @@ extension ScenarioWriterView {
                 Color.clear.preference(
                     key: MainCardHeightPreferenceKey.self,
                     value: [card.id: geometry.size.height]
-                )
-                .preference(
-                    key: MainCardWidthPreferenceKey.self,
-                    value: [card.id: geometry.size.width]
                 )
             }
         )
@@ -2456,6 +2438,27 @@ extension ScenarioWriterView {
             changeActiveCard(to: card)
         }
         isMainViewFocused = true
+    }
+
+    func handleMainWorkspaceCardClick(_ card: SceneCard) {
+        let isCommandPressed = NSEvent.modifierFlags.contains(.command)
+        let isPrimarySelection =
+            selectedCardIDs.isEmpty ||
+            (selectedCardIDs.count == 1 && selectedCardIDs.contains(card.id))
+        let shouldBeginEditing =
+            acceptsKeyboardInput &&
+            !showFocusMode &&
+            !isCommandPressed &&
+            activeCardID == card.id &&
+            editingCardID != card.id &&
+            isPrimarySelection
+
+        if shouldBeginEditing {
+            beginCardEditing(card)
+            return
+        }
+
+        handleCardTap(card)
     }
 
     func selectedCardsForDeletion() -> [SceneCard] {

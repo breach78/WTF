@@ -197,6 +197,7 @@ private enum FocusModeTextHeightCalculator {
 struct FocusModeCardEditor: View {
     @ObservedObject var card: SceneCard
     let isActive: Bool
+    let cardWidth: CGFloat
     let fontSize: Double
     let appearance: String
     let horizontalInset: CGFloat
@@ -207,7 +208,6 @@ struct FocusModeCardEditor: View {
 
     @AppStorage("focusModeLineSpacingValueTemp") private var focusModeLineSpacingValue: Double = 4.5
     @State private var measuredBodyHeight: CGFloat = 0
-    @State private var measuredCardWidth: CGFloat = 0
     private let verticalInset: CGFloat = 40
     private var targetMeasuredHeight: CGFloat {
         guard measuredBodyHeight > 1 else { return 0 }
@@ -219,7 +219,7 @@ struct FocusModeCardEditor: View {
     private var focusModeFontSize: CGFloat { CGFloat(fontSize * 1.2) }
     private var focusModeLineSpacing: CGFloat { CGFloat(focusModeLineSpacingValue) }
     private var textEditorMeasureWidth: CGFloat {
-        max(1, measuredCardWidth - (horizontalInset * 2))
+        FocusModeLayoutMetrics.resolvedTextWidth(for: cardWidth)
     }
     private var sizingText: String {
         let text = card.content
@@ -236,12 +236,33 @@ struct FocusModeCardEditor: View {
                 card.content = newValue
                 onContentChange(oldValue, newValue)
                 refreshMeasuredHeights()
+                DispatchQueue.main.async {
+                    refreshMeasuredHeights()
+                }
             }
         )
     }
 
+    private func liveFocusModeResponderBodyHeight() -> CGFloat? {
+        guard isActive else { return nil }
+        guard focusModeEditorCardID == card.id else { return nil }
+        guard let textView = NSApp.keyWindow?.firstResponder as? NSTextView else { return nil }
+        guard let layoutManager = textView.layoutManager,
+              let textContainer = textView.textContainer else { return nil }
+        let textLength = (textView.string as NSString).length
+        if textLength > 0 {
+            let fullRange = NSRange(location: 0, length: textLength)
+            layoutManager.ensureGlyphs(forCharacterRange: fullRange)
+            layoutManager.ensureLayout(forCharacterRange: fullRange)
+        }
+        layoutManager.ensureLayout(for: textContainer)
+        let usedHeight = layoutManager.usedRect(for: textContainer).height
+        guard usedHeight > 0 else { return nil }
+        return max(1, ceil(usedHeight + focusModeBodySafetyInset))
+    }
+
     private func refreshMeasuredHeights() {
-        guard measuredCardWidth > 1 else {
+        guard cardWidth > 1 else {
             return
         }
         let deterministicBodyHeight = FocusModeTextHeightCalculator.measureBodyHeight(
@@ -253,8 +274,10 @@ struct FocusModeCardEditor: View {
         let resolvedBodyHeight: CGFloat
         let observedRangeMin: CGFloat
         let observedRangeMax: CGFloat
-        
-        if let observedBodyHeight, observedBodyHeight > 1 {
+
+        if let liveBodyHeight = liveFocusModeResponderBodyHeight(), liveBodyHeight > 1 {
+            resolvedBodyHeight = liveBodyHeight
+        } else if let observedBodyHeight, observedBodyHeight > 1 {
             observedRangeMin = max(1, (deterministicBodyHeight * 0.65) - 80)
             observedRangeMax = (deterministicBodyHeight * 1.6) + 120
             let observedAccepted = observedBodyHeight >= observedRangeMin && observedBodyHeight <= observedRangeMax
@@ -293,21 +316,8 @@ struct FocusModeCardEditor: View {
                     }
                 )
         }
+        .frame(width: cardWidth, alignment: .topLeading)
         .frame(height: targetMeasuredHeight > 1 ? targetMeasuredHeight : nil, alignment: .topLeading)
-        .background(
-            GeometryReader { proxy in
-                Color.clear.preference(key: FocusModeCardWidthPreferenceKey.self, value: proxy.size.width)
-            }
-        )
-        .onPreferenceChange(FocusModeCardWidthPreferenceKey.self) { value in
-            let normalizedWidth = max(0, round(value * 2) / 2)
-            guard abs(measuredCardWidth - normalizedWidth) > 0.25 else { return }
-            DispatchQueue.main.async {
-                guard abs(measuredCardWidth - normalizedWidth) > 0.25 else { return }
-                measuredCardWidth = normalizedWidth
-                refreshMeasuredHeights()
-            }
-        }
         .onAppear {
             refreshMeasuredHeights()
         }
@@ -325,6 +335,9 @@ struct FocusModeCardEditor: View {
         .onChange(of: observedBodyHeight) { _, _ in
             refreshMeasuredHeights()
         }
+        .onChange(of: cardWidth) { _, _ in
+            refreshMeasuredHeights()
+        }
         .contentShape(Rectangle())
         .onTapGesture { onActivate() }
     }
@@ -337,9 +350,9 @@ struct CardItem: View {
     @ObservedObject var card: SceneCard
     let isActive, isSelected, isMultiSelected, isArchived, isAncestor, isDescendant, isEditing: Bool
     let dropTarget: DropTarget?
+    let preferredTextMeasureWidth: CGFloat
     let forceNamedSnapshotNoteStyle: Bool
     let forceCustomColorVisibility: Bool
-    let measuredWidth: CGFloat?
     var onSelect, onDoubleClick, onEndEdit: () -> Void
     var onContentChange: ((String, String) -> Void)? = nil
     var onColorChange: ((String?) -> Void)? = nil
@@ -453,8 +466,7 @@ struct CardItem: View {
     }
 
     private var mainEditingTextMeasureWidth: CGFloat {
-        let cardWidth = measuredWidth ?? 392
-        return max(1, cardWidth - (MainEditorLayoutMetrics.mainEditorHorizontalPadding * 2))
+        max(1, preferredTextMeasureWidth)
     }
 
     private var resolvedMainEditingBodyHeight: CGFloat {
@@ -606,9 +618,6 @@ struct CardItem: View {
                         .onDisappear {
                             mainEditingMeasureWorkItem?.cancel()
                             mainEditingMeasureWorkItem = nil
-                        }
-                        .onChange(of: measuredWidth) { _, _ in
-                            scheduleMainEditingMeasuredBodyHeightRefresh(immediate: true)
                         }
                         .onChange(of: fontSize) { _, _ in
                             scheduleMainEditingMeasuredBodyHeightRefresh(immediate: true)
