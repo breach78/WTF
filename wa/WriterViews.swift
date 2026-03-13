@@ -245,6 +245,10 @@ struct ScenarioWriterView: View {
     @State var pendingCardTreePastePayload: CardTreeClipboardPayload? = nil
     @State var showCloneCardPasteDialog: Bool = false
     @State var clonePasteDialogSelection: ClonePastePlacement = .child
+    @State var pendingFountainClipboardPastePreview: FountainClipboardPastePreview? = nil
+    @State var showFountainClipboardPasteDialog: Bool = false
+    @State var fountainClipboardPasteSelection: StructuredTextPasteOption = .plainText
+    @State var fountainClipboardPasteSourceTextViewBox = WeakTextViewBox()
     @State var historyBarMeasuredHeight: CGFloat = 0
     @State var historyRetentionLastAppliedCount: Int = 0
     @State var caretEnsureBurstWorkItems: [DispatchWorkItem] = []
@@ -426,6 +430,7 @@ struct ScenarioWriterView: View {
             }
             .onKeyPress(phases: [.down, .repeat]) { press in
                 if !acceptsKeyboardInput { return .handled }
+                if showFountainClipboardPasteDialog { return handleFountainClipboardPasteDialogKeyPress(press) }
                 if showCloneCardPasteDialog { return handleClonePasteDialogKeyPress(press) }
                 if isPreviewingHistory { return .ignored }
                 return handleGlobalKeyPress(press)
@@ -472,8 +477,20 @@ struct ScenarioWriterView: View {
                 Text(exportMessage ?? "")
             }
             .overlay {
+                if showFountainClipboardPasteDialog {
+                    fountainClipboardPasteDialogOverlay
+                }
                 if showCloneCardPasteDialog {
                     cloneCardPasteDialogOverlay
+                }
+            }
+            .onChange(of: showFountainClipboardPasteDialog) { _, isShown in
+                if isShown {
+                    resetFountainClipboardPasteDialogSelection()
+                    return
+                }
+                if !isShown {
+                    pendingFountainClipboardPastePreview = nil
                 }
             }
             .onChange(of: showCloneCardPasteDialog) { _, isShown in
@@ -1167,6 +1184,98 @@ struct ScenarioWriterView: View {
         }
         .zIndex(1000)
         .allowsHitTesting(true)
+    }
+
+    var fountainClipboardPasteDialogOverlay: some View {
+        let sceneCount = pendingFountainClipboardPastePreview?.importPayload.sceneCards.count ?? 0
+
+        return ZStack {
+            Color.black.opacity(0.12)
+                .ignoresSafeArea()
+                .onTapGesture {
+                    cancelFountainClipboardPasteDialog()
+                }
+
+            VStack(alignment: .leading, spacing: 12) {
+                Text("붙여넣기 방식")
+                    .font(.system(size: 16, weight: .semibold))
+                Text(sceneCount >= 2 ? "씬 헤딩 \(sceneCount)개를 감지했습니다." : "붙여넣기 방식을 선택하세요.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+
+                VStack(spacing: 8) {
+                    fountainClipboardPasteDialogOptionRow(.plainText)
+                    fountainClipboardPasteDialogOptionRow(.sceneCards)
+                }
+
+                Text("↑/↓ 선택 · Enter 확인 · Esc 취소")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(16)
+            .frame(width: 320)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color(nsColor: .windowBackgroundColor))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(Color(nsColor: .separatorColor).opacity(0.35), lineWidth: 1)
+            )
+            .shadow(color: Color.black.opacity(0.25), radius: 20, y: 8)
+        }
+        .zIndex(1001)
+        .allowsHitTesting(true)
+    }
+
+    @ViewBuilder
+    func fountainClipboardPasteDialogOptionRow(_ option: StructuredTextPasteOption) -> some View {
+        let isSelected = showFountainClipboardPasteDialog && fountainClipboardPasteSelection == option
+
+        Button {
+            fountainClipboardPasteSelection = option
+            applyFountainClipboardPasteSelection(option)
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: fountainClipboardPasteDialogOptionIcon(option))
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Color.accentColor)
+                Text(fountainClipboardPasteDialogOptionTitle(option))
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Color.primary)
+                Spacer()
+                if isSelected {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Color.accentColor)
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(isSelected ? Color.accentColor.opacity(0.20) : Color.clear)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    func fountainClipboardPasteDialogOptionTitle(_ option: StructuredTextPasteOption) -> String {
+        switch option {
+        case .plainText:
+            return "그냥 붙여넣기"
+        case .sceneCards:
+            return "씬별 카드로 나누기"
+        }
+    }
+
+    func fountainClipboardPasteDialogOptionIcon(_ option: StructuredTextPasteOption) -> String {
+        switch option {
+        case .plainText:
+            return "doc.on.clipboard"
+        case .sceneCards:
+            return "rectangle.split.3x1"
+        }
     }
 
     @ViewBuilder

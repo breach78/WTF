@@ -138,6 +138,216 @@ func sharedHasParagraphBreakBoundary(in text: NSString, delta: TextChangeDelta) 
     return false
 }
 
+// MARK: - Fountain Clipboard Parsing
+
+struct FountainClipboardImport {
+    let coverCardContent: String?
+    let sceneCards: [String]
+
+    var cardContents: [String] {
+        var result: [String] = []
+        if let coverCardContent,
+           !coverCardContent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            result.append(coverCardContent)
+        }
+        result.append(contentsOf: sceneCards)
+        return result
+    }
+}
+
+struct FountainClipboardPastePreview {
+    let rawText: String
+    let importPayload: FountainClipboardImport
+}
+
+enum StructuredTextPasteOption: Equatable {
+    case plainText
+    case sceneCards
+}
+
+func parseFountainClipboardImport(from rawText: String) -> FountainClipboardImport? {
+    let normalized = normalizedClipboardText(rawText)
+    let lines = normalized.components(separatedBy: "\n")
+    guard let firstSceneIndex = lines.firstIndex(where: isFountainSceneHeadingLine) else { return nil }
+
+    let sceneCards = buildFountainSceneCards(from: lines, startingAt: firstSceneIndex)
+    guard sceneCards.count >= 2 else { return nil }
+
+    let titlePageFields = parseFountainTitlePageFields(from: Array(lines[..<firstSceneIndex]))
+    let coverCardContent = buildFountainCoverCardContent(from: titlePageFields)
+
+    return FountainClipboardImport(
+        coverCardContent: coverCardContent,
+        sceneCards: sceneCards
+    )
+}
+
+func normalizedClipboardText(_ text: String) -> String {
+    text
+        .replacingOccurrences(of: "\r\n", with: "\n")
+        .replacingOccurrences(of: "\r", with: "\n")
+}
+
+func isFountainSceneHeadingLine(_ line: String) -> Bool {
+    let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return false }
+
+    if trimmed.hasPrefix(".") {
+        let remainder = trimmed.dropFirst().trimmingCharacters(in: .whitespacesAndNewlines)
+        return !remainder.isEmpty
+    }
+
+    let uppercased = trimmed.uppercased()
+    return uppercased.hasPrefix("INT.")
+        || uppercased.hasPrefix("EXT.")
+        || uppercased.hasPrefix("INT/EXT.")
+        || uppercased.hasPrefix("I/E.")
+}
+
+func buildFountainSceneCards(from lines: [String], startingAt firstSceneIndex: Int) -> [String] {
+    var cards: [String] = []
+    var currentLines: [String] = []
+
+    for line in lines[firstSceneIndex...] {
+        if isFountainSceneHeadingLine(line),
+           !currentLines.isEmpty {
+            let card = currentLines
+                .joined(separator: "\n")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if !card.isEmpty {
+                cards.append(card)
+            }
+            currentLines = []
+        }
+        currentLines.append(line)
+    }
+
+    let trailingCard = currentLines
+        .joined(separator: "\n")
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+    if !trailingCard.isEmpty {
+        cards.append(trailingCard)
+    }
+
+    return cards
+}
+
+func parseFountainTitlePageFields(from lines: [String]) -> [String: [String]] {
+    var fields: [String: [String]] = [:]
+    var currentKey: String? = nil
+
+    for line in lines {
+        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            currentKey = nil
+            continue
+        }
+
+        if let field = parseFountainTitlePageField(trimmed) {
+            currentKey = normalizedFountainTitlePageFieldKey(field.key)
+            if !field.value.isEmpty {
+                fields[currentKey!, default: []].append(field.value)
+            } else if fields[currentKey!] == nil {
+                fields[currentKey!] = []
+            }
+            continue
+        }
+
+        guard line.hasPrefix("\t") || line.hasPrefix(" ") else {
+            currentKey = nil
+            continue
+        }
+
+        guard let currentKey else { continue }
+        fields[currentKey, default: []].append(trimmed)
+    }
+
+    return fields
+}
+
+func parseFountainTitlePageField(_ line: String) -> (key: String, value: String)? {
+    guard let separatorIndex = line.firstIndex(of: ":") else { return nil }
+    let key = line[..<separatorIndex].trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !key.isEmpty else { return nil }
+    let valueStart = line.index(after: separatorIndex)
+    let value = line[valueStart...].trimmingCharacters(in: .whitespacesAndNewlines)
+    return (key: key, value: value)
+}
+
+func normalizedFountainTitlePageFieldKey(_ key: String) -> String {
+    key
+        .lowercased()
+        .filter { $0.isLetter || $0.isNumber }
+}
+
+func buildFountainCoverCardContent(from fields: [String: [String]]) -> String? {
+    let titleValues = fields["title"] ?? []
+    let title = titleValues.first?.trimmingCharacters(in: .whitespacesAndNewlines)
+    let revision = joinedFountainFieldValues(Array(titleValues.dropFirst()), separator: " / ")
+    let date = joinedFountainFieldValues(fields["draftdate"], separator: " / ")
+    let author = joinedFountainFieldValues(fields["author"], separator: " / ")
+    let company = joinedFountainFieldValues(
+        fields["company"]
+        ?? fields["productioncompany"]
+        ?? fields["production"],
+        separator: " / "
+    )
+
+    let contact = joinedFountainFieldValues(
+        resolvedFountainContactValues(from: fields),
+        separator: ", "
+    )
+
+    var lines: [String] = []
+    if let title, !title.isEmpty {
+        lines.append("# \(title)")
+    }
+    if let revision, !revision.isEmpty {
+        lines.append("## \(revision)")
+    }
+    if let date, !date.isEmpty {
+        lines.append("### \(date)")
+    }
+    if let author, !author.isEmpty {
+        lines.append("#### \(author)")
+    }
+    if let company, !company.isEmpty {
+        lines.append("##### \(company)")
+    }
+    if let contact, !contact.isEmpty {
+        lines.append("###### \(contact)")
+    }
+
+    let result = lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+    return result.isEmpty ? nil : result
+}
+
+func resolvedFountainContactValues(from fields: [String: [String]]) -> [String]? {
+    if let direct = fields["contact"], !direct.isEmpty {
+        return direct
+    }
+
+    var values: [String] = []
+    if let email = fields["email"]?.first,
+       !email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        values.append(email)
+    }
+    if let phone = fields["phone"]?.first,
+       !phone.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        values.append(phone)
+    }
+    return values.isEmpty ? nil : values
+}
+
+func joinedFountainFieldValues(_ values: [String]?, separator: String) -> String? {
+    guard let values else { return nil }
+    let normalized = values
+        .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        .filter { !$0.isEmpty }
+    guard !normalized.isEmpty else { return nil }
+    return normalized.joined(separator: separator)
+}
+
 func sharedLineHasSignificantContentBeforeBreak(in text: NSString, breakIndex: Int) -> Bool {
     guard breakIndex > 0 else { return false }
     var i = breakIndex - 1

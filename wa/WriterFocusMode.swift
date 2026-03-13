@@ -338,6 +338,10 @@ extension ScenarioWriterView {
 
     func handleFocusModeKeyDown(_ event: NSEvent) -> NSEvent? {
         if shouldPassThroughFocusModeEvent(event) { return event }
+        if showFountainClipboardPasteDialog {
+            _ = handleFountainClipboardPasteDialogKeyDownEvent(event)
+            return nil
+        }
         if showCloneCardPasteDialog {
             _ = handleClonePasteDialogKeyDownEvent(event)
             return nil
@@ -346,6 +350,7 @@ extension ScenarioWriterView {
 
         let flags = event.modifierFlags
         if handleFocusEscapeShortcut(event, flags: flags) { return nil }
+        if handleFocusFountainClipboardPasteShortcut(event, flags: flags) { return nil }
         if handleFocusCardEditingShortcuts(event, flags: flags) { return nil }
         if shouldPassThroughAfterFocusReturnBoundaryUpdate(event, flags: flags) { return event }
         if shouldPassThroughFocusModeModifierEvent(flags) { return event }
@@ -370,6 +375,18 @@ extension ScenarioWriterView {
         if handleFocusInsertSiblingShortcut(event, isCommandOnly: isCommandOnly) { return true }
         if handleFocusOptionArrowSiblingShortcut(event, flags: flags) { return true }
         return false
+    }
+
+    private func handleFocusFountainClipboardPasteShortcut(
+        _ event: NSEvent,
+        flags: NSEvent.ModifierFlags
+    ) -> Bool {
+        guard isCommandOnlyFlags(flags) else { return false }
+        let normalized = (event.charactersIgnoringModifiers ?? "").lowercased()
+        let isPasteShortcut = normalized == "v" || normalized == "ㅍ" || event.keyCode == 9
+        guard isPasteShortcut else { return false }
+        guard let textView = NSApp.keyWindow?.firstResponder as? NSTextView else { return false }
+        return handleFountainClipboardPasteShortcutIfPossible(from: textView)
     }
 
     private func shouldPassThroughAfterFocusReturnBoundaryUpdate(

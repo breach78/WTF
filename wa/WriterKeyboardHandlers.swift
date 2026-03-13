@@ -126,6 +126,79 @@ extension ScenarioWriterView {
         }
     }
 
+    func resetFountainClipboardPasteDialogSelection() {
+        fountainClipboardPasteSelection = .plainText
+    }
+
+    func moveFountainClipboardPasteDialogSelection() {
+        switch fountainClipboardPasteSelection {
+        case .plainText:
+            fountainClipboardPasteSelection = .sceneCards
+        case .sceneCards:
+            fountainClipboardPasteSelection = .plainText
+        }
+    }
+
+    func confirmFountainClipboardPasteDialogSelection() {
+        applyFountainClipboardPasteSelection(fountainClipboardPasteSelection)
+    }
+
+    func handleFountainClipboardPasteDialogKeyPress(_ press: KeyPress) -> KeyPress.Result {
+        guard showFountainClipboardPasteDialog else { return .ignored }
+        if press.modifiers.contains(.command) || press.modifiers.contains(.option) || press.modifiers.contains(.control) {
+            return .handled
+        }
+        switch press.key {
+        case .upArrow, .downArrow:
+            moveFountainClipboardPasteDialogSelection()
+            return .handled
+        case .return:
+            if press.phase == .down {
+                confirmFountainClipboardPasteDialogSelection()
+            }
+            return .handled
+        case .escape:
+            if press.phase == .down {
+                cancelFountainClipboardPasteDialog()
+            }
+            return .handled
+        default:
+            return .handled
+        }
+    }
+
+    func handleFountainClipboardPasteDialogKeyDownEvent(_ event: NSEvent) -> Bool {
+        guard showFountainClipboardPasteDialog else { return false }
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        if flags.contains(.command) || flags.contains(.option) || flags.contains(.control) {
+            return true
+        }
+        switch event.keyCode {
+        case 126, 125: // up/down
+            DispatchQueue.main.async {
+                moveFountainClipboardPasteDialogSelection()
+            }
+            return true
+        case 36, 76: // return
+            DispatchQueue.main.async {
+                confirmFountainClipboardPasteDialogSelection()
+            }
+            return true
+        case 53: // escape
+            DispatchQueue.main.async {
+                cancelFountainClipboardPasteDialog()
+            }
+            return true
+        default:
+            return true
+        }
+    }
+
+    func isPlainPasteShortcut(_ press: KeyPress) -> Bool {
+        let normalized = press.characters.lowercased()
+        return normalized == "v" || press.characters == "ㅍ"
+    }
+
     func resetClonePasteDialogSelection() {
         clonePasteDialogSelection = isClonePastePlacementEnabled(.child) ? .child : .sibling
     }
@@ -329,6 +402,22 @@ extension ScenarioWriterView {
             default:
                 break
             }
+        }
+        if isMainEditorTyping &&
+            !showFocusMode &&
+            press.phase == .down &&
+            press.modifiers.contains(.command) &&
+            !press.modifiers.contains(.option) &&
+            !press.modifiers.contains(.control) &&
+            !press.modifiers.contains(.shift) &&
+            isPlainPasteShortcut(press) {
+            guard let textView = NSApp.keyWindow?.firstResponder as? NSTextView else {
+                return .ignored
+            }
+            if handleFountainClipboardPasteShortcutIfPossible(from: textView) {
+                return .handled
+            }
+            return .ignored
         }
         if press.phase == .down && press.key != .tab {
             clearMainEditTabArm()
@@ -804,6 +893,10 @@ extension ScenarioWriterView {
                 return event
             }
             if !acceptsKeyboardInput { return event }
+            if showFountainClipboardPasteDialog {
+                _ = handleFountainClipboardPasteDialogKeyDownEvent(event)
+                return nil
+            }
             if showCloneCardPasteDialog {
                 _ = handleClonePasteDialogKeyDownEvent(event)
                 return nil
@@ -835,6 +928,13 @@ extension ScenarioWriterView {
                     toggleSearch()
                 }
                 return nil
+            }
+            let isPasteShortcut = normalized == "v" || normalized == "ㅍ" || event.keyCode == 9
+            if isCmdOnly && editingCardID != nil && isPasteShortcut {
+                if let textView = NSApp.keyWindow?.firstResponder as? NSTextView,
+                   handleFountainClipboardPasteShortcutIfPossible(from: textView) {
+                    return nil
+                }
             }
             if showAIChat && isAIChatInputFocused {
                 return event

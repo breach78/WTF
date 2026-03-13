@@ -1271,6 +1271,199 @@ extension ScenarioWriterView {
         }
     }
 
+    func handleFountainClipboardPasteShortcutIfPossible(from textView: NSTextView) -> Bool {
+        guard let preview = loadFountainClipboardPastePreview() else { return false }
+        fountainClipboardPasteSourceTextViewBox.textView = textView
+        pendingFountainClipboardPastePreview = preview
+        showFountainClipboardPasteDialog = true
+        return true
+    }
+
+    func loadFountainClipboardPastePreview() -> FountainClipboardPastePreview? {
+        let pasteboard = NSPasteboard.general
+        guard let rawText = pasteboard.string(forType: .string) else { return nil }
+        guard let importPayload = parseFountainClipboardImport(from: rawText) else { return nil }
+        return FountainClipboardPastePreview(rawText: rawText, importPayload: importPayload)
+    }
+
+    func cancelFountainClipboardPasteDialog() {
+        showFountainClipboardPasteDialog = false
+        restoreFountainClipboardPasteTextFocusIfNeeded()
+    }
+
+    func applyFountainClipboardPasteSelection(_ option: StructuredTextPasteOption) {
+        guard let preview = pendingFountainClipboardPastePreview else {
+            cancelFountainClipboardPasteDialog()
+            return
+        }
+
+        showFountainClipboardPasteDialog = false
+
+        switch option {
+        case .plainText:
+            pasteRawTextIntoFountainClipboardSource(preview.rawText)
+        case .sceneCards:
+            insertFountainClipboardImportCards(preview.importPayload)
+        }
+    }
+
+    func restoreFountainClipboardPasteTextFocusIfNeeded() {
+        guard let textView = fountainClipboardPasteSourceTextViewBox.textView else { return }
+        DispatchQueue.main.async {
+            guard let window = textView.window else { return }
+            window.makeFirstResponder(textView)
+        }
+    }
+
+    func pasteRawTextIntoFountainClipboardSource(_ rawText: String) {
+        guard let textView = fountainClipboardPasteSourceTextViewBox.textView else { return }
+        DispatchQueue.main.async {
+            guard let window = textView.window else { return }
+            window.makeFirstResponder(textView)
+            textView.insertText(rawText, replacementRange: textView.selectedRange())
+        }
+    }
+
+    func canReuseEditingCardForFountainClipboardImport() -> Bool {
+        guard let editingID = editingCardID,
+              let editingCard = findCard(by: editingID) else { return false }
+        guard editingCard.children.isEmpty else { return false }
+        return editingCard.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    func insertFountainClipboardImportCards(_ importPayload: FountainClipboardImport) {
+        let cardContents = importPayload.cardContents
+        guard !cardContents.isEmpty else { return }
+
+        let reuseEditingCard = canReuseEditingCardForFountainClipboardImport()
+        let anchorCardID = editingCardID ?? activeCardID
+
+        if reuseEditingCard {
+            if showFocusMode {
+                finalizeFocusTypingCoalescing(reason: "fountain-import")
+                focusModeEditorCardID = nil
+            } else {
+                finalizeMainTypingCoalescing(reason: "fountain-import")
+            }
+            resetEditingTransientState()
+        } else if editingCardID != nil {
+            finishEditing()
+            if showFocusMode {
+                focusModeEditorCardID = nil
+            }
+        }
+
+        let prevState = captureScenarioState()
+        guard let anchorCard = anchorCardID.flatMap({ findCard(by: $0) }) ?? activeCardID.flatMap({ findCard(by: $0) }) else {
+            insertRootLevelFountainClipboardCards(cardContents, previousState: prevState)
+            return
+        }
+
+        var insertedCards: [SceneCard] = []
+        insertedCards.reserveCapacity(cardContents.count)
+
+        if reuseEditingCard {
+            anchorCard.content = cardContents[0]
+            insertedCards.append(anchorCard)
+            let trailingContents = Array(cardContents.dropFirst())
+            appendFountainClipboardCards(
+                trailingContents,
+                parent: anchorCard.parent,
+                insertionIndex: anchorCard.orderIndex + 1,
+                category: anchorCard.category,
+                accumulator: &insertedCards
+            )
+            normalizeIndices(parent: anchorCard.parent)
+        } else {
+            appendFountainClipboardCards(
+                cardContents,
+                parent: anchorCard.parent,
+                insertionIndex: anchorCard.orderIndex + 1,
+                category: anchorCard.category,
+                accumulator: &insertedCards
+            )
+            normalizeIndices(parent: anchorCard.parent)
+        }
+
+        completeFountainClipboardImport(
+            insertedCards,
+            previousState: prevState
+        )
+    }
+
+    func insertRootLevelFountainClipboardCards(_ cardContents: [String], previousState: ScenarioState) {
+        var insertedCards: [SceneCard] = []
+        insertedCards.reserveCapacity(cardContents.count)
+        appendFountainClipboardCards(
+            cardContents,
+            parent: nil,
+            insertionIndex: scenario.rootCards.count,
+            category: nil,
+            accumulator: &insertedCards
+        )
+        normalizeIndices(parent: nil)
+        completeFountainClipboardImport(
+            insertedCards,
+            previousState: previousState
+        )
+    }
+
+    func appendFountainClipboardCards(
+        _ contents: [String],
+        parent: SceneCard?,
+        insertionIndex: Int,
+        category: String?,
+        accumulator: inout [SceneCard]
+    ) {
+        guard !contents.isEmpty else { return }
+
+        let siblings = parent?.sortedChildren ?? scenario.rootCards
+        for sibling in siblings where sibling.orderIndex >= insertionIndex {
+            sibling.orderIndex += contents.count
+        }
+
+        for (offset, content) in contents.enumerated() {
+            let card = SceneCard(
+                content: content,
+                orderIndex: insertionIndex + offset,
+                createdAt: Date(),
+                parent: parent,
+                scenario: scenario,
+                category: parent?.category ?? category,
+                isFloating: false,
+                isArchived: false,
+                lastSelectedChildID: nil,
+                colorHex: nil,
+                cloneGroupID: nil,
+                isAICandidate: false
+            )
+            scenario.cards.append(card)
+            accumulator.append(card)
+        }
+    }
+
+    func completeFountainClipboardImport(
+        _ insertedCards: [SceneCard],
+        previousState: ScenarioState
+    ) {
+        guard !insertedCards.isEmpty else { return }
+
+        scenario.bumpCardsVersion()
+        commitCardMutation(
+            previousState: previousState,
+            actionName: "파운틴 카드 붙여넣기",
+            forceSnapshot: true
+        )
+
+        selectedCardIDs = Set(insertedCards.map { $0.id })
+        if let first = insertedCards.first {
+            changeActiveCard(to: first, shouldFocusMain: false)
+        }
+        if !showFocusMode {
+            isMainViewFocused = true
+        }
+    }
+
     func handlePasteShortcut() {
         if pasteCutCardTreeIfPossible() {
             return
