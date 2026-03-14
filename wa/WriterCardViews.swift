@@ -144,56 +144,6 @@ struct PreviewCardItem: View {
 
 // MARK: - 포커스 모드 카드 에디터
 
-private enum FocusModeTextHeightCalculator {
-    private static var lineFragmentPadding: CGFloat {
-        FocusModeLayoutMetrics.focusModeLineFragmentPadding
-    }
-
-    static func measureBodyHeight(
-        text: String,
-        fontSize: CGFloat,
-        lineSpacing: CGFloat,
-        width: CGFloat
-    ) -> CGFloat {
-        let measuringText: String
-        if text.isEmpty {
-            measuringText = " "
-        } else if text.hasSuffix("\n") {
-            measuringText = text + " "
-        } else {
-            measuringText = text
-        }
-        let constrainedWidth = max(1, width)
-        let paragraphStyle = NSMutableParagraphStyle()
-        paragraphStyle.lineSpacing = lineSpacing
-        paragraphStyle.lineBreakMode = .byWordWrapping
-
-        let font = NSFont(name: "SansMonoCJKFinalDraft", size: fontSize)
-            ?? NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
-
-        let storage = NSTextStorage(
-            string: measuringText,
-            attributes: [
-                .font: font,
-                .paragraphStyle: paragraphStyle
-            ]
-        )
-        let layoutManager = NSLayoutManager()
-        let textContainer = NSTextContainer(size: CGSize(width: constrainedWidth, height: CGFloat.greatestFiniteMagnitude))
-        textContainer.lineFragmentPadding = lineFragmentPadding
-        textContainer.lineBreakMode = .byWordWrapping
-        textContainer.maximumNumberOfLines = 0
-        textContainer.widthTracksTextView = false
-        textContainer.heightTracksTextView = false
-        layoutManager.addTextContainer(textContainer)
-        storage.addLayoutManager(layoutManager)
-        layoutManager.ensureLayout(for: textContainer)
-
-        let usedHeight = layoutManager.usedRect(for: textContainer).height
-        return max(1, ceil(usedHeight + focusModeBodySafetyInset))
-    }
-}
-
 struct FocusModeCardEditor: View {
     @ObservedObject var card: SceneCard
     let isActive: Bool
@@ -247,29 +197,23 @@ struct FocusModeCardEditor: View {
         guard isActive else { return nil }
         guard focusModeEditorCardID == card.id else { return nil }
         guard let textView = NSApp.keyWindow?.firstResponder as? NSTextView else { return nil }
-        guard let layoutManager = textView.layoutManager,
-              let textContainer = textView.textContainer else { return nil }
-        let textLength = (textView.string as NSString).length
-        if textLength > 0 {
-            let fullRange = NSRange(location: 0, length: textLength)
-            layoutManager.ensureGlyphs(forCharacterRange: fullRange)
-            layoutManager.ensureLayout(forCharacterRange: fullRange)
-        }
-        layoutManager.ensureLayout(for: textContainer)
-        let usedHeight = layoutManager.usedRect(for: textContainer).height
-        guard usedHeight > 0 else { return nil }
-        return max(1, ceil(usedHeight + focusModeBodySafetyInset))
+        return sharedLiveTextViewBodyHeight(
+            textView,
+            safetyInset: focusModeBodySafetyInset
+        )
     }
 
     private func refreshMeasuredHeights() {
         guard cardWidth > 1 else {
             return
         }
-        let deterministicBodyHeight = FocusModeTextHeightCalculator.measureBodyHeight(
+        let deterministicBodyHeight = sharedMeasuredTextBodyHeight(
             text: sizingText,
             fontSize: focusModeFontSize,
             lineSpacing: focusModeLineSpacing,
-            width: textEditorMeasureWidth
+            width: textEditorMeasureWidth,
+            lineFragmentPadding: FocusModeLayoutMetrics.focusModeLineFragmentPadding,
+            safetyInset: focusModeBodySafetyInset
         )
         let resolvedBodyHeight: CGFloat
         let observedRangeMin: CGFloat
@@ -494,50 +438,18 @@ struct CardItem: View {
         guard editorFocus else { return nil }
         guard let textView = NSApp.keyWindow?.firstResponder as? NSTextView else { return nil }
         guard textView.string == card.content else { return nil }
-        guard let layoutManager = textView.layoutManager,
-              let textContainer = textView.textContainer else { return nil }
-        layoutManager.ensureLayout(for: textContainer)
-        let usedHeight = layoutManager.usedRect(for: textContainer).height
-        guard usedHeight > 0 else { return nil }
-        return max(1, ceil(usedHeight))
+        return sharedLiveTextViewBodyHeight(textView)
     }
 
     private func measureMainEditorBodyHeight(text: String, width: CGFloat) -> CGFloat {
-        let content: String
-        if text.isEmpty {
-            content = " "
-        } else if text.hasSuffix("\n") {
-            content = text + " "
-        } else {
-            content = text
-        }
-
-        let paragraphStyle = NSMutableParagraphStyle()
-        paragraphStyle.lineSpacing = mainCardLineSpacing
-        paragraphStyle.lineBreakMode = .byWordWrapping
-
-        let font = NSFont(name: "SansMonoCJKFinalDraft", size: fontSize)
-            ?? NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
-
-        let storage = NSTextStorage(
-            string: content,
-            attributes: [
-                .font: font,
-                .paragraphStyle: paragraphStyle
-            ]
+        sharedMeasuredTextBodyHeight(
+            text: text,
+            fontSize: CGFloat(fontSize),
+            lineSpacing: mainCardLineSpacing,
+            width: width,
+            lineFragmentPadding: mainEditorLineFragmentPadding,
+            safetyInset: 0
         )
-        let layoutManager = NSLayoutManager()
-        let textContainer = NSTextContainer(size: CGSize(width: max(1, width), height: CGFloat.greatestFiniteMagnitude))
-        textContainer.lineFragmentPadding = mainEditorLineFragmentPadding
-        textContainer.lineBreakMode = .byWordWrapping
-        textContainer.maximumNumberOfLines = 0
-        textContainer.widthTracksTextView = false
-        textContainer.heightTracksTextView = false
-        layoutManager.addTextContainer(textContainer)
-        storage.addLayoutManager(layoutManager)
-        layoutManager.ensureLayout(for: textContainer)
-        let usedHeight = layoutManager.usedRect(for: textContainer).height
-        return max(1, ceil(usedHeight))
     }
 
     private func refreshMainEditingMeasuredBodyHeight() {
@@ -731,7 +643,7 @@ struct CardItem: View {
                         Button("대안") { onAIAlternative?() }
                             .disabled(onAIAlternative == nil || !aiPlotActionsEnabled || isAIBusy)
                         Divider()
-                        Button("현재 카드 요약") { onAISummarizeCurrent?() }
+                        Button("선택 카드 요약") { onAISummarizeCurrent?() }
                             .disabled(onAISummarizeCurrent == nil || isAIBusy)
                         Button("자식 카드 요약") { onSummarizeChildren?() }
                             .disabled(onSummarizeChildren == nil || isAIBusy)
@@ -780,7 +692,7 @@ struct CardItem: View {
                         Button("대안") { onAIAlternative?() }
                             .disabled(onAIAlternative == nil || !aiPlotActionsEnabled || isAIBusy)
                         Divider()
-                        Button("현재 카드 요약") { onAISummarizeCurrent?() }
+                        Button("선택 카드 요약") { onAISummarizeCurrent?() }
                             .disabled(onAISummarizeCurrent == nil || isAIBusy)
                         Button("자식 카드 요약") { onSummarizeChildren?() }
                             .disabled(onSummarizeChildren == nil || isAIBusy)

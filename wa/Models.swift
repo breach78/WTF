@@ -11,29 +11,45 @@ final class Scenario: ObservableObject, Identifiable, Hashable {
     @Published var isTemplate: Bool { didSet { markModified() } }
     @Published var timestamp: Date
     @Published var changeCountSinceLastSnapshot: Int
-    @Published var cards: [SceneCard] { didSet { markModified() } }
+    @Published var cards: [SceneCard] {
+        didSet {
+            markCardRecordsDirty()
+            markCardContentDirty()
+            markModified()
+        }
+    }
     @Published var snapshots: [HistorySnapshot] {
         didSet {
             cachedSortedSnapshots = nil
+            markHistoryDirty()
             markModified()
         }
     }
     @Published var linkedCardEditDatesByFocusCardID: [UUID: [UUID: Date]] {
         didSet {
             rebuildLinkedTargetCardCache()
+            markLinkedCardsDirty()
             markModified()
         }
     }
     @Published private(set) var cardsVersion: Int = 0
+    private(set) var cardRecordsSaveVersion: Int = 0
+    private(set) var cardContentSaveVersion: Int = 0
+    private(set) var historySaveVersion: Int = 0
+    private(set) var linkedCardsSaveVersion: Int = 0
     private var cachedVersion: Int = -1
     private var cachedRoots: [SceneCard] = []
     private var cachedChildrenByParent: [UUID: [SceneCard]] = [:]
+    private var cachedChildListSignatureByParentID: [UUID: Int] = [:]
     private var cachedCardsByID: [UUID: SceneCard] = [:]
     private var cachedCardLocationByID: [UUID: (level: Int, index: Int)] = [:]
     private var cachedCloneMembersByGroup: [UUID: [SceneCard]] = [:]
+    private var cachedDescendantIDsByCardID: [UUID: Set<UUID>] = [:]
+    private var cachedLevelCardsByCategory: [Int: [String: [SceneCard]]] = [:]
     private var activeCloneSyncGroupIDs: Set<UUID> = []
     private var cachedSortedSnapshots: [HistorySnapshot]?
     private var cachedLevels: [[SceneCard]] = []
+    private var cachedRootListSignature: Int = 0
     private var timestampTrackingSuppressionCount: Int = 0
     private var interactiveTimestampSuppressionCount: Int = 0
     private var pendingModifiedTimestamp: Date?
@@ -41,6 +57,7 @@ final class Scenario: ObservableObject, Identifiable, Hashable {
     private var lastAppliedModifiedAt: Date = .distantPast
     private let modifiedTimestampDebounceInterval: TimeInterval = 0.14
     private var cachedLinkedTargetCardIDs: Set<UUID> = []
+    private(set) var sharedCraftTreeDirty: Bool = false
     var splitPaneActiveCardByPaneID: [Int: UUID] = [:]
 
     init(
@@ -165,6 +182,30 @@ final class Scenario: ObservableObject, Identifiable, Hashable {
         cardsVersion += 1
     }
 
+    func markSharedCraftDirty() {
+        sharedCraftTreeDirty = true
+    }
+
+    func clearSharedCraftDirty() {
+        sharedCraftTreeDirty = false
+    }
+
+    func markCardRecordsDirty() {
+        cardRecordsSaveVersion &+= 1
+    }
+
+    func markCardContentDirty() {
+        cardContentSaveVersion &+= 1
+    }
+
+    func markHistoryDirty() {
+        historySaveVersion &+= 1
+    }
+
+    func markLinkedCardsDirty() {
+        linkedCardsSaveVersion &+= 1
+    }
+
     func cardByID(_ id: UUID) -> SceneCard? {
         rebuildIndexIfNeeded()
         return cachedCardsByID[id]
@@ -178,6 +219,19 @@ final class Scenario: ObservableObject, Identifiable, Hashable {
     func children(for parentID: UUID) -> [SceneCard] {
         rebuildIndexIfNeeded()
         return cachedChildrenByParent[parentID] ?? []
+    }
+
+    func childListSignature(parentID: UUID?) -> Int {
+        rebuildIndexIfNeeded()
+        if let parentID {
+            return cachedChildListSignatureByParentID[parentID] ?? 0
+        }
+        return cachedRootListSignature
+    }
+
+    func filteredCards(atLevel levelIndex: Int, category: String) -> [SceneCard] {
+        rebuildIndexIfNeeded()
+        return cachedLevelCardsByCategory[levelIndex]?[category] ?? []
     }
 
     func clonePeers(for cardID: UUID, excluding excludedCardID: UUID? = nil) -> [SceneCard] {
@@ -196,6 +250,11 @@ final class Scenario: ObservableObject, Identifiable, Hashable {
               let cloneGroupID = card.cloneGroupID,
               let members = cachedCloneMembersByGroup[cloneGroupID] else { return false }
         return members.count > 1
+    }
+
+    func descendantIDs(for cardID: UUID) -> Set<UUID> {
+        rebuildIndexIfNeeded()
+        return cachedDescendantIDsByCardID[cardID] ?? []
     }
 
     func propagateCloneContent(from sourceCard: SceneCard, content: String) {
@@ -379,8 +438,11 @@ final class Scenario: ObservableObject, Identifiable, Hashable {
         }
         cachedRoots = roots
         cachedChildrenByParent = childrenByParent
+        cachedRootListSignature = orderedCardIDSignature(roots)
+        cachedChildListSignatureByParentID = childrenByParent.mapValues(orderedCardIDSignature(_:))
         cachedCardsByID = byID
         cachedCloneMembersByGroup = cloneMembersByGroup
+        cachedDescendantIDsByCardID = buildDescendantIDIndex(childrenByParent: childrenByParent)
         // Build levels hierarchy
         var levels: [[SceneCard]] = [roots]
         var curr = roots
@@ -397,9 +459,55 @@ final class Scenario: ObservableObject, Identifiable, Hashable {
                 locationByID[card.id] = (levelIndex, index)
             }
         }
+        var levelCardsByCategory: [Int: [String: [SceneCard]]] = [:]
+        for (levelIndex, levelCards) in levels.enumerated() {
+            guard !levelCards.isEmpty else { continue }
+            var grouped: [String: [SceneCard]] = [:]
+            grouped.reserveCapacity(3)
+            for card in levelCards {
+                let category = card.category ?? ScenarioCardCategory.uncategorized
+                grouped[category, default: []].append(card)
+            }
+            levelCardsByCategory[levelIndex] = grouped
+        }
         cachedLevels = levels
+        cachedLevelCardsByCategory = levelCardsByCategory
         cachedCardLocationByID = locationByID
         cachedVersion = cardsVersion
+    }
+
+    private func orderedCardIDSignature(_ cards: [SceneCard]) -> Int {
+        var hasher = Hasher()
+        hasher.combine(cards.count)
+        for card in cards {
+            hasher.combine(card.id)
+        }
+        return hasher.finalize()
+    }
+
+    private func buildDescendantIDIndex(childrenByParent: [UUID: [SceneCard]]) -> [UUID: Set<UUID>] {
+        var cache: [UUID: Set<UUID>] = [:]
+
+        func descendants(for cardID: UUID) -> Set<UUID> {
+            if let cached = cache[cardID] {
+                return cached
+            }
+            let children = childrenByParent[cardID] ?? []
+            var result: Set<UUID> = []
+            result.reserveCapacity(children.count * 2)
+            for child in children {
+                result.insert(child.id)
+                result.formUnion(descendants(for: child.id))
+            }
+            cache[cardID] = result
+            return result
+        }
+
+        for cardID in cachedCardsByID.keys {
+            _ = descendants(for: cardID)
+        }
+
+        return cache
     }
 }
 
@@ -410,11 +518,15 @@ final class SceneCard: ObservableObject, Identifiable {
         didSet {
             guard !isApplyingCloneSynchronization else { return }
             scenario?.propagateCloneContent(from: self, content: content)
+            scenario?.markCardContentDirty()
+            markSharedCraftDirtyIfNeeded()
             scenario?.markModified()
         }
     }
     @Published var orderIndex: Int {
         didSet {
+            scenario?.markCardRecordsDirty()
+            markSharedCraftDirtyIfNeeded()
             scenario?.bumpCardsVersion()
             scenario?.markModified()
         }
@@ -422,34 +534,54 @@ final class SceneCard: ObservableObject, Identifiable {
     @Published var createdAt: Date
     @Published var parent: SceneCard? {
         didSet {
+            scenario?.markCardRecordsDirty()
+            markSharedCraftDirtyIfNeeded()
             scenario?.bumpCardsVersion()
             scenario?.markModified()
         }
     }
     weak var scenario: Scenario?
-    @Published var category: String? { didSet { scenario?.markModified() } }
+    @Published var category: String? {
+        didSet {
+            scenario?.markCardRecordsDirty()
+            markSharedCraftDirtyIfNeeded(previousCategory: oldValue)
+            scenario?.markModified()
+        }
+    }
     @Published var isFloating: Bool {
         didSet {
+            scenario?.markCardRecordsDirty()
+            markSharedCraftDirtyIfNeeded()
             scenario?.bumpCardsVersion()
             scenario?.markModified()
         }
     }
     @Published var isArchived: Bool {
         didSet {
+            scenario?.markCardRecordsDirty()
+            markSharedCraftDirtyIfNeeded()
             scenario?.bumpCardsVersion()
             scenario?.markModified()
         }
     }
-    @Published var lastSelectedChildID: UUID?
+    @Published var lastSelectedChildID: UUID? {
+        didSet {
+            scenario?.markCardRecordsDirty()
+        }
+    }
     @Published var colorHex: String? {
         didSet {
             guard !isApplyingCloneSynchronization else { return }
             scenario?.propagateCloneColor(from: self, colorHex: colorHex)
+            scenario?.markCardRecordsDirty()
+            markSharedCraftDirtyIfNeeded()
             scenario?.markModified()
         }
     }
     @Published var cloneGroupID: UUID? {
         didSet {
+            scenario?.markCardRecordsDirty()
+            markSharedCraftDirtyIfNeeded()
             scenario?.bumpCardsVersion()
             scenario?.markModified()
         }
@@ -471,6 +603,13 @@ final class SceneCard: ObservableObject, Identifiable {
         self.colorHex = colorHex
         self.cloneGroupID = cloneGroupID
         self.isAICandidate = isAICandidate
+    }
+
+    private func markSharedCraftDirtyIfNeeded(previousCategory: String? = nil) {
+        guard category == ScenarioCardCategory.craft || previousCategory == ScenarioCardCategory.craft else {
+            return
+        }
+        scenario?.markSharedCraftDirty()
     }
 
     fileprivate func applyCloneSynchronizedContent(_ newContent: String) {
@@ -570,6 +709,7 @@ struct CardSnapshot: Codable, Equatable {
 @MainActor
 final class FileStore: ObservableObject {
     private let currentSchemaVersion = 3
+    private let sharedCraftRootCardID = UUID(uuidString: "F2EE98E5-93B4-4F58-85A3-3D0C89B1C3E1")!
     @Published var scenarios: [Scenario] = []
     let folderURL: URL
 
@@ -600,6 +740,28 @@ final class FileStore: ObservableObject {
         let scenarioPayloads: [ScenarioSavePayload]
     }
 
+    private struct ScenarioPayloadCacheEntry {
+        let cardRecordsVersion: Int
+        let cardContentVersion: Int
+        let historyVersion: Int
+        let linkedCardsVersion: Int
+        let validCardIDs: Set<UUID>
+        let cardRecordsData: Data
+        let historyRecordsData: Data
+        let linkedCardsData: Data
+        let cardContentsByID: [UUID: String]
+    }
+
+    private struct SharedCraftTreeNodeSnapshot: Equatable {
+        let id: UUID
+        let content: String
+        let createdAt: Date
+        let colorHex: String?
+        let cloneGroupID: UUID?
+        let isAICandidate: Bool
+        let children: [SharedCraftTreeNodeSnapshot]
+    }
+
     private let concurrentIOQueue = DispatchQueue(label: "wa.filestore.io.concurrent", qos: .utility, attributes: .concurrent)
     private let saveQueue = DispatchQueue(label: "wa.filestore.save.queue", qos: .utility)
     private let saveQueueKey = DispatchSpecificKey<Void>()
@@ -615,6 +777,7 @@ final class FileStore: ObservableObject {
     private nonisolated(unsafe) var lastSavedLinkedCardsData: [UUID: Data] = [:]
     private nonisolated(unsafe) var lastSavedAIThreadsData: [UUID: Data] = [:]
     private nonisolated(unsafe) var lastSavedAIEmbeddingIndexData: [UUID: Data] = [:]
+    private var scenarioPayloadCacheByID: [UUID: ScenarioPayloadCacheEntry] = [:]
 
     init(folderURL: URL) {
         self.folderURL = folderURL
@@ -639,6 +802,252 @@ final class FileStore: ObservableObject {
             return lhs.timestamp > rhs.timestamp
         }
         return lhs.id.uuidString < rhs.id.uuidString
+    }
+
+    private func orderedCards(_ cards: [SceneCard]) -> [SceneCard] {
+        cards.sorted {
+            if $0.orderIndex != $1.orderIndex {
+                return $0.orderIndex < $1.orderIndex
+            }
+            return $0.createdAt < $1.createdAt
+        }
+    }
+
+    private func primaryRootCard(in scenario: Scenario) -> SceneCard? {
+        orderedCards(scenario.rootCards).first
+    }
+
+    private func directChildren(of parent: SceneCard, in scenario: Scenario) -> [SceneCard] {
+        orderedCards(scenario.children(for: parent.id))
+    }
+
+    private func craftRootCards(in scenario: Scenario) -> [SceneCard] {
+        guard let root = primaryRootCard(in: scenario) else { return [] }
+        return directChildren(of: root, in: scenario).filter { $0.category == ScenarioCardCategory.craft }
+    }
+
+    private func subtreeIDs(from card: SceneCard, in scenario: Scenario) -> Set<UUID> {
+        var result: Set<UUID> = [card.id]
+        for child in scenario.children(for: card.id) {
+            result.formUnion(subtreeIDs(from: child, in: scenario))
+        }
+        return result
+    }
+
+    private func defaultSharedCraftSnapshot() -> SharedCraftTreeNodeSnapshot {
+        SharedCraftTreeNodeSnapshot(
+            id: sharedCraftRootCardID,
+            content: ScenarioCardCategory.craft,
+            createdAt: .distantPast,
+            colorHex: nil,
+            cloneGroupID: nil,
+            isAICandidate: false,
+            children: []
+        )
+    }
+
+    private func sharedCraftSnapshot(from card: SceneCard, in scenario: Scenario) -> SharedCraftTreeNodeSnapshot {
+        let children = directChildren(of: card, in: scenario).map { child in
+            sharedCraftSnapshot(from: child, in: scenario)
+        }
+        return SharedCraftTreeNodeSnapshot(
+            id: card.id,
+            content: card.parent?.parent == nil ? ScenarioCardCategory.craft : card.content,
+            createdAt: card.createdAt,
+            colorHex: card.colorHex,
+            cloneGroupID: card.cloneGroupID,
+            isAICandidate: card.isAICandidate,
+            children: children
+        )
+    }
+
+    private func combinedSharedCraftSnapshot(in scenario: Scenario) -> SharedCraftTreeNodeSnapshot? {
+        let craftRoots = craftRootCards(in: scenario)
+        guard let primaryRoot = craftRoots.first else { return nil }
+
+        let mergedChildren = craftRoots.flatMap { craftRoot in
+            directChildren(of: craftRoot, in: scenario).map { child in
+                sharedCraftSnapshot(from: child, in: scenario)
+            }
+        }
+
+        return SharedCraftTreeNodeSnapshot(
+            id: primaryRoot.id,
+            content: ScenarioCardCategory.craft,
+            createdAt: primaryRoot.createdAt,
+            colorHex: primaryRoot.colorHex,
+            cloneGroupID: primaryRoot.cloneGroupID,
+            isAICandidate: primaryRoot.isAICandidate,
+            children: mergedChildren
+        )
+    }
+
+    private func sharedCraftNodeCount(_ snapshot: SharedCraftTreeNodeSnapshot) -> Int {
+        1 + snapshot.children.reduce(0) { partialResult, child in
+            partialResult + sharedCraftNodeCount(child)
+        }
+    }
+
+    private func bestExistingSharedCraftSourceScenario() -> Scenario? {
+        scenarios
+            .compactMap { scenario -> (scenario: Scenario, snapshot: SharedCraftTreeNodeSnapshot)? in
+                guard let snapshot = combinedSharedCraftSnapshot(in: scenario) else { return nil }
+                return (scenario, snapshot)
+            }
+            .max { lhs, rhs in
+                let lhsNodeCount = sharedCraftNodeCount(lhs.snapshot)
+                let rhsNodeCount = sharedCraftNodeCount(rhs.snapshot)
+                if lhsNodeCount != rhsNodeCount {
+                    return lhsNodeCount < rhsNodeCount
+                }
+                if lhs.scenario.timestamp != rhs.scenario.timestamp {
+                    return lhs.scenario.timestamp < rhs.scenario.timestamp
+                }
+                return lhs.scenario.id.uuidString < rhs.scenario.id.uuidString
+            }?
+            .scenario
+    }
+
+    private func currentSharedCraftSnapshot(from sourceScenario: Scenario? = nil) -> SharedCraftTreeNodeSnapshot {
+        if let sourceScenario,
+           let snapshot = combinedSharedCraftSnapshot(in: sourceScenario) {
+            return snapshot
+        }
+        if let source = bestExistingSharedCraftSourceScenario(),
+           let snapshot = combinedSharedCraftSnapshot(in: source) {
+            return snapshot
+        }
+        return defaultSharedCraftSnapshot()
+    }
+
+    private func latestDirtySharedCraftSourceScenario() -> Scenario? {
+        scenarios
+            .filter(\.sharedCraftTreeDirty)
+            .max {
+                if $0.timestamp != $1.timestamp {
+                    return $0.timestamp < $1.timestamp
+                }
+                return $0.id.uuidString < $1.id.uuidString
+            }
+    }
+
+    private func hasMissingSharedCraftRoot() -> Bool {
+        scenarios.contains { craftRootCards(in: $0).isEmpty }
+    }
+
+    private func existingSharedCraftSnapshot(in scenario: Scenario) -> SharedCraftTreeNodeSnapshot? {
+        combinedSharedCraftSnapshot(in: scenario)
+    }
+
+    private func instantiateSharedCraftSnapshot(
+        _ snapshot: SharedCraftTreeNodeSnapshot,
+        parent: SceneCard,
+        scenario: Scenario,
+        orderIndex: Int
+    ) -> [SceneCard] {
+        let card = SceneCard(
+            id: snapshot.id,
+            content: parent.parent == nil ? ScenarioCardCategory.craft : snapshot.content,
+            orderIndex: orderIndex,
+            createdAt: snapshot.createdAt,
+            parent: parent,
+            scenario: scenario,
+            category: ScenarioCardCategory.craft,
+            isFloating: false,
+            isArchived: false,
+            lastSelectedChildID: nil,
+            colorHex: snapshot.colorHex,
+            cloneGroupID: snapshot.cloneGroupID,
+            isAICandidate: snapshot.isAICandidate
+        )
+
+        var cards: [SceneCard] = [card]
+        for (childIndex, childSnapshot) in snapshot.children.enumerated() {
+            cards.append(
+                contentsOf: instantiateSharedCraftSnapshot(
+                    childSnapshot,
+                    parent: card,
+                    scenario: scenario,
+                    orderIndex: childIndex
+                )
+            )
+        }
+        return cards
+    }
+
+    private func applySharedCraftSnapshot(
+        _ snapshot: SharedCraftTreeNodeSnapshot,
+        to scenario: Scenario,
+        preserveTimestamp: Bool
+    ) {
+        guard let titleRoot = primaryRootCard(in: scenario) else { return }
+        if existingSharedCraftSnapshot(in: scenario) == snapshot {
+            return
+        }
+
+        let savedTimestamp = scenario.timestamp
+        let savedChangeCount = scenario.changeCountSinceLastSnapshot
+        let craftIDsToRemove: Set<UUID> = {
+            let roots = craftRootCards(in: scenario)
+            guard !roots.isEmpty else { return [] }
+            var ids: Set<UUID> = []
+            for craftRoot in roots {
+                ids.formUnion(subtreeIDs(from: craftRoot, in: scenario))
+            }
+            return ids
+        }()
+
+        scenario.performWithoutTimestampTracking {
+            if !craftIDsToRemove.isEmpty {
+                scenario.cards.removeAll { craftIDsToRemove.contains($0.id) }
+            }
+
+            let nonCraftChildren = directChildren(of: titleRoot, in: scenario)
+                .filter { $0.category != ScenarioCardCategory.craft }
+            for (index, child) in nonCraftChildren.enumerated() {
+                child.orderIndex = index
+            }
+
+            let insertedCards = instantiateSharedCraftSnapshot(
+                snapshot,
+                parent: titleRoot,
+                scenario: scenario,
+                orderIndex: nonCraftChildren.count
+            )
+            scenario.cards.append(contentsOf: insertedCards)
+
+            if let lastSelectedChildID = titleRoot.lastSelectedChildID,
+               craftIDsToRemove.contains(lastSelectedChildID) {
+                titleRoot.lastSelectedChildID = insertedCards.first?.id
+            }
+
+            scenario.bumpCardsVersion()
+        }
+
+        if preserveTimestamp {
+            scenario.timestamp = savedTimestamp
+            scenario.changeCountSinceLastSnapshot = savedChangeCount
+        }
+    }
+
+    private func synchronizeSharedCraftTrees(
+        preserveExistingTimestamps: Bool,
+        force: Bool = false
+    ) {
+        let sourceScenario = force ? nil : latestDirtySharedCraftSourceScenario()
+        guard force || sourceScenario != nil || hasMissingSharedCraftRoot() else {
+            return
+        }
+
+        let snapshot = currentSharedCraftSnapshot(from: sourceScenario)
+        for scenario in scenarios {
+            applySharedCraftSnapshot(
+                snapshot,
+                to: scenario,
+                preserveTimestamp: preserveExistingTimestamps
+            )
+            scenario.clearSharedCraftDirty()
+        }
     }
 
     private func resortScenariosInPlace() {
@@ -772,13 +1181,14 @@ final class FileStore: ObservableObject {
             }
 
             scenarios = scenarioMap.values.sorted(by: scenarioSortComparator)
-            for scenario in scenarios {
-                scenario.bumpCardsVersion()
-            }
 
             if scenarios.isEmpty {
                 createInitialScenario()
             } else {
+                synchronizeSharedCraftTrees(preserveExistingTimestamps: true, force: true)
+                for scenario in scenarios {
+                    scenario.bumpCardsVersion()
+                }
                 primeSavedCachesFromCurrentState()
             }
     }
@@ -787,6 +1197,7 @@ final class FileStore: ObservableObject {
         for scenario in scenarios {
             scenario.flushPendingModifiedTimestamp()
         }
+        synchronizeSharedCraftTrees(preserveExistingTimestamps: true)
         resortScenariosInPlace()
         requestSave(immediate: immediate)
     }
@@ -827,6 +1238,10 @@ final class FileStore: ObservableObject {
             encoder.outputFormatting = [.sortedKeys]
             encoder.dateEncodingStrategy = .iso8601
 
+            for scenario in scenarios {
+                scenario.pruneLinkedCards(validCardIDs: Set(scenario.cards.map(\.id)))
+            }
+
             let scenarioRecords = scenarios.map { scenario in
                 let folderName = ensureScenarioFolder(for: scenario.id)
                 return ScenarioRecord(
@@ -843,47 +1258,90 @@ final class FileStore: ObservableObject {
 
             var scenarioPayloads: [ScenarioSavePayload] = []
             scenarioPayloads.reserveCapacity(scenarios.count)
+            var nextScenarioPayloadCacheByID: [UUID: ScenarioPayloadCacheEntry] = [:]
+            nextScenarioPayloadCacheByID.reserveCapacity(scenarios.count)
 
             for scenario in scenarios {
                 let folderName = ensureScenarioFolder(for: scenario.id)
-                let cardRecords = scenario.cards.map { card in
-                    CardRecord(
-                        id: card.id,
-                        scenarioID: scenario.id,
-                        parentID: card.parent?.id,
-                        orderIndex: card.orderIndex,
-                        createdAt: card.createdAt,
-                        category: card.category,
-                        isFloating: card.isFloating,
-                        isArchived: card.isArchived,
-                        lastSelectedChildID: card.lastSelectedChildID,
-                        schemaVersion: currentSchemaVersion,
-                        colorHex: card.colorHex,
-                        cloneGroupID: card.cloneGroupID
-                    )
-                }
-                let historyRecords = scenario.snapshots.map { snap in
-                    HistorySnapshotRecord(
-                        id: snap.id,
-                        timestamp: snap.timestamp,
-                        name: snap.name,
-                        scenarioID: scenario.id,
-                        cardSnapshots: snap.cardSnapshots,
-                        isDelta: snap.isDelta,
-                        deletedCardIDs: snap.deletedCardIDs,
-                        isPromoted: snap.isPromoted,
-                        promotionReason: snap.promotionReason,
-                        noteCardID: snap.noteCardID,
-                        schemaVersion: currentSchemaVersion
-                    )
-                }
                 let validCardIDs = Set(scenario.cards.map(\.id))
-                scenario.pruneLinkedCards(validCardIDs: validCardIDs)
-                let linkedCardRecords = scenario.linkedCardRecords()
-                let cardRecordsData = try encoder.encode(cardRecords)
-                let historyRecordsData = try encoder.encode(historyRecords)
-                let linkedCardsData = try encoder.encode(linkedCardRecords)
-                let cardContentsByID = Dictionary(uniqueKeysWithValues: scenario.cards.map { ($0.id, $0.content) })
+                let cachedPayload = scenarioPayloadCacheByID[scenario.id]
+
+                let cardRecordsData: Data = try {
+                    guard let cachedPayload,
+                          cachedPayload.cardRecordsVersion == scenario.cardRecordsSaveVersion,
+                          cachedPayload.validCardIDs == validCardIDs else {
+                        let cardRecords = scenario.cards.map { card in
+                            CardRecord(
+                                id: card.id,
+                                scenarioID: scenario.id,
+                                parentID: card.parent?.id,
+                                orderIndex: card.orderIndex,
+                                createdAt: card.createdAt,
+                                category: card.category,
+                                isFloating: card.isFloating,
+                                isArchived: card.isArchived,
+                                lastSelectedChildID: card.lastSelectedChildID,
+                                schemaVersion: currentSchemaVersion,
+                                colorHex: card.colorHex,
+                                cloneGroupID: card.cloneGroupID
+                            )
+                        }
+                        return try encoder.encode(cardRecords)
+                    }
+                    return cachedPayload.cardRecordsData
+                }()
+
+                let historyRecordsData: Data = try {
+                    guard let cachedPayload,
+                          cachedPayload.historyVersion == scenario.historySaveVersion else {
+                        let historyRecords = scenario.snapshots.map { snap in
+                            HistorySnapshotRecord(
+                                id: snap.id,
+                                timestamp: snap.timestamp,
+                                name: snap.name,
+                                scenarioID: scenario.id,
+                                cardSnapshots: snap.cardSnapshots,
+                                isDelta: snap.isDelta,
+                                deletedCardIDs: snap.deletedCardIDs,
+                                isPromoted: snap.isPromoted,
+                                promotionReason: snap.promotionReason,
+                                noteCardID: snap.noteCardID,
+                                schemaVersion: currentSchemaVersion
+                            )
+                        }
+                        return try encoder.encode(historyRecords)
+                    }
+                    return cachedPayload.historyRecordsData
+                }()
+
+                let linkedCardsData: Data = try {
+                    guard let cachedPayload,
+                          cachedPayload.linkedCardsVersion == scenario.linkedCardsSaveVersion else {
+                        return try encoder.encode(scenario.linkedCardRecords())
+                    }
+                    return cachedPayload.linkedCardsData
+                }()
+
+                let cardContentsByID: [UUID: String] = {
+                    guard let cachedPayload,
+                          cachedPayload.cardContentVersion == scenario.cardContentSaveVersion,
+                          cachedPayload.validCardIDs == validCardIDs else {
+                        return Dictionary(uniqueKeysWithValues: scenario.cards.map { ($0.id, $0.content) })
+                    }
+                    return cachedPayload.cardContentsByID
+                }()
+
+                nextScenarioPayloadCacheByID[scenario.id] = ScenarioPayloadCacheEntry(
+                    cardRecordsVersion: scenario.cardRecordsSaveVersion,
+                    cardContentVersion: scenario.cardContentSaveVersion,
+                    historyVersion: scenario.historySaveVersion,
+                    linkedCardsVersion: scenario.linkedCardsSaveVersion,
+                    validCardIDs: validCardIDs,
+                    cardRecordsData: cardRecordsData,
+                    historyRecordsData: historyRecordsData,
+                    linkedCardsData: linkedCardsData,
+                    cardContentsByID: cardContentsByID
+                )
 
                 scenarioPayloads.append(
                     ScenarioSavePayload(
@@ -897,6 +1355,8 @@ final class FileStore: ObservableObject {
                     )
                 )
             }
+
+            scenarioPayloadCacheByID = nextScenarioPayloadCacheByID
 
             return SavePayload(
                 scenarioRecordsData: scenarioRecordsData,
@@ -1059,6 +1519,7 @@ final class FileStore: ObservableObject {
             let noteCard = SceneCard(content: ScenarioCardCategory.note, orderIndex: 1, parent: rootCard, scenario: scenario, category: ScenarioCardCategory.note)
             scenario.cards = [rootCard, plotCard, noteCard]
         }
+        applySharedCraftSnapshot(currentSharedCraftSnapshot(), to: scenario, preserveTimestamp: false)
         scenario.snapshots = []
         scenario.changeCountSinceLastSnapshot = 0
         scenario.bumpCardsVersion()
@@ -1113,6 +1574,7 @@ final class FileStore: ObservableObject {
         let plotCard = SceneCard(content: ScenarioCardCategory.plot, orderIndex: 0, parent: rootCard, scenario: scenario, category: ScenarioCardCategory.plot)
         let noteCard = SceneCard(content: ScenarioCardCategory.note, orderIndex: 1, parent: rootCard, scenario: scenario, category: ScenarioCardCategory.note)
         scenario.cards = [rootCard, plotCard, noteCard]
+        applySharedCraftSnapshot(defaultSharedCraftSnapshot(), to: scenario, preserveTimestamp: false)
         scenario.bumpCardsVersion()
         scenarios = [scenario]
         saveAll(immediate: true)

@@ -26,6 +26,20 @@ struct ScenarioWriterView: View {
         var syncWorkItem: DispatchWorkItem? = nil
     }
 
+    struct FocusModeSearchMatch: Equatable {
+        let cardID: UUID
+        let range: NSRange
+    }
+
+    struct MainColumnFocusRequest: Equatable {
+        let targetID: UUID
+        let prefersTopAnchor: Bool
+        let cardsCount: Int
+        let firstCardID: UUID?
+        let lastCardID: UUID?
+        let viewportHeightBucket: Int
+    }
+
     @EnvironmentObject var store: FileStore
     @EnvironmentObject var referenceCardStore: ReferenceCardStore
     @ObservedObject var scenario: Scenario
@@ -77,6 +91,8 @@ struct ScenarioWriterView: View {
     @State var activeAncestorIDs: Set<UUID> = []
     @State var activeDescendantIDs: Set<UUID> = []
     @State var activeSiblingIDs: Set<UUID> = []
+    @State var activeRelationSourceCardID: UUID? = nil
+    @State var activeRelationSourceCardsVersion: Int = -1
     @State var lastActiveCardID: UUID? = nil
     @State var selectedCardIDs: Set<UUID> = []
     @State var suppressAutoScrollOnce: Bool = false
@@ -116,6 +132,7 @@ struct ScenarioWriterView: View {
     @FocusState var isSearchFocused: Bool
     @FocusState var isNamedSnapshotSearchFocused: Bool
     @FocusState var focusModeEditorCardID: UUID?
+    @FocusState var isFocusModeSearchFieldFocused: Bool
 
     // --- 히스토리 관련 상태 ---
     @State var historyIndex: Double = 0
@@ -142,6 +159,13 @@ struct ScenarioWriterView: View {
     @State var editingStartState: ScenarioState? = nil
     @State var pendingNewCardPrevState: ScenarioState? = nil
     @State var showFocusMode: Bool = false
+    @State var showFocusModeSearchPopup: Bool = false
+    @State var focusModeSearchText: String = ""
+    @State var focusModeSearchMatches: [FocusModeSearchMatch] = []
+    @State var focusModeSearchSelectedMatchIndex: Int = -1
+    @State var focusModeSearchHighlightRequestID: Int = 0
+    @State var focusModeSearchPersistentHighlight: FocusModeSearchMatch? = nil
+    @State var focusModeSearchHighlightTextViewBox = WeakTextViewBox()
     @State var focusModeNextCardScrollAnchor: UnitPoint? = nil
     @State var focusModeNextCardScrollAnimated: Bool = true
     @State var suppressFocusModeScrollOnce: Bool = false
@@ -158,6 +182,7 @@ struct ScenarioWriterView: View {
     @State var focusDeleteSelectionLockUntil: Date = .distantPast
     @State var pendingActiveCardID: UUID? = nil
     @State var pendingMainCanvasRestoreCardID: UUID? = nil
+    @State var mainColumnLastFocusRequestByKey: [String: MainColumnFocusRequest] = [:]
     @State var mainCaretLocationByCardID: [UUID: Int] = [:]
     @State var mainCaretRestoreRequestID: Int = 0
     @State var mainLineSpacingAppliedCardID: UUID? = nil
@@ -571,6 +596,7 @@ struct ScenarioWriterView: View {
     }
 
     func handleActiveCardIDChange(_ newID: UUID?) {
+        mainColumnLastFocusRequestByKey = [:]
         syncSplitPaneActiveCardState(newID)
         if linkedCardsFilterEnabled, let newID, findCard(by: newID) != nil {
             linkedCardAnchorID = newID
@@ -580,6 +606,7 @@ struct ScenarioWriterView: View {
     }
 
     func handleScenarioCardsVersionChange() {
+        mainColumnLastFocusRequestByKey = [:]
         if isInactiveSplitPane {
             scheduleInactivePaneSnapshotRefresh()
             return
@@ -613,6 +640,7 @@ struct ScenarioWriterView: View {
     }
 
     func handleShowFocusModeChange(_ isOn: Bool) {
+        mainColumnLastFocusRequestByKey = [:]
         focusModeWindowBackgroundActive = isOn
         FocusMonitorRecorder.shared.record("focus.toggle", reason: "showFocusMode-onChange") {
             [
@@ -639,6 +667,9 @@ struct ScenarioWriterView: View {
             DispatchQueue.main.async {
                 guard showFocusMode else { return }
                 guard editingCardID == editingID else { return }
+                if focusModeEditorCardID == editingID {
+                    return
+                }
                 if let card = findCard(by: editingID) {
                     beginFocusModeEditing(card, cursorToEnd: false)
                 } else {
@@ -647,6 +678,8 @@ struct ScenarioWriterView: View {
             }
         } else {
             finalizeFocusTypingCoalescing(reason: "focus-exit")
+            clearPersistentFocusModeSearchHighlight()
+            closeFocusModeSearchPopup()
             stopFocusModeKeyMonitor()
             stopFocusModeScrollMonitor()
             stopFocusModeCaretMonitor()
@@ -1436,7 +1469,7 @@ struct ScenarioWriterView: View {
         guard let category = activeCategory else {
             return cards
         }
-        return cards.filter { $0.category == category }
+        return scenario.filteredCards(atLevel: levelIndex, category: category)
     }
 
     func handleMainCanvasInnerTap() {

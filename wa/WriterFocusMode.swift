@@ -50,6 +50,18 @@ extension ScenarioWriterView {
                 .onChange(of: focusModeEntryScrollTick) { _, _ in
                     handleFocusModeEntryScrollTickChange(proxy: proxy)
                 }
+                .onChange(of: scenario.cardsVersion) { _, _ in
+                    refreshFocusModeSearchResultsIfNeeded()
+                }
+            }
+        }
+        .overlay(alignment: .topTrailing) {
+            if showFocusModeSearchPopup {
+                focusModeSearchPopup
+                    .padding(.top, 18)
+                    .padding(.trailing, 22)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .zIndex(20)
             }
         }
         .coordinateSpace(name: "focus-mode-canvas")
@@ -57,6 +69,104 @@ extension ScenarioWriterView {
         .onChange(of: size.width) { oldWidth, newWidth in
             handleFocusModeCanvasWidthChange(oldWidth: oldWidth, newWidth: newWidth)
         }
+    }
+
+    private var focusModeSearchPopupBackgroundColor: Color {
+        appearance == "light"
+            ? Color.white.opacity(0.96)
+            : Color.black.opacity(0.82)
+    }
+
+    private var focusModeSearchPopupBorderColor: Color {
+        appearance == "light"
+            ? Color.black.opacity(0.10)
+            : Color.white.opacity(0.12)
+    }
+
+    private var focusModeSearchStatusText: String {
+        let trimmed = focusModeSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "검색어 입력" }
+        guard !focusModeSearchMatches.isEmpty else { return "결과 없음" }
+        let current = focusModeSearchSelectedMatchIndex >= 0
+            ? min(focusModeSearchSelectedMatchIndex + 1, focusModeSearchMatches.count)
+            : 0
+        return "\(current)/\(focusModeSearchMatches.count)"
+    }
+
+    @ViewBuilder
+    private var focusModeSearchPopup: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(appearance == "light" ? .black.opacity(0.55) : .white.opacity(0.78))
+                TextField(
+                    "",
+                    text: $focusModeSearchText,
+                    prompt: Text("포커스 모드 검색")
+                        .foregroundColor(appearance == "light" ? .black.opacity(0.35) : .white.opacity(0.45))
+                )
+                .textFieldStyle(.plain)
+                .font(.system(size: 13, weight: .medium, design: .monospaced))
+                .foregroundStyle(appearance == "light" ? .black : .white)
+                .focused($isFocusModeSearchFieldFocused)
+                .onChange(of: focusModeSearchText) { _, _ in
+                    refreshFocusModeSearchResults()
+                }
+                .onSubmit {
+                    moveFocusModeSearchSelection(step: 1)
+                }
+                Button {
+                    closeFocusModeSearchPopup()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(appearance == "light" ? .black.opacity(0.42) : .white.opacity(0.42))
+                }
+                .buttonStyle(.plain)
+            }
+
+            HStack(spacing: 8) {
+                Text(focusModeSearchStatusText)
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .foregroundStyle(appearance == "light" ? .black.opacity(0.58) : .white.opacity(0.72))
+                Spacer(minLength: 0)
+                Button {
+                    moveFocusModeSearchSelection(step: -1)
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 11, weight: .semibold))
+                        .frame(width: 26, height: 22)
+                }
+                .buttonStyle(.plain)
+                .disabled(focusModeSearchMatches.isEmpty)
+                .opacity(focusModeSearchMatches.isEmpty ? 0.35 : 1.0)
+
+                Button {
+                    moveFocusModeSearchSelection(step: 1)
+                } label: {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .semibold))
+                        .frame(width: 26, height: 22)
+                }
+                .buttonStyle(.plain)
+                .disabled(focusModeSearchMatches.isEmpty)
+                .opacity(focusModeSearchMatches.isEmpty ? 0.35 : 1.0)
+            }
+            .foregroundStyle(appearance == "light" ? .black.opacity(0.82) : .white.opacity(0.86))
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .frame(width: 296)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(focusModeSearchPopupBackgroundColor)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(focusModeSearchPopupBorderColor, lineWidth: 1)
+        )
+        .shadow(color: Color.black.opacity(0.18), radius: 20, x: 0, y: 10)
     }
 
     @ViewBuilder
@@ -83,7 +193,7 @@ extension ScenarioWriterView {
 
     @ViewBuilder
     private func focusModeCardsColumn(cards: [SceneCard], cardWidth: CGFloat) -> some View {
-        VStack(spacing: 0) {
+        LazyVStack(spacing: 0) {
             ForEach(Array(cards.enumerated()), id: \.element.id) { index, card in
                 focusModeCardBlock(card, cardWidth: cardWidth)
                     .id(focusModeCardScrollID(card.id))
@@ -215,6 +325,222 @@ extension ScenarioWriterView {
             focusObservedBodyHeightByCardID.removeAll()
             requestFocusModeOffsetNormalization(includeActive: false, force: true, reason: "canvas-width-change")
         }
+    }
+
+    private func openFocusModeSearchPopup() {
+        guard showFocusMode else { return }
+        if !showFocusModeSearchPopup {
+            withAnimation(quickEaseAnimation) {
+                showFocusModeSearchPopup = true
+            }
+        }
+        refreshFocusModeSearchResults()
+        DispatchQueue.main.async {
+            guard showFocusModeSearchPopup else { return }
+            isFocusModeSearchFieldFocused = true
+        }
+    }
+
+    func closeFocusModeSearchPopup() {
+        focusModeSearchHighlightRequestID += 1
+        withAnimation(quickEaseAnimation) {
+            showFocusModeSearchPopup = false
+        }
+        focusModeSearchText = ""
+        focusModeSearchMatches = []
+        focusModeSearchSelectedMatchIndex = -1
+        isFocusModeSearchFieldFocused = false
+    }
+
+    private var focusModeSearchHighlightColor: NSColor {
+        if appearance == "light" {
+            return NSColor.systemYellow.withAlphaComponent(0.38)
+        }
+        return NSColor.systemYellow.withAlphaComponent(0.26)
+    }
+
+    func clearPersistentFocusModeSearchHighlight() {
+        if let match = focusModeSearchPersistentHighlight,
+           let textView = focusModeSearchHighlightTextViewBox.textView,
+           let layoutManager = textView.layoutManager {
+            let textLength = (textView.string as NSString).length
+            let safeLocation = min(max(0, match.range.location), textLength)
+            let safeLength = min(max(0, match.range.length), max(0, textLength - safeLocation))
+            if safeLength > 0 {
+                let safeRange = NSRange(location: safeLocation, length: safeLength)
+                layoutManager.removeTemporaryAttribute(.backgroundColor, forCharacterRange: safeRange)
+            }
+        }
+        focusModeSearchPersistentHighlight = nil
+        focusModeSearchHighlightTextViewBox.textView = nil
+    }
+
+    private func refreshFocusModeSearchResults() {
+        let trimmedQuery = focusModeSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedQuery.isEmpty else {
+            focusModeSearchMatches = []
+            focusModeSearchSelectedMatchIndex = -1
+            return
+        }
+
+        let previousMatch = focusModeSearchMatches.indices.contains(focusModeSearchSelectedMatchIndex)
+            ? focusModeSearchMatches[focusModeSearchSelectedMatchIndex]
+            : nil
+
+        var matches: [FocusModeSearchMatch] = []
+        for card in focusedColumnCards() {
+            let text = card.content as NSString
+            var searchRange = NSRange(location: 0, length: text.length)
+            while searchRange.length > 0 {
+                let found = text.range(
+                    of: trimmedQuery,
+                    options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive],
+                    range: searchRange
+                )
+                guard found.location != NSNotFound, found.length > 0 else { break }
+                matches.append(FocusModeSearchMatch(cardID: card.id, range: found))
+                let nextLocation = found.location + found.length
+                guard nextLocation < text.length else { break }
+                searchRange = NSRange(location: nextLocation, length: text.length - nextLocation)
+            }
+        }
+
+        focusModeSearchMatches = matches
+        if let previousMatch,
+           let preservedIndex = matches.firstIndex(of: previousMatch) {
+            focusModeSearchSelectedMatchIndex = preservedIndex
+        } else {
+            focusModeSearchSelectedMatchIndex = -1
+        }
+    }
+
+    private func refreshFocusModeSearchResultsIfNeeded() {
+        guard showFocusModeSearchPopup || focusModeSearchPersistentHighlight != nil else { return }
+        refreshFocusModeSearchResults()
+    }
+
+    private func moveFocusModeSearchSelection(step: Int) {
+        refreshFocusModeSearchResults()
+        guard !focusModeSearchMatches.isEmpty else { return }
+
+        let count = focusModeSearchMatches.count
+        let nextIndex: Int
+        if focusModeSearchSelectedMatchIndex < 0 || focusModeSearchSelectedMatchIndex >= count {
+            nextIndex = step >= 0 ? 0 : (count - 1)
+        } else {
+            nextIndex = (focusModeSearchSelectedMatchIndex + step + count) % count
+        }
+
+        focusModeSearchSelectedMatchIndex = nextIndex
+        revealFocusModeSearchMatch(focusModeSearchMatches[nextIndex])
+    }
+
+    private func revealFocusModeSearchMatch(_ match: FocusModeSearchMatch) {
+        guard let card = findCard(by: match.cardID) else { return }
+        beginFocusModeEditing(
+            card,
+            cursorToEnd: false,
+            cardScrollAnchor: .center,
+            animatedScroll: true,
+            preserveViewportOnSwitch: false,
+            placeCursorAtStartWhenNoHint: false,
+            allowPendingEntryCaretHint: false,
+            explicitCaretLocation: match.range.location
+        )
+        if isFocusModeSearchFieldFocused {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+                guard showFocusModeSearchPopup else { return }
+                isFocusModeSearchFieldFocused = true
+            }
+        }
+        scheduleFocusModeSearchHighlight(match)
+    }
+
+    private func scheduleFocusModeSearchHighlight(_ match: FocusModeSearchMatch) {
+        focusModeSearchHighlightRequestID += 1
+        let requestID = focusModeSearchHighlightRequestID
+        let delays: [Double] = [0.0, 0.08, 0.18]
+        for delay in delays {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                applyFocusModeSearchHighlightIfPossible(match, requestID: requestID)
+            }
+        }
+    }
+
+    private func applyFocusModeSearchHighlightIfPossible(
+        _ match: FocusModeSearchMatch,
+        requestID: Int
+    ) {
+        guard showFocusMode else { return }
+        guard requestID == focusModeSearchHighlightRequestID else { return }
+        guard let card = findCard(by: match.cardID) else { return }
+        guard let textView = resolveFocusModeTextView(for: card) else { return }
+
+        let textLength = (textView.string as NSString).length
+        let safeLocation = min(max(0, match.range.location), textLength)
+        let safeLength = min(max(0, match.range.length), max(0, textLength - safeLocation))
+        guard safeLength > 0 else { return }
+
+        let safeRange = NSRange(location: safeLocation, length: safeLength)
+        clearPersistentFocusModeSearchHighlight()
+        if let layoutManager = textView.layoutManager {
+            layoutManager.addTemporaryAttributes(
+                [.backgroundColor: focusModeSearchHighlightColor],
+                forCharacterRange: safeRange
+            )
+            focusModeSearchPersistentHighlight = FocusModeSearchMatch(
+                cardID: match.cardID,
+                range: safeRange
+            )
+            focusModeSearchHighlightTextViewBox.textView = textView
+        }
+        ensureFocusModeSearchRangeVisible(textView: textView, range: safeRange)
+        textView.showFindIndicator(for: safeRange)
+    }
+
+    private func resolveFocusModeTextView(for card: SceneCard) -> NSTextView? {
+        if let responder = NSApp.keyWindow?.firstResponder as? NSTextView,
+           !isReferenceTextView(responder) {
+            let responderID = ObjectIdentifier(responder)
+            let trackedCardID = focusResponderCardByObjectID[responderID]
+            let activeEditorCardID = focusModeEditorCardID ?? editingCardID ?? activeCardID
+            if trackedCardID == card.id || activeEditorCardID == card.id || responder.string == card.content {
+                if activeEditorCardID == card.id {
+                    focusResponderCardByObjectID[responderID] = card.id
+                }
+                return responder
+            }
+        }
+
+        guard let root = NSApp.keyWindow?.contentView else { return nil }
+        let textViews = sortedFocusModeTextViewsByVerticalPosition(
+            collectEditableFocusModeTextViews(root: root)
+        )
+
+        if let mapped = textViews.first(where: { textView in
+            focusResponderCardByObjectID[ObjectIdentifier(textView)] == card.id
+        }) {
+            return mapped
+        }
+
+        let focusedCards = focusedColumnCards()
+        if !focusedCards.isEmpty && focusedCards.count == textViews.count {
+            let pairCount = min(focusedCards.count, textViews.count)
+            for index in 0 ..< pairCount {
+                focusResponderCardByObjectID[ObjectIdentifier(textViews[index])] = focusedCards[index].id
+            }
+            if let remapped = textViews.first(where: { textView in
+                focusResponderCardByObjectID[ObjectIdentifier(textView)] == card.id
+            }) {
+                return remapped
+            }
+        }
+
+        let contentMatches = textViews.filter { $0.string == card.content }
+        if contentMatches.count == 1 {
+            return contentMatches[0]
+        }
+        return nil
     }
 
     @ViewBuilder
@@ -359,6 +685,8 @@ extension ScenarioWriterView {
 
         let flags = event.modifierFlags
         if handleFocusEscapeShortcut(event, flags: flags) { return nil }
+        if handleFocusSearchPopupReturnShortcut(event, flags: flags) { return nil }
+        if handleFocusSearchShortcut(event, flags: flags) { return nil }
         if handleFocusFountainClipboardPasteShortcut(event, flags: flags) { return nil }
         if handleFocusCardEditingShortcuts(event, flags: flags) { return nil }
         if shouldPassThroughAfterFocusReturnBoundaryUpdate(event, flags: flags) { return event }
@@ -372,8 +700,28 @@ extension ScenarioWriterView {
         guard isPlainFocusEscape(event, flags: flags) else { return false }
         DispatchQueue.main.async {
             guard showFocusMode else { return }
-            guard editingCardID != nil else { return }
-            finishEditing()
+            let hadEditingState = editingCardID != nil || focusModeEditorCardID != nil
+            guard hadEditingState else { return }
+            focusModeEditorCardID = nil
+            if editingCardID != nil {
+                finishEditing()
+            }
+        }
+        return true
+    }
+
+    private func handleFocusSearchPopupReturnShortcut(
+        _ event: NSEvent,
+        flags: NSEvent.ModifierFlags
+    ) -> Bool {
+        guard showFocusModeSearchPopup else { return false }
+        guard flags.intersection(.deviceIndependentFlagsMask).isEmpty else { return false }
+        guard event.keyCode == 36 || event.keyCode == 76 else { return false }
+        if let textView = NSApp.keyWindow?.firstResponder as? NSTextView, textView.hasMarkedText() {
+            return false
+        }
+        DispatchQueue.main.async {
+            moveFocusModeSearchSelection(step: 1)
         }
         return true
     }
@@ -1011,7 +1359,14 @@ extension ScenarioWriterView {
         activeFocusedCardID: UUID?,
         focusedCardIDs: Set<UUID>
     ) {
-        if !focusedCards.isEmpty && !textViews.isEmpty {
+        if let activeTextView,
+           let activeFocusedCardID,
+           focusedCardIDs.contains(activeFocusedCardID) {
+            let activeIdentity = ObjectIdentifier(activeTextView)
+            focusResponderCardByObjectID[activeIdentity] = activeFocusedCardID
+        }
+
+        if !focusedCards.isEmpty && focusedCards.count == textViews.count {
             let pairCount = min(textViews.count, focusedCards.count)
             for i in 0 ..< pairCount {
                 let identity = ObjectIdentifier(textViews[i])
@@ -1157,7 +1512,7 @@ extension ScenarioWriterView {
     }
 
     func scheduleFocusModeOffsetNormalizationBurst(includeActive: Bool) {
-        let delays: [Double] = [0.0, 0.05, 0.16]
+        let delays: [Double] = [0.0, 0.14]
         for delay in delays {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
                 requestFocusModeOffsetNormalization(includeActive: includeActive, force: true, reason: "burst-delay-\(String(format: "%.2f", delay))")
@@ -1548,11 +1903,12 @@ extension ScenarioWriterView {
     func ensureFocusModeCaretVisible(typewriter: Bool = false) {
         guard let context = resolveFocusModeCaretEnsureContext() else { return }
 
-        let selectionRects = resolveFocusModeCaretSelectionRects(
+        let selectionRects = resolveFocusModeSelectionRects(
             textView: context.textView,
             layoutManager: context.layoutManager,
             textContainer: context.textContainer,
-            outerDocumentView: context.outerDocumentView
+            outerDocumentView: context.outerDocumentView,
+            selection: context.textView.selectedRange()
         )
         let viewport = resolveFocusModeCaretViewportContext(outerScrollView: context.outerScrollView)
         let targetY = resolveFocusModeCaretTargetY(
@@ -1598,6 +1954,39 @@ extension ScenarioWriterView {
         )
     }
 
+    private func ensureFocusModeSearchRangeVisible(textView: NSTextView, range: NSRange) {
+        guard showFocusMode else { return }
+        guard let outerScrollView = outerScrollView(containing: textView),
+              let outerDocumentView = outerScrollView.documentView,
+              let layoutManager = textView.layoutManager,
+              let textContainer = textView.textContainer else {
+            return
+        }
+
+        let clampedRange = clampedFocusModeSelection(range, textLength: (textView.string as NSString).length)
+        let selectionRects = resolveFocusModeSelectionRects(
+            textView: textView,
+            layoutManager: layoutManager,
+            textContainer: textContainer,
+            outerDocumentView: outerDocumentView,
+            selection: clampedRange
+        )
+        let viewport = resolveFocusModeCaretViewportContext(outerScrollView: outerScrollView)
+        let targetY = resolveFocusModeCaretTargetY(
+            selectionRects: selectionRects,
+            viewport: viewport,
+            typewriter: false
+        )
+        applyFocusModeCaretScrollPositionIfNeeded(
+            outerScrollView: outerScrollView,
+            visible: viewport.visible,
+            targetY: targetY,
+            minY: viewport.minY,
+            maxY: viewport.maxY,
+            typewriter: false
+        )
+    }
+
     private struct FocusModeCaretSelectionRects {
         let selection: NSRange
         let startRect: CGRect
@@ -1620,10 +2009,26 @@ extension ScenarioWriterView {
         textContainer: NSTextContainer,
         outerDocumentView: NSView
     ) -> FocusModeCaretSelectionRects {
+        resolveFocusModeSelectionRects(
+            textView: textView,
+            layoutManager: layoutManager,
+            textContainer: textContainer,
+            outerDocumentView: outerDocumentView,
+            selection: textView.selectedRange()
+        )
+    }
+
+    private func resolveFocusModeSelectionRects(
+        textView: NSTextView,
+        layoutManager: NSLayoutManager,
+        textContainer: NSTextContainer,
+        outerDocumentView: NSView,
+        selection: NSRange
+    ) -> FocusModeCaretSelectionRects {
         let textLength = (textView.string as NSString).length
-        let selection = textView.selectedRange()
-        let selectionStart = min(selection.location, textLength)
-        let selectionEnd = min(selection.location + selection.length, textLength)
+        let clampedSelection = clampedFocusModeSelection(selection, textLength: textLength)
+        let selectionStart = min(clampedSelection.location, textLength)
+        let selectionEnd = min(clampedSelection.location + clampedSelection.length, textLength)
         let startRect = focusModeCaretRectInDocument(
             at: selectionStart,
             textView: textView,
@@ -1631,7 +2036,7 @@ extension ScenarioWriterView {
             textContainer: textContainer,
             outerDocumentView: outerDocumentView
         )
-        let endRect = (selection.length > 0)
+        let endRect = (clampedSelection.length > 0)
             ? focusModeCaretRectInDocument(
                 at: selectionEnd,
                 textView: textView,
@@ -1641,7 +2046,14 @@ extension ScenarioWriterView {
             )
             : startRect
 
-        return FocusModeCaretSelectionRects(selection: selection, startRect: startRect, endRect: endRect)
+        return FocusModeCaretSelectionRects(selection: clampedSelection, startRect: startRect, endRect: endRect)
+    }
+
+    private func clampedFocusModeSelection(_ selection: NSRange, textLength: Int) -> NSRange {
+        let safeLocation = min(max(0, selection.location), textLength)
+        let maxLength = max(0, textLength - safeLocation)
+        let safeLength = min(max(0, selection.length), maxLength)
+        return NSRange(location: safeLocation, length: safeLength)
     }
 
     private func focusModeCaretRectInDocument(
@@ -1773,15 +2185,14 @@ extension ScenarioWriterView {
         var targetY = defaultTargetY
         let startRect = selectionRects.startRect
         let endRect = selectionRects.endRect
-        let minimalTopRevealPadding: CGFloat = 8
         let focusModeLineHeight = max(1, CGFloat(fontSize * 1.2) + CGFloat(focusModeLineSpacingValue))
-        let collapsedBottomRevealPadding = max(24, ceil(focusModeLineHeight * 3))
-        let collapsedMaxVisibleY = viewport.visible.maxY - collapsedBottomRevealPadding
-        let collapsedMinVisibleY = viewport.visible.minY + minimalTopRevealPadding
+        let collapsedRevealPadding = max(24, ceil(focusModeLineHeight * 3))
+        let collapsedMaxVisibleY = viewport.visible.maxY - collapsedRevealPadding
+        let collapsedMinVisibleY = viewport.visible.minY + collapsedRevealPadding
         if endRect.maxY > collapsedMaxVisibleY {
-            targetY = endRect.maxY - (viewport.visible.height - collapsedBottomRevealPadding)
+            targetY = endRect.maxY - (viewport.visible.height - collapsedRevealPadding)
         } else if startRect.minY < collapsedMinVisibleY {
-            targetY = max(viewport.minY, startRect.minY - minimalTopRevealPadding)
+            targetY = max(viewport.minY, startRect.minY - collapsedRevealPadding)
         }
         return targetY
     }
@@ -2042,8 +2453,7 @@ extension ScenarioWriterView {
         // Cancel any pending burst from previous invocation
         for item in caretEnsureBurstWorkItems { item.cancel() }
         caretEnsureBurstWorkItems.removeAll()
-        // Reduced from 5 to 3 delays — the intermediate ticks are redundant
-        let delays: [Double] = [0.0, 0.10, 0.28]
+        let delays: [Double] = [0.0, 0.22]
         for delay in delays {
             let work = DispatchWorkItem {
                 requestFocusModeCaretEnsure(typewriter: false, delay: 0.0, reason: "ensure-burst")
@@ -2055,6 +2465,7 @@ extension ScenarioWriterView {
 
     func handleFocusModeCardContentChange(cardID: UUID, oldValue: String, newValue: String) {
         guard canHandleFocusModeCardContentChange(cardID: cardID, oldValue: oldValue, newValue: newValue) else { return }
+        clearPersistentFocusModeSearchHighlight()
         markEditingSessionTextMutation()
         guard syncFocusModeContentChangeEditorOffsetIfNeeded() else { return }
 
@@ -2067,6 +2478,7 @@ extension ScenarioWriterView {
         focusTypingLastEditAt = now
         focusLastCommittedContentByCard[cardID] = newValue
         scheduleFocusTypingIdleFinalize()
+        refreshFocusModeSearchResultsIfNeeded()
 
         if shouldFinalizeFocusTypingForReturnBoundary(delta: delta) { return }
         finalizeFocusTypingForStrongBoundaryIfNeeded(newValue: newValue, delta: delta)
@@ -2093,6 +2505,24 @@ extension ScenarioWriterView {
             return true
         }
         return false
+    }
+
+    private func handleFocusSearchShortcut(
+        _ event: NSEvent,
+        flags: NSEvent.ModifierFlags
+    ) -> Bool {
+        guard isCommandOnlyFlags(flags) else { return false }
+        let normalized = (event.charactersIgnoringModifiers ?? "").lowercased()
+        let isFindShortcut = normalized == "f" || normalized == "ㄹ" || event.keyCode == 3
+        guard isFindShortcut else { return false }
+        DispatchQueue.main.async {
+            if showFocusModeSearchPopup {
+                closeFocusModeSearchPopup()
+            } else {
+                openFocusModeSearchPopup()
+            }
+        }
+        return true
     }
 
     private func isFocusModeResponderComposingText() -> Bool {

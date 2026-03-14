@@ -908,7 +908,7 @@ final class ScriptKoreanPDFGenerator {
         let framesetter = CTFramesetterCreateWithAttributedString(attrString as CFAttributedString)
         let path = CGPath(rect: CGRect(x: 0, y: 0, width: width, height: 10000), transform: nil)
         let frame = CTFramesetterCreateFrame(framesetter, CFRange(location: 0, length: 0), path, nil)
-        let lines = CTFrameGetLines(frame) as! [CTLine]
+        let lines = (CTFrameGetLines(frame) as? [CTLine]) ?? []
 
         var currentY = cursorY
         for line in lines {
@@ -947,7 +947,7 @@ final class ScriptKoreanPDFGenerator {
 
         if element.type == .sceneHeading {
             let text = element.text.uppercased()
-            let sceneText = sceneNumber != nil ? "\(sceneNumber!). \(text)" : text
+            let sceneText = sceneNumber.map { "\($0). \(text)" } ?? text
 
             var font = NSFont(name: fontName, size: config.koreanFontSize) ?? NSFont.monospacedSystemFont(ofSize: config.koreanFontSize, weight: .regular)
             if config.koreanIsSceneBold {

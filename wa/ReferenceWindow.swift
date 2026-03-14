@@ -573,11 +573,12 @@ private struct ReferenceCardEditorRow: View {
            let liveMeasured = liveFocusedBodyHeight(for: textView) {
             measured = liveMeasured
         } else {
-            measured = ReferenceCardTextHeightCalculator.measureBodyHeight(
+            measured = sharedMeasuredTextBodyHeight(
                 text: resolvedText,
                 fontSize: fontSize,
                 lineSpacing: lineSpacing,
                 width: measuredEditorWidth,
+                lineFragmentPadding: MainEditorLayoutMetrics.mainEditorLineFragmentPadding,
                 safetyInset: measurementSafetyInset
             )
         }
@@ -595,67 +596,11 @@ private struct ReferenceCardEditorRow: View {
     }
 
     private func liveFocusedBodyHeight(for textView: NSTextView) -> CGFloat? {
-        guard let layoutManager = textView.layoutManager,
-              let textContainer = textView.textContainer else { return nil }
-        let textLength = (textView.string as NSString).length
-        let fullRange = NSRange(location: 0, length: textLength)
-        if textLength > 0 {
-            layoutManager.ensureGlyphs(forCharacterRange: fullRange)
-            layoutManager.ensureLayout(forCharacterRange: fullRange)
-        }
-        layoutManager.ensureLayout(for: textContainer)
-        let usedHeight = layoutManager.usedRect(for: textContainer).height
-        guard usedHeight > 0 else { return nil }
-        let insetHeight = textView.textContainerInset.height * 2
-        return max(1, ceil(usedHeight + insetHeight + measurementSafetyInset))
-    }
-}
-
-private enum ReferenceCardTextHeightCalculator {
-    static func measureBodyHeight(
-        text: String,
-        fontSize: CGFloat,
-        lineSpacing: CGFloat,
-        width: CGFloat,
-        safetyInset: CGFloat
-    ) -> CGFloat {
-        let measuringText: String
-        if text.isEmpty {
-            measuringText = " "
-        } else if text.hasSuffix("\n") {
-            measuringText = text + " "
-        } else {
-            measuringText = text
-        }
-
-        let constrainedWidth = max(1, width)
-        let paragraphStyle = NSMutableParagraphStyle()
-        paragraphStyle.lineSpacing = lineSpacing
-        paragraphStyle.lineBreakMode = .byWordWrapping
-
-        let font = NSFont(name: "SansMonoCJKFinalDraft", size: fontSize)
-            ?? NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
-
-        let storage = NSTextStorage(
-            string: measuringText,
-            attributes: [
-                .font: font,
-                .paragraphStyle: paragraphStyle
-            ]
+        sharedLiveTextViewBodyHeight(
+            textView,
+            safetyInset: measurementSafetyInset,
+            includeTextContainerInset: true
         )
-        let layoutManager = NSLayoutManager()
-        let textContainer = NSTextContainer(size: CGSize(width: constrainedWidth, height: CGFloat.greatestFiniteMagnitude))
-        textContainer.lineFragmentPadding = MainEditorLayoutMetrics.mainEditorLineFragmentPadding
-        textContainer.lineBreakMode = .byWordWrapping
-        textContainer.maximumNumberOfLines = 0
-        textContainer.widthTracksTextView = false
-        textContainer.heightTracksTextView = false
-        layoutManager.addTextContainer(textContainer)
-        storage.addLayoutManager(layoutManager)
-        layoutManager.ensureLayout(for: textContainer)
-
-        let usedHeight = layoutManager.usedRect(for: textContainer).height
-        return max(1, ceil(usedHeight + safetyInset))
     }
 }
 

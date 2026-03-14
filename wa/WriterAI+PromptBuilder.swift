@@ -173,8 +173,11 @@ extension ScenarioWriterView {
         """
     }
 
-    func buildAISummaryPrompt(for card: SceneCard) -> String {
-        let articleText = clampedAIText(card.content, maxLength: 5600, preserveLineBreak: true)
+    func buildAISummaryPrompt(for cards: [SceneCard]) -> String {
+        let sourceText = cards
+            .map(\.content)
+            .joined(separator: "\n\n")
+        let articleText = clampedAIText(sourceText, maxLength: 5600, preserveLineBreak: true)
         return renderEntityDenseSummaryPrompt(articleText: articleText)
     }
 

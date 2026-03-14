@@ -147,11 +147,12 @@ extension ScenarioWriterView {
         let disconnectAnchorID = resolvedLinkedCardsAnchorID()
         let canDisconnectLinkedCard =
             linkedCardsFilterEnabled &&
-            disconnectAnchorID != nil &&
-            scenario.linkedCardEditDate(
-                focusCardID: disconnectAnchorID!,
-                linkedCardID: card.id
-            ) != nil
+            disconnectAnchorID.flatMap { anchorID in
+                scenario.linkedCardEditDate(
+                    focusCardID: anchorID,
+                    linkedCardID: card.id
+                )
+            } != nil
         let clonePeerDestinations = isCloneLinked ? clonePeerMenuDestinations(for: card) : []
         CardItem(
             card: card,
@@ -238,10 +239,11 @@ extension ScenarioWriterView {
 
     @ViewBuilder
     func column(for cards: [SceneCard], level: Int, parent: SceneCard?, screenHeight: CGFloat) -> some View {
+        let childListSignature = scenario.childListSignature(parentID: parent?.id)
         VStack(spacing: 0) {
             ScrollViewReader { proxy in
                 ScrollView(.vertical, showsIndicators: false) {
-                    VStack(spacing: 0) {
+                    LazyVStack(spacing: 0) {
                         // --- 최상단 드롭 영역 (첫 카드가 정확히 0.4 지점에 오도록 높이를 0.4로 고정) ---
                         DropSpacer(target: .columnTop(parent?.id), activeDropTarget: $activeDropTarget, alignment: .bottom) { providers in
                             handleGeneralDrop(providers, target: .columnTop(parent?.id))
@@ -289,21 +291,21 @@ extension ScenarioWriterView {
                     let isImmediateChildColumn = cards.contains { $0.parent?.id == newID }
                     if isDirectPath || isImmediateChildColumn {
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) {
-                            scrollToFocus(in: cards, parent: parent, proxy: proxy, viewportHeight: screenHeight, animated: true)
+                            scrollToFocus(in: cards, level: level, parent: parent, proxy: proxy, viewportHeight: screenHeight, animated: true)
                         }
                     }
                 }
-                .onChange(of: cards.map { $0.id }) { _, _ in
+                .onChange(of: childListSignature) { _, _ in
                     guard !showFocusMode else { return }
                     guard acceptsKeyboardInput else { return }
                     // 부모가 바뀌어 열의 카드 구성이 달라진 경우(자식 열 등장), 애니메이션 없이 즉시 위치를 잡습니다.
-                    scrollToFocus(in: cards, parent: parent, proxy: proxy, viewportHeight: screenHeight, animated: false)
+                    scrollToFocus(in: cards, level: level, parent: parent, proxy: proxy, viewportHeight: screenHeight, animated: false)
                 }
                 .onAppear {
                     guard !showFocusMode else { return }
                     guard acceptsKeyboardInput else { return }
                     // 처음 열이 그려질 때는 지연 없이 즉시 스냅하여 튀어오르는 느낌을 제거합니다.
-                    scrollToFocus(in: cards, parent: parent, proxy: proxy, viewportHeight: screenHeight, animated: false)
+                    scrollToFocus(in: cards, level: level, parent: parent, proxy: proxy, viewportHeight: screenHeight, animated: false)
                 }
                 .onPreferenceChange(MainCardHeightPreferenceKey.self) { heights in
                     guard !showFocusMode else { return }
@@ -316,7 +318,7 @@ extension ScenarioWriterView {
                     let oldHeight = previousHeights[activeID] ?? 0
                     if oldHeight <= screenHeight && newHeight > screenHeight {
                         DispatchQueue.main.async {
-                            scrollToFocus(in: cards, parent: parent, proxy: proxy, viewportHeight: screenHeight, animated: false)
+                            scrollToFocus(in: cards, level: level, parent: parent, proxy: proxy, viewportHeight: screenHeight, animated: false)
                         }
                     }
                 }
@@ -339,6 +341,7 @@ extension ScenarioWriterView {
 
     func scrollToFocus(
         in cards: [SceneCard],
+        level: Int,
         parent: SceneCard?,
         proxy: ScrollViewProxy,
         viewportHeight: CGFloat,
@@ -346,6 +349,7 @@ extension ScenarioWriterView {
     ) {
         guard acceptsKeyboardInput else { return }
         let defaultAnchor = UnitPoint(x: 0.5, y: 0.4)
+        let requestKey = mainColumnScrollCacheKey(level: level, parent: parent)
 
         let targetID: UUID?
         if let id = activeCardID, cards.contains(where: { $0.id == id }) {
@@ -367,21 +371,38 @@ extension ScenarioWriterView {
             targetID = nil
         }
 
-        if let idToScroll = targetID {
-            let focusAnchor: UnitPoint
-            if let cardHeight = mainCardHeights[idToScroll], cardHeight > viewportHeight {
-                focusAnchor = UnitPoint(x: 0.5, y: 0.0)
-            } else {
-                focusAnchor = defaultAnchor
-            }
-            if animated {
-                withAnimation(quickEaseAnimation) {
-                    proxy.scrollTo(idToScroll, anchor: focusAnchor)
-                }
-            } else {
+        guard let idToScroll = targetID else {
+            mainColumnLastFocusRequestByKey.removeValue(forKey: requestKey)
+            return
+        }
+
+        let prefersTopAnchor = (mainCardHeights[idToScroll] ?? 0) > viewportHeight
+        let request = MainColumnFocusRequest(
+            targetID: idToScroll,
+            prefersTopAnchor: prefersTopAnchor,
+            cardsCount: cards.count,
+            firstCardID: cards.first?.id,
+            lastCardID: cards.last?.id,
+            viewportHeightBucket: Int(viewportHeight.rounded())
+        )
+        if mainColumnLastFocusRequestByKey[requestKey] == request {
+            return
+        }
+        mainColumnLastFocusRequestByKey[requestKey] = request
+
+        let focusAnchor = prefersTopAnchor ? UnitPoint(x: 0.5, y: 0.0) : defaultAnchor
+        if animated {
+            withAnimation(quickEaseAnimation) {
                 proxy.scrollTo(idToScroll, anchor: focusAnchor)
             }
+        } else {
+            proxy.scrollTo(idToScroll, anchor: focusAnchor)
         }
+    }
+
+    func mainColumnScrollCacheKey(level: Int, parent: SceneCard?) -> String {
+        let parentKey = parent?.id.uuidString ?? "root"
+        return "\(level)|\(parentKey)"
     }
 
     func requestMainBottomRevealIfNeeded(
@@ -801,11 +822,22 @@ extension ScenarioWriterView {
 
     func findCard(by id: UUID) -> SceneCard? { scenario.cardByID(id) }
 
+    func resetActiveRelationStateCache() {
+        activeAncestorIDs = []
+        activeSiblingIDs = []
+        activeDescendantIDs = []
+        activeRelationSourceCardID = nil
+        activeRelationSourceCardsVersion = scenario.cardsVersion
+    }
+
     func synchronizeActiveRelationState(for activeID: UUID?) {
+        if activeRelationSourceCardID == activeID,
+           activeRelationSourceCardsVersion == scenario.cardsVersion {
+            return
+        }
+
         guard let activeID, let card = findCard(by: activeID) else {
-            activeAncestorIDs = []
-            activeSiblingIDs = []
-            activeDescendantIDs = []
+            resetActiveRelationStateCache()
             return
         }
 
@@ -818,11 +850,13 @@ extension ScenarioWriterView {
 
         let siblings = card.parent?.children ?? scenario.rootCards
         let siblingIDs = Set(siblings.map { $0.id }).filter { $0 != card.id }
-        let descendantIDs = descendantIDSet(of: card)
+        let descendantIDs = scenario.descendantIDs(for: card.id)
 
         if activeAncestorIDs != ancestors { activeAncestorIDs = ancestors }
         if activeSiblingIDs != siblingIDs { activeSiblingIDs = siblingIDs }
         if activeDescendantIDs != descendantIDs { activeDescendantIDs = descendantIDs }
+        activeRelationSourceCardID = activeID
+        activeRelationSourceCardsVersion = scenario.cardsVersion
     }
 
     func changeActiveCard(
@@ -857,7 +891,7 @@ extension ScenarioWriterView {
             card.parent?.lastSelectedChildID = card.id
             synchronizeActiveRelationState(for: card.id)
             if shouldFocusMain { isMainViewFocused = true }
-            let levelCount = resolvedLevelsWithParents().count
+            let levelCount = scenario.allLevels.count
             if levelCount > maxLevelCount { maxLevelCount = levelCount }
         }
         if deferToMainAsync || !Thread.isMainThread {
@@ -877,12 +911,7 @@ extension ScenarioWriterView {
     }
 
     func descendantIDSet(of card: SceneCard) -> Set<UUID> {
-        var ids: Set<UUID> = []
-        for child in card.children {
-            ids.insert(child.id)
-            ids.formUnion(descendantIDSet(of: child))
-        }
-        return ids
+        scenario.descendantIDs(for: card.id)
     }
 
     // MARK: - Finish Editing
@@ -899,7 +928,7 @@ extension ScenarioWriterView {
 
     func takeFinishEditingContext() -> FinishEditingContext? {
         let inFocusMode = showFocusMode
-        let skipMainFocusRestore = suppressMainFocusRestoreAfterFinishEditing
+        let skipMainFocusRestore = suppressMainFocusRestoreAfterFinishEditing || inFocusMode
         suppressMainFocusRestoreAfterFinishEditing = false
         if inFocusMode {
             finalizeFocusTypingCoalescing(reason: "finish-editing")
@@ -1165,9 +1194,7 @@ extension ScenarioWriterView {
     func deselectAll() {
         finishEditing()
         activeCardID = nil
-        activeAncestorIDs = []
-        activeDescendantIDs = []
-        activeSiblingIDs = []
+        resetActiveRelationStateCache()
         selectedCardIDs = []
     }
 
@@ -2230,7 +2257,8 @@ extension ScenarioWriterView {
             suppressHorizontalAutoScroll = true
             changeActiveCard(to: n)
         } else {
-            activeCardID = nil; activeAncestorIDs = []; activeDescendantIDs = []; activeSiblingIDs = []
+            activeCardID = nil
+            resetActiveRelationStateCache()
         }
         isMainViewFocused = true
         commitCardMutation(
@@ -2440,15 +2468,117 @@ extension ScenarioWriterView {
         isMainViewFocused = true
     }
 
+    private func mainWorkspaceClickModifiers() -> (command: Bool, shift: Bool) {
+        let flags = NSEvent.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        return (
+            command: flags.contains(.command),
+            shift: flags.contains(.shift)
+        )
+    }
+
+    private func resolvedMainWorkspaceLevel(containing cardID: UUID) -> [SceneCard]? {
+        resolvedAllLevels().first { level in
+            level.contains(where: { $0.id == cardID })
+        }
+    }
+
+    private func resolvedMainWorkspaceRangeAnchorID(in level: [SceneCard]) -> UUID? {
+        if let anchorID = keyboardRangeSelectionAnchorCardID,
+           selectedCardIDs.contains(anchorID),
+           level.contains(where: { $0.id == anchorID }) {
+            return anchorID
+        }
+
+        if selectedCardIDs.count == 1,
+           let selectedID = selectedCardIDs.first,
+           level.contains(where: { $0.id == selectedID }) {
+            return selectedID
+        }
+
+        if let activeID = activeCardID,
+           selectedCardIDs.contains(activeID),
+           level.contains(where: { $0.id == activeID }) {
+            return activeID
+        }
+
+        return level.first(where: { selectedCardIDs.contains($0.id) })?.id
+    }
+
+    private func mainWorkspaceRangeSelectionIDs(
+        in level: [SceneCard],
+        anchorID: UUID,
+        targetID: UUID
+    ) -> Set<UUID> {
+        guard let anchorIndex = level.firstIndex(where: { $0.id == anchorID }),
+              let targetIndex = level.firstIndex(where: { $0.id == targetID }) else {
+            return Set([targetID])
+        }
+        let lower = min(anchorIndex, targetIndex)
+        let upper = max(anchorIndex, targetIndex)
+        return Set(level[lower ... upper].map { $0.id })
+    }
+
+    private func handleMainWorkspacePlainClick(_ card: SceneCard) {
+        finishEditing()
+        selectedCardIDs = [card.id]
+        keyboardRangeSelectionAnchorCardID = card.id
+        changeActiveCard(to: card)
+        isMainViewFocused = true
+    }
+
+    private func handleMainWorkspaceCommandClick(_ card: SceneCard) {
+        finishEditing()
+        let wasSelected = selectedCardIDs.contains(card.id)
+        if wasSelected {
+            selectedCardIDs.remove(card.id)
+            if selectedCardIDs.isEmpty {
+                keyboardRangeSelectionAnchorCardID = nil
+            } else if keyboardRangeSelectionAnchorCardID == card.id {
+                keyboardRangeSelectionAnchorCardID = selectedCardIDs.first
+            }
+        } else {
+            selectedCardIDs.insert(card.id)
+            if keyboardRangeSelectionAnchorCardID == nil {
+                keyboardRangeSelectionAnchorCardID = card.id
+            }
+        }
+        changeActiveCard(to: card)
+        isMainViewFocused = true
+    }
+
+    private func handleMainWorkspaceRangeClick(_ card: SceneCard, additive: Bool) {
+        finishEditing()
+        guard let level = resolvedMainWorkspaceLevel(containing: card.id),
+              let anchorID = resolvedMainWorkspaceRangeAnchorID(in: level) else {
+            handleMainWorkspacePlainClick(card)
+            return
+        }
+
+        keyboardRangeSelectionAnchorCardID = anchorID
+        let rangeIDs = mainWorkspaceRangeSelectionIDs(
+            in: level,
+            anchorID: anchorID,
+            targetID: card.id
+        )
+        if additive {
+            selectedCardIDs.formUnion(rangeIDs)
+        } else {
+            selectedCardIDs = rangeIDs
+        }
+        changeActiveCard(to: card)
+        isMainViewFocused = true
+    }
+
     func handleMainWorkspaceCardClick(_ card: SceneCard) {
-        let isCommandPressed = NSEvent.modifierFlags.contains(.command)
+        let modifiers = mainWorkspaceClickModifiers()
         let isPrimarySelection =
             selectedCardIDs.isEmpty ||
             (selectedCardIDs.count == 1 && selectedCardIDs.contains(card.id))
         let shouldBeginEditing =
             acceptsKeyboardInput &&
             !showFocusMode &&
-            !isCommandPressed &&
+            !modifiers.command &&
+            !modifiers.shift &&
             activeCardID == card.id &&
             editingCardID != card.id &&
             isPrimarySelection
@@ -2458,7 +2588,19 @@ extension ScenarioWriterView {
             return
         }
 
-        handleCardTap(card)
+        if modifiers.command && modifiers.shift {
+            handleMainWorkspaceRangeClick(card, additive: true)
+            return
+        }
+        if modifiers.shift {
+            handleMainWorkspaceRangeClick(card, additive: false)
+            return
+        }
+        if modifiers.command {
+            handleMainWorkspaceCommandClick(card)
+            return
+        }
+        handleMainWorkspacePlainClick(card)
     }
 
     func selectedCardsForDeletion() -> [SceneCard] {
@@ -2667,9 +2809,7 @@ extension ScenarioWriterView {
             } else {
                 selectedCardIDs = []
                 activeCardID = nil
-                activeAncestorIDs = []
-                activeDescendantIDs = []
-                activeSiblingIDs = []
+                resetActiveRelationStateCache()
                 if showFocusMode {
                     editingCardID = nil
                     focusModeEditorCardID = nil

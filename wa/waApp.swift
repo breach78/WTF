@@ -360,6 +360,9 @@ private struct MainWindowTitleHider: NSViewRepresentable {
 private struct MainWindowSizePersistenceAccessor: NSViewRepresentable {
     private static let widthKey = "mainWorkspaceWindowWidthV1"
     private static let heightKey = "mainWorkspaceWindowHeightV1"
+    private static let originXKey = "mainWorkspaceWindowOriginXV1"
+    private static let originYKey = "mainWorkspaceWindowOriginYV1"
+    private static let fullscreenKey = "mainWorkspaceWindowFullscreenV1"
 
     func makeCoordinator() -> Coordinator {
         Coordinator()
@@ -376,7 +379,9 @@ private struct MainWindowSizePersistenceAccessor: NSViewRepresentable {
     final class Coordinator {
         private weak var window: NSWindow?
         private var observers: [NSObjectProtocol] = []
-        private var didRestoreSize = false
+        private var didRestoreWindowState = false
+        private var isRestoringWindowState = false
+        private var pendingFullscreenRestore = false
 
         deinit {
             removeObservers()
@@ -394,11 +399,13 @@ private struct MainWindowSizePersistenceAccessor: NSViewRepresentable {
             if window !== attachedWindow {
                 removeObservers()
                 window = attachedWindow
-                didRestoreSize = false
+                didRestoreWindowState = false
+                isRestoringWindowState = false
+                pendingFullscreenRestore = false
                 installObservers(for: attachedWindow)
             }
 
-            restoreSizeIfNeeded(for: attachedWindow)
+            restoreWindowStateIfNeeded(for: attachedWindow)
         }
 
         private func installObservers(for window: NSWindow) {
@@ -414,7 +421,34 @@ private struct MainWindowSizePersistenceAccessor: NSViewRepresentable {
                 }
             )
             observers.append(
+                center.addObserver(forName: NSWindow.didMoveNotification, object: window, queue: .main) { [weak self] _ in
+                    self?.persistSize(from: window)
+                }
+            )
+            observers.append(
+                center.addObserver(forName: NSWindow.willEnterFullScreenNotification, object: window, queue: .main) { [weak self] _ in
+                    self?.persistFrame(from: window)
+                }
+            )
+            observers.append(
+                center.addObserver(forName: NSWindow.didEnterFullScreenNotification, object: window, queue: .main) { [weak self] _ in
+                    self?.persistSize(from: window)
+                    self?.finishFullscreenRestoreIfNeeded()
+                }
+            )
+            observers.append(
+                center.addObserver(forName: NSWindow.didExitFullScreenNotification, object: window, queue: .main) { [weak self] _ in
+                    self?.persistSize(from: window)
+                    self?.finishFullscreenRestoreIfNeeded()
+                }
+            )
+            observers.append(
                 center.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: .main) { [weak self] _ in
+                    self?.persistSize(from: window)
+                }
+            )
+            observers.append(
+                center.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
                     self?.persistSize(from: window)
                 }
             )
@@ -427,30 +461,93 @@ private struct MainWindowSizePersistenceAccessor: NSViewRepresentable {
             observers.removeAll()
         }
 
-        private func restoreSizeIfNeeded(for window: NSWindow) {
-            guard !didRestoreSize else { return }
-            didRestoreSize = true
+        private func restoreWindowStateIfNeeded(for window: NSWindow) {
+            guard !didRestoreWindowState else { return }
+            didRestoreWindowState = true
             let defaults = UserDefaults.standard
+            let hasSavedOrigin = defaults.object(forKey: MainWindowSizePersistenceAccessor.originXKey) != nil
+                && defaults.object(forKey: MainWindowSizePersistenceAccessor.originYKey) != nil
             let width = defaults.double(forKey: MainWindowSizePersistenceAccessor.widthKey)
             let height = defaults.double(forKey: MainWindowSizePersistenceAccessor.heightKey)
-            guard width >= 500, height >= 400 else { return }
-            var frame = window.frame
-            if abs(frame.size.width - width) < 0.5, abs(frame.size.height - height) < 0.5 {
-                return
+            let originX = defaults.double(forKey: MainWindowSizePersistenceAccessor.originXKey)
+            let originY = defaults.double(forKey: MainWindowSizePersistenceAccessor.originYKey)
+            let shouldRestoreFullscreen = defaults.bool(forKey: MainWindowSizePersistenceAccessor.fullscreenKey)
+
+            isRestoringWindowState = true
+
+            if width >= 500, height >= 400 {
+                var frame = window.frame
+                frame.size = NSSize(width: width, height: height)
+                if hasSavedOrigin {
+                    frame.origin = CGPoint(x: originX, y: originY)
+                }
+                let clampedFrame = clampedFrameToVisibleScreens(frame)
+                if abs(window.frame.origin.x - clampedFrame.origin.x) > 0.5
+                    || abs(window.frame.origin.y - clampedFrame.origin.y) > 0.5
+                    || abs(window.frame.size.width - clampedFrame.size.width) > 0.5
+                    || abs(window.frame.size.height - clampedFrame.size.height) > 0.5 {
+                    window.setFrame(clampedFrame, display: true)
+                }
             }
-            frame.size = NSSize(width: width, height: height)
-            window.setFrame(frame, display: true)
+
+            DispatchQueue.main.async { [weak self, weak window] in
+                guard let self, let window else { return }
+                if shouldRestoreFullscreen, !window.styleMask.contains(.fullScreen) {
+                    self.pendingFullscreenRestore = true
+                    window.toggleFullScreen(nil)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+                        self?.finishFullscreenRestoreIfNeeded()
+                    }
+                } else {
+                    self.isRestoringWindowState = false
+                }
+            }
         }
 
-        private func persistSize(from window: NSWindow) {
+        private func clampedFrameToVisibleScreens(_ frame: CGRect) -> CGRect {
+            let screens = NSScreen.screens
+            guard !screens.isEmpty else { return frame }
+            if screens.contains(where: { $0.visibleFrame.intersects(frame) }) {
+                return frame
+            }
+
+            let visibleFrame = (window?.screen ?? NSScreen.main ?? screens[0]).visibleFrame
+            let width = min(frame.width, visibleFrame.width)
+            let height = min(frame.height, visibleFrame.height)
+            let x = min(max(frame.origin.x, visibleFrame.minX), visibleFrame.maxX - width)
+            let y = min(max(frame.origin.y, visibleFrame.minY), visibleFrame.maxY - height)
+            return CGRect(x: x, y: y, width: width, height: height)
+        }
+
+        private func finishFullscreenRestoreIfNeeded() {
+            guard pendingFullscreenRestore else {
+                isRestoringWindowState = false
+                return
+            }
+            pendingFullscreenRestore = false
+            isRestoringWindowState = false
+        }
+
+        private func persistFrame(from window: NSWindow) {
             guard window.identifier?.rawValue != ReferenceWindowConstants.windowID else { return }
-            guard !window.styleMask.contains(.fullScreen) else { return }
             let width = window.frame.width
             let height = window.frame.height
             guard width >= 500, height >= 400 else { return }
             let defaults = UserDefaults.standard
             defaults.set(width, forKey: MainWindowSizePersistenceAccessor.widthKey)
             defaults.set(height, forKey: MainWindowSizePersistenceAccessor.heightKey)
+            defaults.set(window.frame.origin.x, forKey: MainWindowSizePersistenceAccessor.originXKey)
+            defaults.set(window.frame.origin.y, forKey: MainWindowSizePersistenceAccessor.originYKey)
+        }
+
+        private func persistSize(from window: NSWindow) {
+            guard window.identifier?.rawValue != ReferenceWindowConstants.windowID else { return }
+            guard !isRestoringWindowState else { return }
+            let defaults = UserDefaults.standard
+            let isFullscreen = window.styleMask.contains(.fullScreen)
+            defaults.set(isFullscreen, forKey: MainWindowSizePersistenceAccessor.fullscreenKey)
+            guard !isFullscreen else { return }
+            persistFrame(from: window)
         }
     }
 }
@@ -477,6 +574,7 @@ struct waApp: App {
     @State private var store: FileStore?
     @StateObject private var referenceCardStore = ReferenceCardStore()
     @State private var didHideReferenceWindowOnLaunch: Bool = false
+    @State private var storeSetupRequestID: Int = 0
 
     init() {
         UserDefaults.standard.set(false, forKey: "TSMLanguageIndicatorEnabled")
@@ -673,12 +771,15 @@ struct waApp: App {
     }
     
     private func setupStore() {
+        storeSetupRequestID += 1
+        let requestID = storeSetupRequestID
+
+        store?.flushPendingSaves()
+        store = nil
+
         guard let bookmark = storageBookmark else { return }
 
         Task { @MainActor in
-            store?.flushPendingSaves()
-            self.store = nil
-            
             do {
                 var isStale = false
                 // 북마크로부터 URL 복원 및 권한 획득
@@ -693,9 +794,11 @@ struct waApp: App {
 
                 let newStore = FileStore(folderURL: url)
                 await newStore.load()
+                guard requestID == storeSetupRequestID else { return }
 
                 self.store = newStore
             } catch {
+                guard requestID == storeSetupRequestID else { return }
                 storageBookmark = nil // 실패 시 다시 선택하도록 초기화
             }
         }

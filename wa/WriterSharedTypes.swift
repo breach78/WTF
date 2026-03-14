@@ -6,6 +6,7 @@ let focusModeBodySafetyInset: CGFloat = 8
 enum ScenarioCardCategory {
     static let plot = "플롯"
     static let note = "노트"
+    static let craft = "작법"
     static let uncategorized = "미분류"
 }
 
@@ -114,6 +115,152 @@ func normalizeGeminiModelIDValue(_ raw: String) -> String {
     default:
         return trimmed
     }
+}
+
+// MARK: - Shared Text Measurement Utilities
+
+private let sharedTextHeightMeasurementCache = SharedTextHeightMeasurementCache()
+
+final class SharedTextHeightMeasurementCache: @unchecked Sendable {
+    private let cache = NSCache<NSString, NSNumber>()
+
+    init() {
+        cache.countLimit = 4096
+    }
+
+    func measureBodyHeight(
+        text: String,
+        fontSize: CGFloat,
+        lineSpacing: CGFloat,
+        width: CGFloat,
+        lineFragmentPadding: CGFloat,
+        safetyInset: CGFloat
+    ) -> CGFloat {
+        let measuringText = normalizedMeasurementText(text)
+        let constrainedWidth = max(1, width)
+        let cacheKey = measurementCacheKey(
+            text: measuringText,
+            fontSize: fontSize,
+            lineSpacing: lineSpacing,
+            width: constrainedWidth,
+            lineFragmentPadding: lineFragmentPadding,
+            safetyInset: safetyInset
+        )
+
+        if let cached = cache.object(forKey: cacheKey) {
+            return CGFloat(cached.doubleValue)
+        }
+
+        let paragraphStyle = NSMutableParagraphStyle()
+        paragraphStyle.lineSpacing = lineSpacing
+        paragraphStyle.lineBreakMode = .byWordWrapping
+
+        let font = NSFont(name: "SansMonoCJKFinalDraft", size: fontSize)
+            ?? NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
+
+        let storage = NSTextStorage(
+            string: measuringText,
+            attributes: [
+                .font: font,
+                .paragraphStyle: paragraphStyle
+            ]
+        )
+        let layoutManager = NSLayoutManager()
+        let textContainer = NSTextContainer(
+            size: CGSize(width: constrainedWidth, height: CGFloat.greatestFiniteMagnitude)
+        )
+        textContainer.lineFragmentPadding = lineFragmentPadding
+        textContainer.lineBreakMode = .byWordWrapping
+        textContainer.maximumNumberOfLines = 0
+        textContainer.widthTracksTextView = false
+        textContainer.heightTracksTextView = false
+        layoutManager.addTextContainer(textContainer)
+        storage.addLayoutManager(layoutManager)
+        layoutManager.ensureLayout(for: textContainer)
+
+        let usedHeight = layoutManager.usedRect(for: textContainer).height
+        let measured = max(1, ceil(usedHeight + safetyInset))
+        cache.setObject(NSNumber(value: Double(measured)), forKey: cacheKey)
+        return measured
+    }
+
+    private func normalizedMeasurementText(_ text: String) -> String {
+        if text.isEmpty {
+            return " "
+        }
+        if text.hasSuffix("\n") {
+            return text + " "
+        }
+        return text
+    }
+
+    private func measurementCacheKey(
+        text: String,
+        fontSize: CGFloat,
+        lineSpacing: CGFloat,
+        width: CGFloat,
+        lineFragmentPadding: CGFloat,
+        safetyInset: CGFloat
+    ) -> NSString {
+        let fingerprint = stableTextFingerprint(text)
+        let fontBits = Double(fontSize).bitPattern
+        let spacingBits = Double(lineSpacing).bitPattern
+        let widthBits = Double(width).bitPattern
+        let paddingBits = Double(lineFragmentPadding).bitPattern
+        let insetBits = Double(safetyInset).bitPattern
+        let key = "\(fontBits)|\(spacingBits)|\(widthBits)|\(paddingBits)|\(insetBits)|\(text.utf16.count)|\(fingerprint)"
+        return key as NSString
+    }
+
+    private func stableTextFingerprint(_ text: String) -> UInt64 {
+        var hash: UInt64 = 1469598103934665603
+        for byte in text.utf8 {
+            hash ^= UInt64(byte)
+            hash &*= 1099511628211
+        }
+        return hash
+    }
+}
+
+func sharedMeasuredTextBodyHeight(
+    text: String,
+    fontSize: CGFloat,
+    lineSpacing: CGFloat,
+    width: CGFloat,
+    lineFragmentPadding: CGFloat,
+    safetyInset: CGFloat
+) -> CGFloat {
+    sharedTextHeightMeasurementCache.measureBodyHeight(
+        text: text,
+        fontSize: fontSize,
+        lineSpacing: lineSpacing,
+        width: width,
+        lineFragmentPadding: lineFragmentPadding,
+        safetyInset: safetyInset
+    )
+}
+
+func sharedLiveTextViewBodyHeight(
+    _ textView: NSTextView,
+    safetyInset: CGFloat = 0,
+    includeTextContainerInset: Bool = false
+) -> CGFloat? {
+    guard let layoutManager = textView.layoutManager,
+          let textContainer = textView.textContainer else { return nil }
+
+    let textLength = (textView.string as NSString).length
+    if textLength > 0 {
+        let fullRange = NSRange(location: 0, length: textLength)
+        layoutManager.ensureGlyphs(forCharacterRange: fullRange)
+        layoutManager.ensureLayout(forCharacterRange: fullRange)
+    }
+    layoutManager.ensureLayout(for: textContainer)
+
+    let usedHeight = layoutManager.usedRect(for: textContainer).height
+    guard usedHeight > 0 else { return nil }
+
+    let insetHeight = includeTextContainerInset ? (textView.textContainerInset.height * 2) : 0
+    return max(1, ceil(usedHeight + insetHeight + safetyInset))
 }
 
 // MARK: - Shared Text Processing Utilities
@@ -276,11 +423,12 @@ func parseFountainTitlePageFields(from lines: [String]) -> [String: [String]] {
         }
 
         if let field = parseFountainTitlePageField(trimmed) {
-            currentKey = normalizedFountainTitlePageFieldKey(field.key)
+            let normalizedKey = normalizedFountainTitlePageFieldKey(field.key)
+            currentKey = normalizedKey
             if !field.value.isEmpty {
-                fields[currentKey!, default: []].append(field.value)
-            } else if fields[currentKey!] == nil {
-                fields[currentKey!] = []
+                fields[normalizedKey, default: []].append(field.value)
+            } else if fields[normalizedKey] == nil {
+                fields[normalizedKey] = []
             }
             continue
         }

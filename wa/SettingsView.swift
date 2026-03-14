@@ -271,7 +271,10 @@ struct SettingsView: View {
         "Sans Mono CJK Final Draft.otf",
         "Sans Mono CJK Final Draft Bold.otf"
     ]
-    private let oflLicenseURL = URL(string: "https://openfontlicense.org/open-font-license-official-text/")!
+    private var oflLicenseURL: URL {
+        URL(string: "https://openfontlicense.org/open-font-license-official-text/")
+            ?? URL(fileURLWithPath: "/")
+    }
 
     var onUpdateStore: () -> Void
 

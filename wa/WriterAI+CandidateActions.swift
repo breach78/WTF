@@ -78,12 +78,12 @@ extension ScenarioWriterView {
     // MARK: - AI Generation Actions
 
     func runAICardActionFromContextMenu(for card: SceneCard, action: AICardAction) {
-        prepareCardForContextMenuAIAction(card)
         switch action {
         case .elaborate, .nextScene, .alternative:
+            prepareCardForContextMenuAIAction(card)
             openAIOptionsSheet(for: action)
         case .summary:
-            requestAISummaryCandidate()
+            requestAISummaryCandidate(fromContextCard: card)
         }
     }
 
@@ -105,6 +105,26 @@ extension ScenarioWriterView {
         finishEditing()
         selectedCardIDs = [card.id]
         changeActiveCard(to: card, shouldFocusMain: false)
+    }
+
+    func summarySourceCards(contextCard: SceneCard) -> [SceneCard] {
+        if selectedCardIDs.count > 1, selectedCardIDs.contains(contextCard.id) {
+            let selected = selectedCardIDs.compactMap { findCard(by: $0) }
+            guard selected.count == selectedCardIDs.count else { return [contextCard] }
+            return sortedCardsByCanvasOrder(selected)
+        }
+        return [contextCard]
+    }
+
+    func prepareCardForContextMenuAISummaryAction(_ card: SceneCard) -> [UUID] {
+        let sourceCards = summarySourceCards(contextCard: card)
+        suppressMainFocusRestoreAfterFinishEditing = true
+        finishEditing()
+        if sourceCards.count == 1 {
+            selectedCardIDs = [card.id]
+        }
+        changeActiveCard(to: card, shouldFocusMain: false)
+        return sourceCards.map(\.id)
     }
 
     func aiCardGenerationQuery(for card: SceneCard, action: AICardAction, options: Set<AIGenerationOption>) -> String {
@@ -248,12 +268,11 @@ extension ScenarioWriterView {
         }
     }
 
-    func requestAISummaryCandidate() {
-        finishEditing()
+    func requestAISummaryCandidate(fromContextCard card: SceneCard) {
+        let sourceCardIDs = prepareCardForContextMenuAISummaryAction(card)
         pruneAICandidateTracking()
 
-        guard let parentID = activeCardID,
-              findCard(by: parentID) != nil else {
+        guard findCard(by: card.id) != nil else {
             setAIStatusError("활성 카드가 없어 요약을 만들 수 없습니다.")
             return
         }
@@ -261,20 +280,21 @@ extension ScenarioWriterView {
         let resolvedModel = currentGeminiModel()
 
         aiIsGenerating = true
-        aiChildSummaryLoadingCardIDs.insert(parentID)
+        aiChildSummaryLoadingCardIDs.insert(card.id)
         setAIStatus("요약 제안을 생성하는 중입니다...")
 
         Task { @MainActor in
             defer {
                 aiIsGenerating = false
-                aiChildSummaryLoadingCardIDs.remove(parentID)
+                aiChildSummaryLoadingCardIDs.remove(card.id)
             }
             do {
-                guard let latestParent = findCard(by: parentID) else { return }
+                guard let latestParent = findCard(by: card.id) else { return }
                 guard let apiKey = try KeychainStore.loadGeminiAPIKey() else {
                     throw GeminiServiceError.missingAPIKey
                 }
-                let prompt = buildAISummaryPrompt(for: latestParent)
+                let latestSourceCards = sourceCardIDs.compactMap { findCard(by: $0) }
+                let prompt = buildAISummaryPrompt(for: latestSourceCards.isEmpty ? [latestParent] : latestSourceCards)
                 let summaryText = try await GeminiService.generateText(
                     prompt: prompt,
                     model: resolvedModel,
@@ -287,7 +307,7 @@ extension ScenarioWriterView {
                 let suggestion = GeminiSuggestion(title: "", content: normalized, rationale: nil)
                 applyAICandidates(
                     suggestions: [suggestion],
-                    parentID: parentID,
+                    parentID: card.id,
                     action: .summary
                 )
             } catch {

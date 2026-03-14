@@ -41,9 +41,8 @@ extension ScenarioWriterView {
         let sourceCards = scenario.cards
         var cards: [CardState] = []
         cards.reserveCapacity(sourceCards.count)
-        let hasOverride = overrideCardID != nil && overrideContent != nil
         for card in sourceCards {
-            let content = (hasOverride && card.id == overrideCardID) ? (overrideContent!) : card.content
+            let content = (card.id == overrideCardID) ? (overrideContent ?? card.content) : card.content
             cards.append(CardState(
                 id: card.id,
                 content: content,
