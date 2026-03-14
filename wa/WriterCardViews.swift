@@ -370,7 +370,6 @@ struct CardItem: View {
             || onAISummarizeCurrent != nil
             || onSummarizeChildren != nil
     }
-
     private var resolvedCardRGB: (r: Double, g: Double, b: Double) {
         if forceNamedSnapshotNoteStyle {
             return resolvedNamedSnapshotNoteRGB()
@@ -487,7 +486,109 @@ struct CardItem: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
     }
 
-    var body: some View {
+    @ViewBuilder
+    private var cardContextMenuContent: some View {
+        if let onDisconnectLinkedCard {
+            Button("연결 끊기", role: .destructive) { onDisconnectLinkedCard() }
+            Divider()
+        }
+        if showsEmptyCardBulkDeleteMenuOnly {
+            if hasAIMenuActions {
+                Menu("AI") {
+                    Button("구체화") { onAIElaborate?() }
+                        .disabled(onAIElaborate == nil || !aiPlotActionsEnabled || isAIBusy)
+                    Button("다음 장면") { onAINextScene?() }
+                        .disabled(onAINextScene == nil || !aiPlotActionsEnabled || isAIBusy)
+                    Button("대안") { onAIAlternative?() }
+                        .disabled(onAIAlternative == nil || !aiPlotActionsEnabled || isAIBusy)
+                    Divider()
+                    Button("선택 카드 요약") { onAISummarizeCurrent?() }
+                        .disabled(onAISummarizeCurrent == nil || isAIBusy)
+                    Button("자식 카드 요약") { onSummarizeChildren?() }
+                        .disabled(onSummarizeChildren == nil || isAIBusy)
+                }
+                if onBulkDeleteEmptyCards != nil {
+                    Divider()
+                }
+            }
+            if let onTranscriptionMode {
+                Button("전사 모드") { onTranscriptionMode() }
+                    .disabled(isTranscriptionBusy || isAIBusy)
+                if onBulkDeleteEmptyCards != nil {
+                    Divider()
+                }
+            }
+            if let onBulkDeleteEmptyCards {
+                Button("내용 없음 카드 전체 삭제", role: .destructive) { onBulkDeleteEmptyCards() }
+            }
+        } else {
+            if let onCloneCard {
+                Button("클론 카드") { onCloneCard() }
+                Divider()
+            }
+            if let onNavigateToClonePeer, !clonePeerDestinations.isEmpty {
+                Menu("다른 클론으로 이동") {
+                    ForEach(clonePeerDestinations) { destination in
+                        Button(destination.title) { onNavigateToClonePeer(destination.id) }
+                    }
+                }
+                Divider()
+            }
+            if let onReferenceCard {
+                Button("레퍼런스 카드로") { onReferenceCard() }
+                Divider()
+            }
+            if let onCreateUpperCardFromSelection {
+                Button("새 상위 카드 만들기") { onCreateUpperCardFromSelection() }
+                Divider()
+            }
+            if hasAIMenuActions {
+                Menu("AI") {
+                    Button("구체화") { onAIElaborate?() }
+                        .disabled(onAIElaborate == nil || !aiPlotActionsEnabled || isAIBusy)
+                    Button("다음 장면") { onAINextScene?() }
+                        .disabled(onAINextScene == nil || !aiPlotActionsEnabled || isAIBusy)
+                    Button("대안") { onAIAlternative?() }
+                        .disabled(onAIAlternative == nil || !aiPlotActionsEnabled || isAIBusy)
+                    Divider()
+                    Button("선택 카드 요약") { onAISummarizeCurrent?() }
+                        .disabled(onAISummarizeCurrent == nil || isAIBusy)
+                    Button("자식 카드 요약") { onSummarizeChildren?() }
+                        .disabled(onSummarizeChildren == nil || isAIBusy)
+                }
+                Divider()
+            }
+            if let onDelete {
+                Button("삭제", role: .destructive) { onDelete() }
+            }
+            if onDelete != nil {
+                Divider()
+            }
+            if let onColorChange {
+                Menu("카드 색") {
+                    Button("기본") { onColorChange(nil) }
+                    Divider()
+                    Button("연보라") { onColorChange("E7D5FF") }
+                    Button("하늘") { onColorChange("CFE8FF") }
+                    Button("민트") { onColorChange("CFF2E8") }
+                    Button("살구") { onColorChange("FFE1CC") }
+                    Button("연노랑") { onColorChange("FFF3C4") }
+                }
+            }
+            if let onTranscriptionMode {
+                Divider()
+                Button("전사 모드") { onTranscriptionMode() }
+                    .disabled(isTranscriptionBusy || isAIBusy)
+            }
+            if let onHardDelete {
+                Divider()
+                Button("완전 삭제 (모든 곳)", role: .destructive) { onHardDelete() }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var cardSurface: some View {
         ZStack(alignment: .topLeading) {
             backgroundColor
 
@@ -628,105 +729,17 @@ struct CardItem: View {
                 mainEditingMeasureWorkItem = nil
             }
         }
-        .contextMenu {
-            if let onDisconnectLinkedCard {
-                Button("연결 끊기", role: .destructive) { onDisconnectLinkedCard() }
-                Divider()
-            }
-            if showsEmptyCardBulkDeleteMenuOnly {
-                if hasAIMenuActions {
-                    Menu("AI") {
-                        Button("구체화") { onAIElaborate?() }
-                            .disabled(onAIElaborate == nil || !aiPlotActionsEnabled || isAIBusy)
-                        Button("다음 장면") { onAINextScene?() }
-                            .disabled(onAINextScene == nil || !aiPlotActionsEnabled || isAIBusy)
-                        Button("대안") { onAIAlternative?() }
-                            .disabled(onAIAlternative == nil || !aiPlotActionsEnabled || isAIBusy)
-                        Divider()
-                        Button("선택 카드 요약") { onAISummarizeCurrent?() }
-                            .disabled(onAISummarizeCurrent == nil || isAIBusy)
-                        Button("자식 카드 요약") { onSummarizeChildren?() }
-                            .disabled(onSummarizeChildren == nil || isAIBusy)
-                    }
-                    if onBulkDeleteEmptyCards != nil {
-                        Divider()
-                    }
-                }
-                if let onTranscriptionMode {
-                    Button("전사 모드") { onTranscriptionMode() }
-                        .disabled(isTranscriptionBusy || isAIBusy)
-                    if onBulkDeleteEmptyCards != nil {
-                        Divider()
-                    }
-                }
-                if let onBulkDeleteEmptyCards {
-                    Button("내용 없음 카드 전체 삭제", role: .destructive) { onBulkDeleteEmptyCards() }
-                }
-            } else {
-                if let onCloneCard {
-                    Button("클론 카드") { onCloneCard() }
-                    Divider()
-                }
-                if let onNavigateToClonePeer, !clonePeerDestinations.isEmpty {
-                    Menu("다른 클론으로 이동") {
-                        ForEach(clonePeerDestinations) { destination in
-                            Button(destination.title) { onNavigateToClonePeer(destination.id) }
-                        }
-                    }
-                    Divider()
-                }
-                if let onReferenceCard {
-                    Button("레퍼런스 카드로") { onReferenceCard() }
-                    Divider()
-                }
-                if let onCreateUpperCardFromSelection {
-                    Button("새 상위 카드 만들기") { onCreateUpperCardFromSelection() }
-                    Divider()
-                }
-                if hasAIMenuActions {
-                    Menu("AI") {
-                        Button("구체화") { onAIElaborate?() }
-                            .disabled(onAIElaborate == nil || !aiPlotActionsEnabled || isAIBusy)
-                        Button("다음 장면") { onAINextScene?() }
-                            .disabled(onAINextScene == nil || !aiPlotActionsEnabled || isAIBusy)
-                        Button("대안") { onAIAlternative?() }
-                            .disabled(onAIAlternative == nil || !aiPlotActionsEnabled || isAIBusy)
-                        Divider()
-                        Button("선택 카드 요약") { onAISummarizeCurrent?() }
-                            .disabled(onAISummarizeCurrent == nil || isAIBusy)
-                        Button("자식 카드 요약") { onSummarizeChildren?() }
-                            .disabled(onSummarizeChildren == nil || isAIBusy)
-                    }
-                    Divider()
-                }
-                if let onDelete {
-                    Button("삭제", role: .destructive) { onDelete() }
-                }
-                if onDelete != nil {
-                    Divider()
-                }
-                if let onColorChange {
-                    Menu("카드 색") {
-                        Button("기본") { onColorChange(nil) }
-                        Divider()
-                        Button("연보라") { onColorChange("E7D5FF") }
-                        Button("하늘") { onColorChange("CFE8FF") }
-                        Button("민트") { onColorChange("CFF2E8") }
-                        Button("살구") { onColorChange("FFE1CC") }
-                        Button("연노랑") { onColorChange("FFF3C4") }
-                    }
-                }
-                if let onTranscriptionMode {
-                    Divider()
-                    Button("전사 모드") { onTranscriptionMode() }
-                        .disabled(isTranscriptionBusy || isAIBusy)
-                }
-                if let onHardDelete {
-                    Divider()
-                    Button("완전 삭제 (모든 곳)", role: .destructive) { onHardDelete() }
-                }
-            }
+        .onDisappear {
+            mainEditingMeasureWorkItem?.cancel()
+            mainEditingMeasureWorkItem = nil
         }
+    }
+
+    var body: some View {
+        cardSurface
+            .contextMenu {
+                cardContextMenuContent
+            }
     }
 
     private func resolvedBaseRGB() -> (r: Double, g: Double, b: Double) {

@@ -915,6 +915,33 @@ extension ScenarioWriterView {
                 }
             }
             let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            let isPlainEscape =
+                event.keyCode == 53 &&
+                !flags.contains(.command) &&
+                !flags.contains(.option) &&
+                !flags.contains(.control) &&
+                !flags.contains(.shift)
+            if isPlainEscape {
+                if let textView = NSApp.keyWindow?.firstResponder as? NSTextView, textView.hasMarkedText() {
+                    return event
+                }
+                if editingCardID != nil {
+                    clearMainEditTabArm()
+                    DispatchQueue.main.async {
+                        finishEditing()
+                    }
+                    return nil
+                }
+                if isSearchFocused || showTimeline {
+                    DispatchQueue.main.async {
+                        closeSearch()
+                    }
+                    return nil
+                }
+                if isFullscreen {
+                    return nil
+                }
+            }
             let isCmdOnly = flags.contains(.command) && !flags.contains(.option) && !flags.contains(.control) && !flags.contains(.shift)
             let normalized = (event.charactersIgnoringModifiers ?? "").lowercased()
             let isFindShortcut = normalized == "f" || normalized == "ㄹ" || event.keyCode == 3
@@ -1450,7 +1477,9 @@ extension ScenarioWriterView {
     }
 
     func normalizeIndices(parent: SceneCard?) {
-        let siblings = parent?.sortedChildren ?? scenario.rootCards
-        for (index, s) in siblings.enumerated() { s.orderIndex = index }
+        let siblings = liveOrderedSiblings(parent: parent)
+        for (index, s) in siblings.enumerated() where s.orderIndex != index {
+            s.orderIndex = index
+        }
     }
 }

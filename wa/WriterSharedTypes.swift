@@ -694,6 +694,133 @@ enum CaretScrollCoordinator {
     }
 }
 
+struct MainColumnScrollViewAccessor: NSViewRepresentable {
+    let columnKey: String
+    let storedOffsetY: CGFloat?
+    let onOffsetChange: (CGFloat) -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    func makeNSView(context: Context) -> NSView {
+        NSView(frame: .zero)
+    }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        context.coordinator.attach(
+            to: view,
+            columnKey: columnKey,
+            storedOffsetY: storedOffsetY,
+            onOffsetChange: onOffsetChange
+        )
+    }
+
+    final class Coordinator {
+        private weak var scrollView: NSScrollView?
+        private var observer: NSObjectProtocol?
+        private var attachedColumnKey: String?
+        private var lastReportedOffsetY: CGFloat = .nan
+
+        deinit {
+            detach()
+        }
+
+        func attach(
+            to view: NSView,
+            columnKey: String,
+            storedOffsetY: CGFloat?,
+            onOffsetChange: @escaping (CGFloat) -> Void
+        ) {
+            guard let resolvedScrollView = resolveScrollView(from: view) else {
+                DispatchQueue.main.async { [weak self, weak view] in
+                    guard let self, let view else { return }
+                    self.attach(to: view, columnKey: columnKey, storedOffsetY: storedOffsetY, onOffsetChange: onOffsetChange)
+                }
+                return
+            }
+
+            if scrollView !== resolvedScrollView {
+                detach()
+                scrollView = resolvedScrollView
+                installObserver(for: resolvedScrollView, onOffsetChange: onOffsetChange)
+            }
+
+            let keyChanged = attachedColumnKey != columnKey
+            attachedColumnKey = columnKey
+            publishCurrentOffset(onOffsetChange)
+
+            if keyChanged, let storedOffsetY, storedOffsetY > 1 {
+                applyStoredOffsetIfNeeded(storedOffsetY)
+            }
+        }
+
+        private func detach() {
+            if let observer {
+                NotificationCenter.default.removeObserver(observer)
+            }
+            observer = nil
+            scrollView = nil
+            attachedColumnKey = nil
+            lastReportedOffsetY = .nan
+        }
+
+        private func installObserver(for scrollView: NSScrollView, onOffsetChange: @escaping (CGFloat) -> Void) {
+            scrollView.contentView.postsBoundsChangedNotifications = true
+            observer = NotificationCenter.default.addObserver(
+                forName: NSView.boundsDidChangeNotification,
+                object: scrollView.contentView,
+                queue: .main
+            ) { [weak self] _ in
+                self?.publishCurrentOffset(onOffsetChange)
+            }
+        }
+
+        private func publishCurrentOffset(_ onOffsetChange: @escaping (CGFloat) -> Void) {
+            guard let scrollView else { return }
+            let originY = scrollView.contentView.bounds.origin.y
+            guard lastReportedOffsetY.isNaN || abs(lastReportedOffsetY - originY) > 0.5 else { return }
+            lastReportedOffsetY = originY
+            DispatchQueue.main.async {
+                onOffsetChange(originY)
+            }
+        }
+
+        private func applyStoredOffsetIfNeeded(_ storedOffsetY: CGFloat) {
+            guard let scrollView else { return }
+            DispatchQueue.main.async { [weak self, weak scrollView] in
+                guard let self, let scrollView else { return }
+                let visible = scrollView.documentVisibleRect
+                let documentHeight = scrollView.documentView?.bounds.height ?? 0
+                let maxY = max(0, documentHeight - visible.height)
+                let applied = CaretScrollCoordinator.applyVerticalScrollIfNeeded(
+                    scrollView: scrollView,
+                    visibleRect: visible,
+                    targetY: storedOffsetY,
+                    minY: 0,
+                    maxY: maxY,
+                    deadZone: 0.5,
+                    snapToPixel: true
+                )
+                if applied {
+                    self.lastReportedOffsetY = scrollView.contentView.bounds.origin.y
+                }
+            }
+        }
+
+        private func resolveScrollView(from view: NSView) -> NSScrollView? {
+            var current: NSView? = view
+            while let candidate = current {
+                if let scrollView = candidate.enclosingScrollView {
+                    return scrollView
+                }
+                current = candidate.superview
+            }
+            return nil
+        }
+    }
+}
+
 // MARK: - 히스토리 비교를 위한 타입
 
 enum DiffStatus {

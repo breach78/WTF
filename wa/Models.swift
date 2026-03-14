@@ -58,6 +58,13 @@ final class Scenario: ObservableObject, Identifiable, Hashable {
     private let modifiedTimestampDebounceInterval: TimeInterval = 0.14
     private var cachedLinkedTargetCardIDs: Set<UUID> = []
     private(set) var sharedCraftTreeDirty: Bool = false
+    private var cardMutationBatchDepth: Int = 0
+    private var pendingCardsVersionBump: Bool = false
+    private var pendingCardRecordsDirty: Bool = false
+    private var pendingCardContentDirty: Bool = false
+    private var pendingHistoryDirty: Bool = false
+    private var pendingLinkedCardsDirty: Bool = false
+    private var pendingSharedCraftDirty: Bool = false
     var splitPaneActiveCardByPaneID: [Int: UUID] = [:]
 
     init(
@@ -99,7 +106,7 @@ final class Scenario: ObservableObject, Identifiable, Hashable {
     }
 
     func markModified(at date: Date = Date()) {
-        guard totalTimestampSuppressionCount == 0 else {
+        guard totalMutationSuppressionCount == 0 else {
             recordPendingModifiedTimestamp(date)
             return
         }
@@ -119,7 +126,7 @@ final class Scenario: ObservableObject, Identifiable, Hashable {
         let work = DispatchWorkItem { [weak self] in
             guard let self else { return }
             self.pendingModifiedWorkItem = nil
-            guard self.totalTimestampSuppressionCount == 0 else { return }
+            guard self.totalMutationSuppressionCount == 0 else { return }
             guard let pending = self.pendingModifiedTimestamp else { return }
             self.pendingModifiedTimestamp = nil
             self.applyModifiedTimestamp(pending)
@@ -132,7 +139,7 @@ final class Scenario: ObservableObject, Identifiable, Hashable {
         timestampTrackingSuppressionCount += 1
         defer {
             timestampTrackingSuppressionCount = max(0, timestampTrackingSuppressionCount - 1)
-            if totalTimestampSuppressionCount == 0 {
+            if totalMutationSuppressionCount == 0 {
                 flushPendingModifiedTimestamp()
             }
         }
@@ -145,7 +152,7 @@ final class Scenario: ObservableObject, Identifiable, Hashable {
 
     func endInteractiveTimestampSuppression(flush: Bool = true) {
         interactiveTimestampSuppressionCount = max(0, interactiveTimestampSuppressionCount - 1)
-        if flush, totalTimestampSuppressionCount == 0 {
+        if flush, totalMutationSuppressionCount == 0 {
             flushPendingModifiedTimestamp()
         }
     }
@@ -153,7 +160,7 @@ final class Scenario: ObservableObject, Identifiable, Hashable {
     func flushPendingModifiedTimestamp() {
         pendingModifiedWorkItem?.cancel()
         pendingModifiedWorkItem = nil
-        guard totalTimestampSuppressionCount == 0 else { return }
+        guard totalMutationSuppressionCount == 0 else { return }
         guard let pending = pendingModifiedTimestamp else { return }
         pendingModifiedTimestamp = nil
         applyModifiedTimestamp(pending)
@@ -161,6 +168,10 @@ final class Scenario: ObservableObject, Identifiable, Hashable {
 
     private var totalTimestampSuppressionCount: Int {
         timestampTrackingSuppressionCount + interactiveTimestampSuppressionCount
+    }
+
+    private var totalMutationSuppressionCount: Int {
+        totalTimestampSuppressionCount + cardMutationBatchDepth
     }
 
     private func recordPendingModifiedTimestamp(_ date: Date) {
@@ -179,10 +190,18 @@ final class Scenario: ObservableObject, Identifiable, Hashable {
     }
 
     func bumpCardsVersion() {
+        if cardMutationBatchDepth > 0 {
+            pendingCardsVersionBump = true
+            return
+        }
         cardsVersion += 1
     }
 
     func markSharedCraftDirty() {
+        if cardMutationBatchDepth > 0 {
+            pendingSharedCraftDirty = true
+            return
+        }
         sharedCraftTreeDirty = true
     }
 
@@ -191,19 +210,74 @@ final class Scenario: ObservableObject, Identifiable, Hashable {
     }
 
     func markCardRecordsDirty() {
+        if cardMutationBatchDepth > 0 {
+            pendingCardRecordsDirty = true
+            return
+        }
         cardRecordsSaveVersion &+= 1
     }
 
     func markCardContentDirty() {
+        if cardMutationBatchDepth > 0 {
+            pendingCardContentDirty = true
+            return
+        }
         cardContentSaveVersion &+= 1
     }
 
     func markHistoryDirty() {
+        if cardMutationBatchDepth > 0 {
+            pendingHistoryDirty = true
+            return
+        }
         historySaveVersion &+= 1
     }
 
     func markLinkedCardsDirty() {
+        if cardMutationBatchDepth > 0 {
+            pendingLinkedCardsDirty = true
+            return
+        }
         linkedCardsSaveVersion &+= 1
+    }
+
+    func performBatchedCardMutation(_ work: () -> Void) {
+        cardMutationBatchDepth += 1
+        defer {
+            cardMutationBatchDepth = max(0, cardMutationBatchDepth - 1)
+            if cardMutationBatchDepth == 0 {
+                flushBatchedCardMutationIfNeeded()
+            }
+        }
+        work()
+    }
+
+    private func flushBatchedCardMutationIfNeeded() {
+        if pendingCardRecordsDirty {
+            cardRecordsSaveVersion &+= 1
+            pendingCardRecordsDirty = false
+        }
+        if pendingCardContentDirty {
+            cardContentSaveVersion &+= 1
+            pendingCardContentDirty = false
+        }
+        if pendingHistoryDirty {
+            historySaveVersion &+= 1
+            pendingHistoryDirty = false
+        }
+        if pendingLinkedCardsDirty {
+            linkedCardsSaveVersion &+= 1
+            pendingLinkedCardsDirty = false
+        }
+        if pendingSharedCraftDirty {
+            sharedCraftTreeDirty = true
+            pendingSharedCraftDirty = false
+        }
+        if pendingCardsVersionBump {
+            cardsVersion += 1
+            pendingCardsVersionBump = false
+        }
+        flushPendingModifiedTimestamp()
     }
 
     func cardByID(_ id: UUID) -> SceneCard? {
@@ -516,6 +590,7 @@ final class SceneCard: ObservableObject, Identifiable {
     let id: UUID
     @Published var content: String {
         didSet {
+            guard content != oldValue else { return }
             guard !isApplyingCloneSynchronization else { return }
             scenario?.propagateCloneContent(from: self, content: content)
             scenario?.markCardContentDirty()
@@ -525,6 +600,7 @@ final class SceneCard: ObservableObject, Identifiable {
     }
     @Published var orderIndex: Int {
         didSet {
+            guard orderIndex != oldValue else { return }
             scenario?.markCardRecordsDirty()
             markSharedCraftDirtyIfNeeded()
             scenario?.bumpCardsVersion()
@@ -534,6 +610,7 @@ final class SceneCard: ObservableObject, Identifiable {
     @Published var createdAt: Date
     @Published var parent: SceneCard? {
         didSet {
+            guard parent?.id != oldValue?.id else { return }
             scenario?.markCardRecordsDirty()
             markSharedCraftDirtyIfNeeded()
             scenario?.bumpCardsVersion()
@@ -543,13 +620,16 @@ final class SceneCard: ObservableObject, Identifiable {
     weak var scenario: Scenario?
     @Published var category: String? {
         didSet {
+            guard category != oldValue else { return }
             scenario?.markCardRecordsDirty()
             markSharedCraftDirtyIfNeeded(previousCategory: oldValue)
+            scenario?.bumpCardsVersion()
             scenario?.markModified()
         }
     }
     @Published var isFloating: Bool {
         didSet {
+            guard isFloating != oldValue else { return }
             scenario?.markCardRecordsDirty()
             markSharedCraftDirtyIfNeeded()
             scenario?.bumpCardsVersion()
@@ -558,6 +638,7 @@ final class SceneCard: ObservableObject, Identifiable {
     }
     @Published var isArchived: Bool {
         didSet {
+            guard isArchived != oldValue else { return }
             scenario?.markCardRecordsDirty()
             markSharedCraftDirtyIfNeeded()
             scenario?.bumpCardsVersion()
@@ -566,11 +647,13 @@ final class SceneCard: ObservableObject, Identifiable {
     }
     @Published var lastSelectedChildID: UUID? {
         didSet {
+            guard lastSelectedChildID != oldValue else { return }
             scenario?.markCardRecordsDirty()
         }
     }
     @Published var colorHex: String? {
         didSet {
+            guard colorHex != oldValue else { return }
             guard !isApplyingCloneSynchronization else { return }
             scenario?.propagateCloneColor(from: self, colorHex: colorHex)
             scenario?.markCardRecordsDirty()
@@ -580,6 +663,7 @@ final class SceneCard: ObservableObject, Identifiable {
     }
     @Published var cloneGroupID: UUID? {
         didSet {
+            guard cloneGroupID != oldValue else { return }
             scenario?.markCardRecordsDirty()
             markSharedCraftDirtyIfNeeded()
             scenario?.bumpCardsVersion()

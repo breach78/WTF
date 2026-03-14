@@ -99,7 +99,6 @@ struct ScenarioWriterView: View {
     @State var suppressHorizontalAutoScroll: Bool = false
     @State var maxLevelCount: Int = 0
     @State var lastWorkspaceRootSize: CGSize = .zero
-
     @State var editingCardID: UUID? = nil
     @State var showDeleteAlert: Bool = false
     @State var lastScrolledLevel: Int = 0
@@ -183,6 +182,9 @@ struct ScenarioWriterView: View {
     @State var pendingActiveCardID: UUID? = nil
     @State var pendingMainCanvasRestoreCardID: UUID? = nil
     @State var mainColumnLastFocusRequestByKey: [String: MainColumnFocusRequest] = [:]
+    @State var mainColumnViewportOffsetByKey: [String: CGFloat] = [:]
+    @State var mainColumnViewportCaptureSuspendedUntil: Date = .distantPast
+    @State var mainColumnViewportRestoreUntil: Date = .distantPast
     @State var mainCaretLocationByCardID: [UUID: Int] = [:]
     @State var mainCaretRestoreRequestID: Int = 0
     @State var mainLineSpacingAppliedCardID: UUID? = nil
@@ -597,6 +599,9 @@ struct ScenarioWriterView: View {
 
     func handleActiveCardIDChange(_ newID: UUID?) {
         mainColumnLastFocusRequestByKey = [:]
+        if let newID, scenario.rootCards.contains(where: { $0.id == newID }) {
+            mainColumnViewportRestoreUntil = Date().addingTimeInterval(0.35)
+        }
         syncSplitPaneActiveCardState(newID)
         if linkedCardsFilterEnabled, let newID, findCard(by: newID) != nil {
             linkedCardAnchorID = newID
@@ -615,13 +620,6 @@ struct ScenarioWriterView: View {
         pruneAICandidateTracking()
     }
 
-    func handleWorkspaceRootSizePreferenceChange(_ size: CGSize) {
-        let widthChanged = abs(size.width - lastWorkspaceRootSize.width) > 0.5
-        let heightChanged = abs(size.height - lastWorkspaceRootSize.height) > 0.5
-        guard widthChanged || heightChanged else { return }
-        lastWorkspaceRootSize = size
-    }
-
     func handleWorkspaceDisappear() {
         releaseScenarioTimestampSuppressionIfNeeded()
         cancelInactivePaneSnapshotRefresh()
@@ -637,6 +635,13 @@ struct ScenarioWriterView: View {
         stopMainCaretMonitor()
         stopSplitPaneMouseMonitor()
         stopDictationRecording(discardAudio: true)
+    }
+
+    func handleWorkspaceRootSizePreferenceChange(_ size: CGSize) {
+        let widthChanged = abs(size.width - lastWorkspaceRootSize.width) > 0.5
+        let heightChanged = abs(size.height - lastWorkspaceRootSize.height) > 0.5
+        guard widthChanged || heightChanged else { return }
+        lastWorkspaceRootSize = size
     }
 
     func handleShowFocusModeChange(_ isOn: Bool) {

@@ -240,6 +240,7 @@ extension ScenarioWriterView {
     @ViewBuilder
     func column(for cards: [SceneCard], level: Int, parent: SceneCard?, screenHeight: CGFloat) -> some View {
         let childListSignature = scenario.childListSignature(parentID: parent?.id)
+        let viewportKey = mainColumnViewportStorageKey(level: level)
         VStack(spacing: 0) {
             ScrollViewReader { proxy in
                 ScrollView(.vertical, showsIndicators: false) {
@@ -281,10 +282,14 @@ extension ScenarioWriterView {
                     }
                     .padding(.horizontal, MainCanvasLayoutMetrics.columnHorizontalPadding)
                     .frame(width: columnWidth)
+                    .background(mainColumnScrollObserver(viewportKey: viewportKey))
                 }
                 .onChange(of: activeCardID) { _, newID in
                     guard !showFocusMode else { return }
                     guard acceptsKeyboardInput else { return }
+                    if shouldPreserveMainColumnViewportOnReveal(level: level, storageKey: viewportKey, newActiveID: newID) {
+                        return
+                    }
                     // 현재 열이 활성 카드 본인이거나 그 조상을 포함한 '포커스 경로'일 때만 애니메이션 스크롤
                     // 자식 열이 부모의 움직임에 따라 마구 스크롤되는 현상(Dancing)을 방지합니다.
                     let isDirectPath = cards.contains { $0.id == newID || activeAncestorIDs.contains($0.id) }
@@ -298,29 +303,20 @@ extension ScenarioWriterView {
                 .onChange(of: childListSignature) { _, _ in
                     guard !showFocusMode else { return }
                     guard acceptsKeyboardInput else { return }
+                    if shouldPreserveMainColumnViewportOnReveal(level: level, storageKey: viewportKey, newActiveID: activeCardID) {
+                        return
+                    }
                     // 부모가 바뀌어 열의 카드 구성이 달라진 경우(자식 열 등장), 애니메이션 없이 즉시 위치를 잡습니다.
                     scrollToFocus(in: cards, level: level, parent: parent, proxy: proxy, viewportHeight: screenHeight, animated: false)
                 }
                 .onAppear {
                     guard !showFocusMode else { return }
                     guard acceptsKeyboardInput else { return }
+                    if shouldPreserveMainColumnViewportOnReveal(level: level, storageKey: viewportKey, newActiveID: activeCardID) {
+                        return
+                    }
                     // 처음 열이 그려질 때는 지연 없이 즉시 스냅하여 튀어오르는 느낌을 제거합니다.
                     scrollToFocus(in: cards, level: level, parent: parent, proxy: proxy, viewportHeight: screenHeight, animated: false)
-                }
-                .onPreferenceChange(MainCardHeightPreferenceKey.self) { heights in
-                    guard !showFocusMode else { return }
-                    guard acceptsKeyboardInput else { return }
-                    let previousHeights = mainCardHeights
-                    mainCardHeights.merge(heights, uniquingKeysWith: { _, new in new })
-                    guard let activeID = activeCardID else { return }
-                    guard cards.contains(where: { $0.id == activeID }) else { return }
-                    guard let newHeight = heights[activeID] else { return }
-                    let oldHeight = previousHeights[activeID] ?? 0
-                    if oldHeight <= screenHeight && newHeight > screenHeight {
-                        DispatchQueue.main.async {
-                            scrollToFocus(in: cards, level: level, parent: parent, proxy: proxy, viewportHeight: screenHeight, animated: false)
-                        }
-                    }
                 }
                 .onChange(of: mainBottomRevealTick) { _, _ in
                     guard !showFocusMode else { return }
@@ -328,9 +324,16 @@ extension ScenarioWriterView {
                     guard let requestedID = mainBottomRevealCardID else { return }
                     guard activeCardID == requestedID else { return }
                     guard cards.last?.id == requestedID else { return }
-                    guard let cardHeight = mainCardHeights[requestedID], cardHeight > screenHeight else { return }
+                    let cardHeight = mainCardHeights[requestedID] ?? 0
+                    guard cardHeight > screenHeight else { return }
+                    suspendMainColumnViewportCapture(for: 0.32)
                     withAnimation(quickEaseAnimation) {
                         proxy.scrollTo(requestedID, anchor: .bottom)
+                    }
+                }
+                .onPreferenceChange(MainCardHeightPreferenceKey.self) { heights in
+                    if heights != mainCardHeights {
+                        mainCardHeights.merge(heights) { _, new in new }
                     }
                 }
             }
@@ -376,7 +379,8 @@ extension ScenarioWriterView {
             return
         }
 
-        let prefersTopAnchor = (mainCardHeights[idToScroll] ?? 0) > viewportHeight
+        let targetHeight = mainCardHeights[idToScroll] ?? 0
+        let prefersTopAnchor = targetHeight > viewportHeight
         let request = MainColumnFocusRequest(
             targetID: idToScroll,
             prefersTopAnchor: prefersTopAnchor,
@@ -391,6 +395,7 @@ extension ScenarioWriterView {
         mainColumnLastFocusRequestByKey[requestKey] = request
 
         let focusAnchor = prefersTopAnchor ? UnitPoint(x: 0.5, y: 0.0) : defaultAnchor
+        suspendMainColumnViewportCapture(for: animated ? 0.32 : 0.12)
         if animated {
             withAnimation(quickEaseAnimation) {
                 proxy.scrollTo(idToScroll, anchor: focusAnchor)
@@ -403,6 +408,43 @@ extension ScenarioWriterView {
     func mainColumnScrollCacheKey(level: Int, parent: SceneCard?) -> String {
         let parentKey = parent?.id.uuidString ?? "root"
         return "\(level)|\(parentKey)"
+    }
+
+    @ViewBuilder
+    func mainColumnScrollObserver(viewportKey: String) -> some View {
+        MainColumnScrollViewAccessor(
+            columnKey: viewportKey,
+            storedOffsetY: mainColumnViewportOffsetByKey[viewportKey]
+        ) { originY in
+            guard Date() >= mainColumnViewportCaptureSuspendedUntil else { return }
+            let previous = mainColumnViewportOffsetByKey[viewportKey] ?? 0
+            if abs(previous - originY) > 0.5 {
+                mainColumnViewportOffsetByKey[viewportKey] = originY
+            }
+        }
+    }
+
+    func suspendMainColumnViewportCapture(for duration: TimeInterval) {
+        let until = Date().addingTimeInterval(duration)
+        if until > mainColumnViewportCaptureSuspendedUntil {
+            mainColumnViewportCaptureSuspendedUntil = until
+        }
+    }
+
+    func mainColumnViewportStorageKey(level: Int) -> String {
+        if level <= 1 || isActiveCardRoot {
+            return "level:\(level)|all"
+        }
+        let category = activeCategory ?? "all"
+        return "level:\(level)|category:\(category)"
+    }
+
+    func shouldPreserveMainColumnViewportOnReveal(level: Int, storageKey: String, newActiveID: UUID?) -> Bool {
+        guard level > 1 else { return false }
+        guard (mainColumnViewportOffsetByKey[storageKey] ?? 0) > 1 else { return false }
+        guard mainColumnViewportRestoreUntil > Date() else { return false }
+        guard let newActiveID, scenario.rootCards.contains(where: { $0.id == newActiveID }) else { return false }
+        return true
     }
 
     func requestMainBottomRevealIfNeeded(
@@ -484,15 +526,12 @@ extension ScenarioWriterView {
             clonePeerDestinations: clonePeerDestinations,
             onNavigateToClonePeer: { targetID in navigateToCloneCard(targetID) }
         )
+        .id(card.id)
         .background(
-            GeometryReader { geometry in
-                Color.clear.preference(
-                    key: MainCardHeightPreferenceKey.self,
-                    value: [card.id: geometry.size.height]
-                )
+            GeometryReader { proxy in
+                Color.clear.preference(key: MainCardHeightPreferenceKey.self, value: [card.id: proxy.size.height])
             }
         )
-        .id(card.id)
         .onDrag { NSItemProvider(object: card.id.uuidString as NSString) }
         .onDrop(of: [.text], delegate: AdvancedCardDropDelegate(targetCard: card, activeDropTarget: $activeDropTarget, performAction: { providers, target in handleGeneralDrop(providers, target: target) }))
     }
@@ -600,23 +639,24 @@ extension ScenarioWriterView {
         if insertionIndex < 0 { insertionIndex = 0 }
 
         let oldParents = movingRoots.map { $0.parent }
-        let destinationSiblings = destinationParent?.sortedChildren ?? scenario.rootCards
-        for sibling in destinationSiblings where !movingIDs.contains(sibling.id) && sibling.orderIndex >= insertionIndex {
-            sibling.orderIndex += movingRoots.count
-        }
-
-        for (offset, card) in movingRoots.enumerated() {
-            if card.isArchived {
-                card.isArchived = false
-                scenario.bumpCardsVersion()
+        scenario.performBatchedCardMutation {
+            let destinationSiblings = liveOrderedSiblings(parent: destinationParent)
+            for sibling in destinationSiblings where !movingIDs.contains(sibling.id) && sibling.orderIndex >= insertionIndex {
+                sibling.orderIndex += movingRoots.count
             }
-            card.parent = destinationParent
-            card.orderIndex = insertionIndex + offset
-            card.isFloating = false
-            card.updateDescendantsCategory(card.parent?.category)
-        }
 
-        normalizeAffectedParents(oldParents: oldParents, destinationParent: destinationParent)
+            for (offset, card) in movingRoots.enumerated() {
+                if card.isArchived {
+                    card.isArchived = false
+                }
+                card.parent = destinationParent
+                card.orderIndex = insertionIndex + offset
+                card.isFloating = false
+                card.updateDescendantsCategory(card.parent?.category)
+            }
+
+            normalizeAffectedParents(oldParents: oldParents, destinationParent: destinationParent)
+        }
 
         selectedCardIDs = Set(movingRoots.map { $0.id })
         changeActiveCard(to: draggedCard)
@@ -669,23 +709,25 @@ extension ScenarioWriterView {
             }
         case .onto(let id):
             if let parent = findCard(by: id) {
-                return (parent, parent.children.count)
+                return (parent, liveOrderedSiblings(parent: parent).count)
             }
         case .columnTop(let pId):
             let parent = pId.flatMap { findCard(by: $0) }
             return (parent, 0)
         case .columnBottom(let pId):
             let parent = pId.flatMap { findCard(by: $0) }
-            let count = parent?.children.count ?? scenario.rootCards.count
+            let count = liveOrderedSiblings(parent: parent).count
             return (parent, count)
         }
-        return (nil, scenario.rootCards.count)
+        return (nil, liveOrderedSiblings(parent: nil).count)
     }
 
     func normalizeAffectedParents(oldParents: [SceneCard?], destinationParent: SceneCard?) {
+        var normalizedParentIDs: Set<UUID> = []
         var normalizedRoot = false
         for parent in oldParents {
             if let parent = parent {
+                guard normalizedParentIDs.insert(parent.id).inserted else { continue }
                 normalizeIndices(parent: parent)
             } else if !normalizedRoot {
                 normalizeIndices(parent: nil)
@@ -693,6 +735,7 @@ extension ScenarioWriterView {
             }
         }
         if let destinationParent = destinationParent {
+            guard normalizedParentIDs.insert(destinationParent.id).inserted else { return }
             normalizeIndices(parent: destinationParent)
         } else if !normalizedRoot {
             normalizeIndices(parent: nil)
@@ -704,53 +747,53 @@ extension ScenarioWriterView {
         if let targetID = targetIDFrom(target), isDescendant(card, of: targetID) { return }
 
         let prevState = captureScenarioState()
+        scenario.performBatchedCardMutation {
+            if card.isArchived {
+                card.isArchived = false
+            }
 
-        if card.isArchived {
-            card.isArchived = false
-            scenario.bumpCardsVersion()
+            let oldParent = card.parent
+            normalizeIndices(parent: oldParent)
+
+            switch target {
+            case .before(let id):
+                if let anchor = findCard(by: id) {
+                    let newParent = anchor.parent
+                    let newIndex = anchor.orderIndex
+                    let newSiblings = liveOrderedSiblings(parent: newParent)
+                    for s in newSiblings where s.orderIndex >= newIndex { s.orderIndex += 1 }
+                    card.parent = newParent; card.orderIndex = newIndex
+                }
+            case .after(let id):
+                if let anchor = findCard(by: id) {
+                    let newParent = anchor.parent
+                    let newIndex = anchor.orderIndex + 1
+                    let newSiblings = liveOrderedSiblings(parent: newParent)
+                    for s in newSiblings where s.orderIndex >= newIndex { s.orderIndex += 1 }
+                    card.parent = newParent; card.orderIndex = newIndex
+                }
+            case .onto(let id):
+                if let parent = findCard(by: id) {
+                    card.parent = parent
+                    card.orderIndex = liveOrderedSiblings(parent: parent).count
+                }
+            case .columnTop(let pId):
+                let newParent = pId.flatMap { findCard(by: $0) }
+                let newSiblings = liveOrderedSiblings(parent: newParent)
+                for s in newSiblings { s.orderIndex += 1 }
+                card.parent = newParent; card.orderIndex = 0
+            case .columnBottom(let pId):
+                let newParent = pId.flatMap { findCard(by: $0) }
+                let newSiblings = liveOrderedSiblings(parent: newParent)
+                card.parent = newParent; card.orderIndex = newSiblings.count
+            }
+
+            card.isFloating = false
+            normalizeIndices(parent: card.parent)
+            if oldParent?.id != card.parent?.id { normalizeIndices(parent: oldParent) }
+
+            card.updateDescendantsCategory(card.parent?.category)
         }
-
-        let oldParent = card.parent
-        normalizeIndices(parent: oldParent)
-
-        switch target {
-        case .before(let id):
-            if let anchor = findCard(by: id) {
-                let newParent = anchor.parent
-                let newIndex = anchor.orderIndex
-                let newSiblings = newParent?.sortedChildren ?? scenario.rootCards
-                for s in newSiblings where s.orderIndex >= newIndex { s.orderIndex += 1 }
-                card.parent = newParent; card.orderIndex = newIndex
-            }
-        case .after(let id):
-            if let anchor = findCard(by: id) {
-                let newParent = anchor.parent
-                let newIndex = anchor.orderIndex + 1
-                let newSiblings = newParent?.sortedChildren ?? scenario.rootCards
-                for s in newSiblings where s.orderIndex >= newIndex { s.orderIndex += 1 }
-                card.parent = newParent; card.orderIndex = newIndex
-            }
-        case .onto(let id):
-            if let parent = findCard(by: id) {
-                card.parent = parent
-                card.orderIndex = parent.children.count
-            }
-        case .columnTop(let pId):
-            let newParent = pId.flatMap { findCard(by: $0) }
-            let newSiblings = newParent?.sortedChildren ?? scenario.rootCards
-            for s in newSiblings { s.orderIndex += 1 }
-            card.parent = newParent; card.orderIndex = 0
-        case .columnBottom(let pId):
-            let newParent = pId.flatMap { findCard(by: $0) }
-            let newSiblings = newParent?.sortedChildren ?? scenario.rootCards
-            card.parent = newParent; card.orderIndex = newSiblings.count
-        }
-
-        card.isFloating = false
-        normalizeIndices(parent: card.parent)
-        if oldParent?.id != card.parent?.id { normalizeIndices(parent: oldParent) }
-
-        card.updateDescendantsCategory(card.parent?.category)
         changeActiveCard(to: card)
         commitCardMutation(
             previousState: prevState,
@@ -763,6 +806,23 @@ extension ScenarioWriterView {
         case .before(let id), .after(let id), .onto(let id): return id
         default: return nil
         }
+    }
+
+    func liveOrderedSiblings(parent: SceneCard?) -> [SceneCard] {
+        scenario.cards
+            .filter { candidate in
+                guard !candidate.isArchived else { return false }
+                if let parent {
+                    return candidate.parent?.id == parent.id
+                }
+                return candidate.parent == nil && !candidate.isFloating
+            }
+            .sorted {
+                if $0.orderIndex != $1.orderIndex {
+                    return $0.orderIndex < $1.orderIndex
+                }
+                return $0.createdAt < $1.createdAt
+            }
     }
 
     func isDescendant(_ card: SceneCard, of targetID: UUID) -> Bool {
@@ -1953,24 +2013,25 @@ extension ScenarioWriterView {
 
     // MARK: - Insert, Add Child, Delete
 
-    func selectedSiblingsForParentCreation(contextCard: SceneCard) -> [SceneCard]? {
-        guard !showFocusMode else { return nil }
-        guard selectedCardIDs.count > 1 else { return nil }
-        guard selectedCardIDs.contains(contextCard.id) else { return nil }
-
-        let selectedCards = selectedCardIDs.compactMap { findCard(by: $0) }
-        guard selectedCards.count == selectedCardIDs.count else { return nil }
-        guard !selectedCards.isEmpty else { return nil }
-
-        let parentID = selectedCards.first?.parent?.id
-        guard selectedCards.allSatisfy({ $0.parent?.id == parentID }) else { return nil }
-
-        return selectedCards.sorted { lhs, rhs in
+    func sortedCardsForUpperCardCreation(_ cards: [SceneCard]) -> [SceneCard]? {
+        guard !cards.isEmpty else { return nil }
+        let parentID = cards.first?.parent?.id
+        guard cards.allSatisfy({ !$0.isArchived && $0.parent?.id == parentID }) else { return nil }
+        return cards.sorted { lhs, rhs in
             if lhs.orderIndex != rhs.orderIndex {
                 return lhs.orderIndex < rhs.orderIndex
             }
             return lhs.createdAt < rhs.createdAt
         }
+    }
+
+    func selectedSiblingsForParentCreation(contextCard: SceneCard) -> [SceneCard]? {
+        guard !showFocusMode else { return nil }
+        guard selectedCardIDs.count > 1 else { return nil }
+        guard selectedCardIDs.contains(contextCard.id) else { return nil }
+        let selectedCards = selectedCardIDs.compactMap { findCard(by: $0) }
+        guard selectedCards.count == selectedCardIDs.count else { return nil }
+        return sortedCardsForUpperCardCreation(selectedCards)
     }
 
     func canCreateUpperCardFromSelection(contextCard: SceneCard) -> Bool {
@@ -1980,7 +2041,6 @@ extension ScenarioWriterView {
     func createUpperCardFromSelection(contextCard: SceneCard) {
         guard let selectedSiblings = selectedSiblingsForParentCreation(contextCard: contextCard),
               let firstSelected = selectedSiblings.first else { return }
-
         let prevState = captureScenarioState()
         suppressMainFocusRestoreAfterFinishEditing = true
         finishEditing()
@@ -1988,6 +2048,7 @@ extension ScenarioWriterView {
         let parent = firstSelected.parent
         let insertionIndex = firstSelected.orderIndex
         let newParent = SceneCard(
+            content: "",
             orderIndex: insertionIndex,
             parent: parent,
             scenario: scenario,
@@ -1995,13 +2056,15 @@ extension ScenarioWriterView {
         )
         scenario.cards.append(newParent)
 
-        for (childIndex, selectedCard) in selectedSiblings.enumerated() {
-            selectedCard.parent = newParent
-            selectedCard.orderIndex = childIndex
-        }
+        scenario.performBatchedCardMutation {
+            for (childIndex, selectedCard) in selectedSiblings.enumerated() {
+                selectedCard.parent = newParent
+                selectedCard.orderIndex = childIndex
+            }
 
-        normalizeIndices(parent: parent)
-        normalizeIndices(parent: newParent)
+            normalizeIndices(parent: parent)
+            normalizeIndices(parent: newParent)
+        }
 
         scenario.bumpCardsVersion()
         keyboardRangeSelectionAnchorCardID = nil
@@ -2012,14 +2075,11 @@ extension ScenarioWriterView {
         editingStartState = captureScenarioState()
         editingIsNewCard = false
         pendingNewCardPrevState = nil
-        mainCaretLocationByCardID[newParent.id] = 0
+        mainCaretLocationByCardID[newParent.id] = (newParent.content as NSString).length
         requestMainCaretRestore(for: newParent.id)
         requestCoalescedMainCaretEnsure(minInterval: mainCaretSelectionEnsureMinInterval, delay: 0.0)
         isMainViewFocused = true
-        commitCardMutation(
-            previousState: prevState,
-            actionName: "새 상위 카드 만들기"
-        )
+        commitCardMutation(previousState: prevState, actionName: "새 상위 카드 만들기")
     }
 
     func canSummarizeDirectChildren(for parentCard: SceneCard) -> Bool {
