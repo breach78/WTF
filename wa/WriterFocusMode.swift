@@ -50,7 +50,7 @@ extension ScenarioWriterView {
                 .onChange(of: focusModeEntryScrollTick) { _, _ in
                     handleFocusModeEntryScrollTickChange(proxy: proxy)
                 }
-                .onChange(of: scenario.cardsVersion) { _, _ in
+                .onChange(of: scenarioCardsVersion) { _, _ in
                     refreshFocusModeSearchResultsIfNeeded()
                 }
             }
@@ -2591,7 +2591,7 @@ extension ScenarioWriterView {
         let changed = editingStartContent != currentCard.content
         guard changed else { return }
         focusLastCommittedContentByCard[currentID] = currentCard.content
-        store.saveAll()
+        saveWriterChanges()
         takeSnapshot()
     }
 

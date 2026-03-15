@@ -316,6 +316,65 @@ extension ScenarioWriterView {
         }
     }
 
+    func requestAIUpperCardSummary(from request: UpperCardCreationRequest) {
+        pendingUpperCardCreationRequest = nil
+        guard !aiIsGenerating else {
+            setAIStatusError("이미 다른 AI 작업이 진행 중입니다.")
+            return
+        }
+
+        let sourceCards = request.sourceCardIDs.compactMap { findCard(by: $0) }
+        guard sourceCards.count == request.sourceCardIDs.count,
+              let contextCard = findCard(by: request.contextCardID) else {
+            setAIStatusError("원본 카드 상태가 바뀌어 상위 카드를 만들 수 없습니다.")
+            return
+        }
+
+        suppressMainFocusRestoreAfterFinishEditing = true
+        finishEditing()
+        selectedCardIDs = Set(request.sourceCardIDs)
+        changeActiveCard(to: contextCard, shouldFocusMain: false)
+
+        let resolvedModel = currentGeminiModel()
+        aiIsGenerating = true
+        aiChildSummaryLoadingCardIDs.insert(contextCard.id)
+        setAIStatus("AI 요약 상위 카드를 생성하는 중입니다...")
+
+        Task { @MainActor in
+            defer {
+                aiIsGenerating = false
+                aiChildSummaryLoadingCardIDs.remove(contextCard.id)
+            }
+            do {
+                guard let apiKey = try KeychainStore.loadGeminiAPIKey() else {
+                    throw GeminiServiceError.missingAPIKey
+                }
+                let latestSourceCards = request.sourceCardIDs.compactMap { findCard(by: $0) }
+                let promptCards = latestSourceCards.isEmpty ? sourceCards : latestSourceCards
+                let prompt = buildAISummaryPrompt(for: promptCards)
+                let summaryText = try await GeminiService.generateText(
+                    prompt: prompt,
+                    model: resolvedModel,
+                    apiKey: apiKey
+                )
+                let normalized = summaryText.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !normalized.isEmpty else {
+                    throw GeminiServiceError.invalidResponse
+                }
+
+                let resolvedSourceCards = request.sourceCardIDs.compactMap { findCard(by: $0) }
+                guard resolvedSourceCards.count == request.sourceCardIDs.count,
+                      createUpperCardWithResolvedSummary(sourceCards: resolvedSourceCards, summary: normalized) != nil else {
+                    setAIStatusError("원본 카드 상태가 바뀌어 상위 카드를 만들 수 없습니다.")
+                    return
+                }
+                setAIStatus("AI 요약 상위 카드를 만들었습니다.")
+            } catch {
+                setAIStatusError(error.localizedDescription)
+            }
+        }
+    }
+
     func applyAICandidates(
         suggestions: [GeminiSuggestion],
         parentID: UUID,

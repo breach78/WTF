@@ -123,7 +123,7 @@ extension ScenarioWriterView {
             focusLastCommittedContentByCard = Dictionary(uniqueKeysWithValues: scenario.cards.map { ($0.id, $0.content) })
             resetFocusTypingCoalescing()
         }
-        store.saveAll()
+        saveWriterChanges()
         isApplyingUndo = false
     }
 

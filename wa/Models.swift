@@ -166,12 +166,20 @@ final class Scenario: ObservableObject, Identifiable, Hashable {
         applyModifiedTimestamp(pending)
     }
 
+    func persistedTimestamp() -> Date {
+        pendingModifiedTimestamp ?? timestamp
+    }
+
     private var totalTimestampSuppressionCount: Int {
         timestampTrackingSuppressionCount + interactiveTimestampSuppressionCount
     }
 
     private var totalMutationSuppressionCount: Int {
         totalTimestampSuppressionCount + cardMutationBatchDepth
+    }
+
+    var isCardMutationBatchInProgress: Bool {
+        cardMutationBatchDepth > 0
     }
 
     private func recordPendingModifiedTimestamp(_ date: Date) {
@@ -328,7 +336,7 @@ final class Scenario: ObservableObject, Identifiable, Hashable {
 
     func descendantIDs(for cardID: UUID) -> Set<UUID> {
         rebuildIndexIfNeeded()
-        return cachedDescendantIDsByCardID[cardID] ?? []
+        return computeDescendantIDs(for: cardID)
     }
 
     func propagateCloneContent(from sourceCard: SceneCard, content: String) {
@@ -425,26 +433,34 @@ final class Scenario: ObservableObject, Identifiable, Hashable {
         pruneLinkedCards(validCardIDs: Set(cards.map(\.id)))
     }
 
-    func linkedCardRecords() -> [LinkedCardRecord] {
-        linkedCardEditDatesByFocusCardID
-            .flatMap { focusID, byLinked in
-                byLinked.map { linkedID, lastEditedAt in
+    func linkedCardRecords(validCardIDs: Set<UUID>? = nil) -> [LinkedCardRecord] {
+        let validIDs = validCardIDs ?? Set(cards.map(\.id))
+        var records: [LinkedCardRecord] = []
+        records.reserveCapacity(linkedCardEditDatesByFocusCardID.count * 2)
+
+        for (focusID, byLinked) in linkedCardEditDatesByFocusCardID {
+            guard validIDs.contains(focusID) else { continue }
+            for (linkedID, lastEditedAt) in byLinked {
+                guard validIDs.contains(linkedID), linkedID != focusID else { continue }
+                records.append(
                     LinkedCardRecord(
                         focusCardID: focusID,
                         linkedCardID: linkedID,
                         lastEditedAt: lastEditedAt
                     )
-                }
+                )
             }
-            .sorted {
-                if $0.focusCardID != $1.focusCardID {
-                    return $0.focusCardID.uuidString < $1.focusCardID.uuidString
-                }
-                if $0.lastEditedAt != $1.lastEditedAt {
-                    return $0.lastEditedAt > $1.lastEditedAt
-                }
-                return $0.linkedCardID.uuidString < $1.linkedCardID.uuidString
+        }
+
+        return records.sorted { (lhs: LinkedCardRecord, rhs: LinkedCardRecord) in
+            if lhs.focusCardID != rhs.focusCardID {
+                return lhs.focusCardID.uuidString < rhs.focusCardID.uuidString
             }
+            if lhs.lastEditedAt != rhs.lastEditedAt {
+                return lhs.lastEditedAt > rhs.lastEditedAt
+            }
+            return lhs.linkedCardID.uuidString < rhs.linkedCardID.uuidString
+        }
     }
 
     func pruneLinkedCards(validCardIDs: Set<UUID>) {
@@ -506,9 +522,19 @@ final class Scenario: ObservableObject, Identifiable, Hashable {
                 roots.append(card)
             }
         }
-        roots.sort { $0.orderIndex < $1.orderIndex }
+        roots.sort {
+            if $0.orderIndex != $1.orderIndex {
+                return $0.orderIndex < $1.orderIndex
+            }
+            return $0.createdAt < $1.createdAt
+        }
         for key in childrenByParent.keys {
-            childrenByParent[key]?.sort { $0.orderIndex < $1.orderIndex }
+            childrenByParent[key]?.sort {
+                if $0.orderIndex != $1.orderIndex {
+                    return $0.orderIndex < $1.orderIndex
+                }
+                return $0.createdAt < $1.createdAt
+            }
         }
         cachedRoots = roots
         cachedChildrenByParent = childrenByParent
@@ -516,7 +542,7 @@ final class Scenario: ObservableObject, Identifiable, Hashable {
         cachedChildListSignatureByParentID = childrenByParent.mapValues(orderedCardIDSignature(_:))
         cachedCardsByID = byID
         cachedCloneMembersByGroup = cloneMembersByGroup
-        cachedDescendantIDsByCardID = buildDescendantIDIndex(childrenByParent: childrenByParent)
+        cachedDescendantIDsByCardID = [:]
         // Build levels hierarchy
         var levels: [[SceneCard]] = [roots]
         var curr = roots
@@ -559,29 +585,19 @@ final class Scenario: ObservableObject, Identifiable, Hashable {
         return hasher.finalize()
     }
 
-    private func buildDescendantIDIndex(childrenByParent: [UUID: [SceneCard]]) -> [UUID: Set<UUID>] {
-        var cache: [UUID: Set<UUID>] = [:]
-
-        func descendants(for cardID: UUID) -> Set<UUID> {
-            if let cached = cache[cardID] {
-                return cached
-            }
-            let children = childrenByParent[cardID] ?? []
-            var result: Set<UUID> = []
-            result.reserveCapacity(children.count * 2)
-            for child in children {
-                result.insert(child.id)
-                result.formUnion(descendants(for: child.id))
-            }
-            cache[cardID] = result
-            return result
+    private func computeDescendantIDs(for cardID: UUID) -> Set<UUID> {
+        if let cached = cachedDescendantIDsByCardID[cardID] {
+            return cached
         }
-
-        for cardID in cachedCardsByID.keys {
-            _ = descendants(for: cardID)
+        let children = cachedChildrenByParent[cardID] ?? []
+        var result: Set<UUID> = []
+        result.reserveCapacity(children.count * 2)
+        for child in children {
+            result.insert(child.id)
+            result.formUnion(computeDescendantIDs(for: child.id))
         }
-
-        return cache
+        cachedDescendantIDsByCardID[cardID] = result
+        return result
     }
 }
 
@@ -862,6 +878,8 @@ final class FileStore: ObservableObject {
     private nonisolated(unsafe) var lastSavedAIThreadsData: [UUID: Data] = [:]
     private nonisolated(unsafe) var lastSavedAIEmbeddingIndexData: [UUID: Data] = [:]
     private var scenarioPayloadCacheByID: [UUID: ScenarioPayloadCacheEntry] = [:]
+    private var scenarioMetadataObservationByID: [UUID: Set<AnyCancellable>] = [:]
+    private var scenarioResortWorkItem: DispatchWorkItem?
 
     init(folderURL: URL) {
         self.folderURL = folderURL
@@ -1114,7 +1132,7 @@ final class FileStore: ObservableObject {
         }
     }
 
-    private func synchronizeSharedCraftTrees(
+    func synchronizeSharedCraftTrees(
         preserveExistingTimestamps: Bool,
         force: Bool = false
     ) {
@@ -1138,6 +1156,41 @@ final class FileStore: ObservableObject {
         let sorted = scenarios.sorted(by: scenarioSortComparator)
         guard sorted.map(\.id) != scenarios.map(\.id) else { return }
         scenarios = sorted
+    }
+
+    private func scheduleScenarioResort() {
+        scenarioResortWorkItem?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.scenarioResortWorkItem = nil
+            self.resortScenariosInPlace()
+        }
+        scenarioResortWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08, execute: work)
+    }
+
+    private func refreshScenarioMetadataObservers() {
+        scenarioMetadataObservationByID.removeAll()
+
+        for scenario in scenarios {
+            var cancellables: Set<AnyCancellable> = []
+
+            scenario.$timestamp
+                .removeDuplicates()
+                .sink { [weak self] _ in
+                    self?.scheduleScenarioResort()
+                }
+                .store(in: &cancellables)
+
+            scenario.$isTemplate
+                .removeDuplicates()
+                .sink { [weak self] _ in
+                    self?.scheduleScenarioResort()
+                }
+                .store(in: &cancellables)
+
+            scenarioMetadataObservationByID[scenario.id] = cancellables
+        }
     }
 
     func load() async {
@@ -1269,6 +1322,7 @@ final class FileStore: ObservableObject {
             if scenarios.isEmpty {
                 createInitialScenario()
             } else {
+                refreshScenarioMetadataObservers()
                 synchronizeSharedCraftTrees(preserveExistingTimestamps: true, force: true)
                 for scenario in scenarios {
                     scenario.bumpCardsVersion()
@@ -1278,11 +1332,6 @@ final class FileStore: ObservableObject {
     }
 
     func saveAll(immediate: Bool = false) {
-        for scenario in scenarios {
-            scenario.flushPendingModifiedTimestamp()
-        }
-        synchronizeSharedCraftTrees(preserveExistingTimestamps: true)
-        resortScenariosInPlace()
         requestSave(immediate: immediate)
     }
 
@@ -1322,17 +1371,13 @@ final class FileStore: ObservableObject {
             encoder.outputFormatting = [.sortedKeys]
             encoder.dateEncodingStrategy = .iso8601
 
-            for scenario in scenarios {
-                scenario.pruneLinkedCards(validCardIDs: Set(scenario.cards.map(\.id)))
-            }
-
             let scenarioRecords = scenarios.map { scenario in
                 let folderName = ensureScenarioFolder(for: scenario.id)
                 return ScenarioRecord(
                     id: scenario.id,
                     title: scenario.title,
                     isTemplate: scenario.isTemplate,
-                    timestamp: scenario.timestamp,
+                    timestamp: scenario.persistedTimestamp(),
                     changeCountSinceLastSnapshot: scenario.changeCountSinceLastSnapshot,
                     folderName: folderName,
                     schemaVersion: currentSchemaVersion
@@ -1401,7 +1446,7 @@ final class FileStore: ObservableObject {
                 let linkedCardsData: Data = try {
                     guard let cachedPayload,
                           cachedPayload.linkedCardsVersion == scenario.linkedCardsSaveVersion else {
-                        return try encoder.encode(scenario.linkedCardRecords())
+                        return try encoder.encode(scenario.linkedCardRecords(validCardIDs: validCardIDs))
                     }
                     return cachedPayload.linkedCardsData
                 }()
@@ -1608,6 +1653,7 @@ final class FileStore: ObservableObject {
         scenario.changeCountSinceLastSnapshot = 0
         scenario.bumpCardsVersion()
         scenarios.insert(scenario, at: 0)
+        refreshScenarioMetadataObservers()
         saveAll(immediate: true)
         return scenario
     }
@@ -1623,6 +1669,7 @@ final class FileStore: ObservableObject {
 
     func deleteScenario(_ scenario: Scenario) {
         scenarios.removeAll { $0.id == scenario.id }
+        refreshScenarioMetadataObservers()
         if let folderName = scenarioFolderByID[scenario.id] {
             let folder = folderURL.appendingPathComponent(folderName)
             try? fileManager.removeItem(at: folder)
@@ -1640,6 +1687,7 @@ final class FileStore: ObservableObject {
         scenario.pruneLinkedCards(validCardIDs: Set(scenario.cards.map(\.id)))
         scenario.bumpCardsVersion()
         scenario.changeCountSinceLastSnapshot = 0
+        synchronizeSharedCraftTrees(preserveExistingTimestamps: true)
         saveAll(immediate: true)
     }
 
@@ -1661,6 +1709,7 @@ final class FileStore: ObservableObject {
         applySharedCraftSnapshot(defaultSharedCraftSnapshot(), to: scenario, preserveTimestamp: false)
         scenario.bumpCardsVersion()
         scenarios = [scenario]
+        refreshScenarioMetadataObservers()
         saveAll(immediate: true)
     }
 

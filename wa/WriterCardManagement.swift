@@ -93,8 +93,17 @@ extension ScenarioWriterView {
         case none
     }
 
+    func prepareWriterModelForPersistence() {
+        store.synchronizeSharedCraftTrees(preserveExistingTimestamps: true)
+    }
+
+    func saveWriterChanges(immediate: Bool = false) {
+        prepareWriterModelForPersistence()
+        store.saveAll(immediate: immediate)
+    }
+
     func persistCardMutation(forceSnapshot: Bool = false, immediateSave: Bool = false) {
-        store.saveAll(immediate: immediateSave)
+        saveWriterChanges(immediate: immediateSave)
         takeSnapshot(force: forceSnapshot)
     }
 
@@ -163,7 +172,6 @@ extension ScenarioWriterView {
             isAncestor: false,
             isDescendant: false,
             isEditing: acceptsKeyboardInput && editingCardID == card.id,
-            dropTarget: nil,
             preferredTextMeasureWidth: TimelinePanelLayoutMetrics.textWidth,
             forceNamedSnapshotNoteStyle: isNamedNote,
             forceCustomColorVisibility: isAICandidate,
@@ -234,7 +242,10 @@ extension ScenarioWriterView {
                 )
         )
         .id("timeline-\(card.id)")
-        .onDrag { NSItemProvider(object: card.id.uuidString as NSString) }
+        .onDrag {
+            MainCardDragSessionTracker.shared.begin()
+            return NSItemProvider(object: card.id.uuidString as NSString)
+        }
     }
 
     @ViewBuilder
@@ -246,8 +257,12 @@ extension ScenarioWriterView {
                 ScrollView(.vertical, showsIndicators: false) {
                     LazyVStack(spacing: 0) {
                         // --- 최상단 드롭 영역 (첫 카드가 정확히 0.4 지점에 오도록 높이를 0.4로 고정) ---
-                        DropSpacer(target: .columnTop(parent?.id), activeDropTarget: $activeDropTarget, alignment: .bottom) { providers in
-                            handleGeneralDrop(providers, target: .columnTop(parent?.id))
+                        DropSpacer(target: .columnTop(parent?.id), alignment: .bottom) { providers, includeTrailingSiblingBlock in
+                            handleGeneralDrop(
+                                providers,
+                                target: .columnTop(parent?.id),
+                                includeTrailingSiblingBlock: includeTrailingSiblingBlock
+                            )
                         }
                         .frame(height: screenHeight * 0.4)
 
@@ -266,8 +281,12 @@ extension ScenarioWriterView {
                                 }
 
                                 // --- 카드 사이 드롭 영역 ---
-                                DropSpacer(target: .after(card.id), activeDropTarget: $activeDropTarget, alignment: .center) { providers in
-                                    handleGeneralDrop(providers, target: .after(card.id))
+                                DropSpacer(target: .after(card.id), alignment: .center) { providers, includeTrailingSiblingBlock in
+                                    handleGeneralDrop(
+                                        providers,
+                                        target: .after(card.id),
+                                        includeTrailingSiblingBlock: includeTrailingSiblingBlock
+                                    )
                                 }
                             }
                         }
@@ -275,8 +294,12 @@ extension ScenarioWriterView {
                         if cards.isEmpty && level == 0 { addFirstButton(level: level) }
 
                         // --- 최하단 드롭 영역 ---
-                        DropSpacer(target: .columnBottom(parent?.id), activeDropTarget: $activeDropTarget, alignment: .top) { providers in
-                            handleGeneralDrop(providers, target: .columnBottom(parent?.id))
+                        DropSpacer(target: .columnBottom(parent?.id), alignment: .top) { providers, includeTrailingSiblingBlock in
+                            handleGeneralDrop(
+                                providers,
+                                target: .columnBottom(parent?.id),
+                                includeTrailingSiblingBlock: includeTrailingSiblingBlock
+                            )
                         }
                         .frame(height: screenHeight * 0.7)
                     }
@@ -324,16 +347,12 @@ extension ScenarioWriterView {
                     guard let requestedID = mainBottomRevealCardID else { return }
                     guard activeCardID == requestedID else { return }
                     guard cards.last?.id == requestedID else { return }
-                    let cardHeight = mainCardHeights[requestedID] ?? 0
+                    guard let requestedCard = findCard(by: requestedID) else { return }
+                    let cardHeight = resolvedMainCardHeight(for: requestedCard)
                     guard cardHeight > screenHeight else { return }
                     suspendMainColumnViewportCapture(for: 0.32)
                     withAnimation(quickEaseAnimation) {
                         proxy.scrollTo(requestedID, anchor: .bottom)
-                    }
-                }
-                .onPreferenceChange(MainCardHeightPreferenceKey.self) { heights in
-                    if heights != mainCardHeights {
-                        mainCardHeights.merge(heights) { _, new in new }
                     }
                 }
             }
@@ -379,7 +398,7 @@ extension ScenarioWriterView {
             return
         }
 
-        let targetHeight = mainCardHeights[idToScroll] ?? 0
+        let targetHeight = findCard(by: idToScroll).map { resolvedMainCardHeight(for: $0) } ?? 0
         let prefersTopAnchor = targetHeight > viewportHeight
         let request = MainColumnFocusRequest(
             targetID: idToScroll,
@@ -459,6 +478,40 @@ extension ScenarioWriterView {
         return true
     }
 
+    func resolvedMainCardHeight(for card: SceneCard) -> CGFloat {
+        let lineSpacing = CGFloat(mainCardLineSpacingValue)
+
+        if editingCardID == card.id {
+            if let textView = NSApp.keyWindow?.firstResponder as? NSTextView,
+               textView.string == card.content,
+               let liveBodyHeight = sharedLiveTextViewBodyHeight(textView) {
+                return ceil(liveBodyHeight + 48)
+            }
+
+            let editorBodyHeight = sharedMeasuredTextBodyHeight(
+                text: card.content,
+                fontSize: CGFloat(fontSize),
+                lineSpacing: lineSpacing,
+                width: MainCanvasLayoutMetrics.textWidth,
+                lineFragmentPadding: MainEditorLayoutMetrics.mainEditorLineFragmentPadding,
+                safetyInset: 0
+            )
+            return ceil(editorBodyHeight + 48)
+        }
+
+        let displayText = card.content.isEmpty ? "내용 없음" : card.content
+        let displayWidth = max(1, MainCanvasLayoutMetrics.cardWidth - (MainEditorLayoutMetrics.mainCardContentPadding * 2))
+        let displayBodyHeight = sharedMeasuredTextBodyHeight(
+            text: displayText,
+            fontSize: CGFloat(fontSize),
+            lineSpacing: lineSpacing,
+            width: displayWidth,
+            lineFragmentPadding: 0,
+            safetyInset: 0
+        )
+        return ceil(displayBodyHeight + (MainEditorLayoutMetrics.mainCardContentPadding * 2))
+    }
+
     @ViewBuilder
     func cardRow(_ card: SceneCard, proxy: ScrollViewProxy) -> some View {
         let isAICandidate = aiCandidateState.cardIDs.contains(card.id) || card.isAICandidate
@@ -478,7 +531,6 @@ extension ScenarioWriterView {
             isAncestor: activeAncestorIDs.contains(card.id) || activeSiblingIDs.contains(card.id),
             isDescendant: activeDescendantIDs.contains(card.id),
             isEditing: !showFocusMode && acceptsKeyboardInput && editingCardID == card.id,
-            dropTarget: activeDropTarget,
             preferredTextMeasureWidth: MainCanvasLayoutMetrics.textWidth,
             forceNamedSnapshotNoteStyle: false,
             forceCustomColorVisibility: isAICandidate,
@@ -524,16 +576,20 @@ extension ScenarioWriterView {
             isLinkedCard: isLinkedCard,
             onCloneCard: { copyCardsAsCloneFromContext(card) },
             clonePeerDestinations: clonePeerDestinations,
-            onNavigateToClonePeer: { targetID in navigateToCloneCard(targetID) }
-        )
-        .id(card.id)
-        .background(
-            GeometryReader { proxy in
-                Color.clear.preference(key: MainCardHeightPreferenceKey.self, value: [card.id: proxy.size.height])
+            onNavigateToClonePeer: { targetID in navigateToCloneCard(targetID) },
+            onCardDrop: { providers, includeTrailingSiblingBlock in
+                handleGeneralDrop(
+                    providers,
+                    target: .onto(card.id),
+                    includeTrailingSiblingBlock: includeTrailingSiblingBlock
+                )
             }
         )
-        .onDrag { NSItemProvider(object: card.id.uuidString as NSString) }
-        .onDrop(of: [.text], delegate: AdvancedCardDropDelegate(targetCard: card, activeDropTarget: $activeDropTarget, performAction: { providers, target in handleGeneralDrop(providers, target: target) }))
+        .id(card.id)
+        .onDrag {
+            MainCardDragSessionTracker.shared.begin()
+            return NSItemProvider(object: card.id.uuidString as NSString)
+        }
     }
 
     func clonePeerMenuDestinations(for card: SceneCard) -> [ClonePeerMenuDestination] {
@@ -602,12 +658,24 @@ extension ScenarioWriterView {
 
     // MARK: - Drag & Drop
 
-    func handleGeneralDrop(_ providers: [NSItemProvider], target: DropTarget) {
+    func handleGeneralDrop(
+        _ providers: [NSItemProvider],
+        target: DropTarget,
+        includeTrailingSiblingBlock: Bool = false
+    ) {
         guard let provider = providers.first else { return }
         provider.loadObject(ofClass: NSString.self) { string, _ in
             guard let uuidStr = string as? String, let draggedID = UUID(uuidString: uuidStr) else { return }
             DispatchQueue.main.async {
+                MainCardDragSessionTracker.shared.end()
                 guard let draggedCard = findCard(by: draggedID) else { return }
+                if includeTrailingSiblingBlock {
+                    let siblingBlock = trailingSiblingBlock(from: draggedCard)
+                    if siblingBlock.count > 1 {
+                        executeMoveSelection(siblingBlock, draggedCard: draggedCard, target: target)
+                        return
+                    }
+                }
                 let selectedCards = selectedCardIDs.compactMap { findCard(by: $0) }
                 if selectedCardIDs.count > 1, selectedCardIDs.contains(draggedID) {
                     executeMoveSelection(selectedCards, draggedCard: draggedCard, target: target)
@@ -646,13 +714,18 @@ extension ScenarioWriterView {
             }
 
             for (offset, card) in movingRoots.enumerated() {
+                let previousParent = card.parent
                 if card.isArchived {
                     card.isArchived = false
                 }
                 card.parent = destinationParent
                 card.orderIndex = insertionIndex + offset
                 card.isFloating = false
-                card.updateDescendantsCategory(card.parent?.category)
+                synchronizeMovedSubtreeCategoryIfNeeded(
+                    for: card,
+                    oldParent: previousParent,
+                    newParent: destinationParent
+                )
             }
 
             normalizeAffectedParents(oldParents: oldParents, destinationParent: destinationParent)
@@ -684,6 +757,14 @@ extension ScenarioWriterView {
             if l.1 != r.1 { return l.1 < r.1 }
             return lhs.createdAt < rhs.createdAt
         }
+    }
+
+    func trailingSiblingBlock(from draggedCard: SceneCard) -> [SceneCard] {
+        let siblings = liveOrderedSiblings(parent: draggedCard.parent)
+        guard let startIndex = siblings.firstIndex(where: { $0.id == draggedCard.id }) else {
+            return [draggedCard]
+        }
+        return Array(siblings[startIndex...])
     }
 
     func buildCanvasRank() -> [UUID: (Int, Int)] {
@@ -792,7 +873,11 @@ extension ScenarioWriterView {
             normalizeIndices(parent: card.parent)
             if oldParent?.id != card.parent?.id { normalizeIndices(parent: oldParent) }
 
-            card.updateDescendantsCategory(card.parent?.category)
+            synchronizeMovedSubtreeCategoryIfNeeded(
+                for: card,
+                oldParent: oldParent,
+                newParent: card.parent
+            )
         }
         changeActiveCard(to: card)
         commitCardMutation(
@@ -809,7 +894,13 @@ extension ScenarioWriterView {
     }
 
     func liveOrderedSiblings(parent: SceneCard?) -> [SceneCard] {
-        scenario.cards
+        if !scenario.isCardMutationBatchInProgress {
+            if let parent {
+                return scenario.children(for: parent.id)
+            }
+            return scenario.rootCards
+        }
+        return scenario.cards
             .filter { candidate in
                 guard !candidate.isArchived else { return false }
                 if let parent {
@@ -823,6 +914,17 @@ extension ScenarioWriterView {
                 }
                 return $0.createdAt < $1.createdAt
             }
+    }
+
+    func synchronizeMovedSubtreeCategoryIfNeeded(
+        for card: SceneCard,
+        oldParent: SceneCard?,
+        newParent: SceneCard?
+    ) {
+        let previousCategory = oldParent?.category
+        let nextCategory = newParent?.category
+        guard previousCategory != nextCategory || card.category != nextCategory else { return }
+        card.updateDescendantsCategory(nextCategory)
     }
 
     func isDescendant(_ card: SceneCard, of targetID: UUID) -> Bool {
@@ -2002,7 +2104,7 @@ extension ScenarioWriterView {
         let new = SceneCard(orderIndex: parent?.children.count ?? scenario.rootCards.count, parent: parent, scenario: scenario, category: parent?.category)
         scenario.cards.append(new)
         scenario.bumpCardsVersion()
-        store.saveAll()
+        saveWriterChanges()
         selectedCardIDs = [new.id]
         changeActiveCard(to: new, shouldFocusMain: false)
         editingCardID = new.id
@@ -2027,59 +2129,165 @@ extension ScenarioWriterView {
 
     func selectedSiblingsForParentCreation(contextCard: SceneCard) -> [SceneCard]? {
         guard !showFocusMode else { return nil }
-        guard selectedCardIDs.count > 1 else { return nil }
-        guard selectedCardIDs.contains(contextCard.id) else { return nil }
-        let selectedCards = selectedCardIDs.compactMap { findCard(by: $0) }
-        guard selectedCards.count == selectedCardIDs.count else { return nil }
-        return sortedCardsForUpperCardCreation(selectedCards)
+        guard !contextCard.isArchived else { return nil }
+        if selectedCardIDs.count > 1 {
+            guard selectedCardIDs.contains(contextCard.id) else { return nil }
+            let selectedCards = selectedCardIDs.compactMap { findCard(by: $0) }
+            guard selectedCards.count == selectedCardIDs.count else { return nil }
+            return sortedCardsForUpperCardCreation(selectedCards)
+        }
+        return [contextCard]
     }
 
     func canCreateUpperCardFromSelection(contextCard: SceneCard) -> Bool {
-        selectedSiblingsForParentCreation(contextCard: contextCard) != nil
+        guard !showFocusMode else { return false }
+        guard !contextCard.isArchived else { return false }
+        if selectedCardIDs.count <= 1 {
+            return true
+        }
+        guard selectedCardIDs.contains(contextCard.id) else { return false }
+        let selectedCards = selectedCardIDs.compactMap { findCard(by: $0) }
+        guard selectedCards.count == selectedCardIDs.count else { return false }
+        return sortedCardsForUpperCardCreation(selectedCards) != nil
+    }
+
+    func upperCardCreationRequest(contextCard: SceneCard) -> UpperCardCreationRequest? {
+        guard let sourceCards = selectedSiblingsForParentCreation(contextCard: contextCard) else { return nil }
+        return UpperCardCreationRequest(
+            contextCardID: contextCard.id,
+            sourceCardIDs: sourceCards.map(\.id)
+        )
     }
 
     func createUpperCardFromSelection(contextCard: SceneCard) {
-        guard let selectedSiblings = selectedSiblingsForParentCreation(contextCard: contextCard),
-              let firstSelected = selectedSiblings.first else { return }
+        guard let request = upperCardCreationRequest(contextCard: contextCard) else { return }
+        pendingUpperCardCreationRequest = request
+    }
+
+    func upperCardCreationSiblingLayout(
+        parent: SceneCard?,
+        selectedSiblings: [SceneCard],
+        newParent: SceneCard,
+        oldSiblings: [SceneCard]
+    ) -> [SceneCard]? {
+        guard let firstSelected = selectedSiblings.first,
+              let insertionIndex = oldSiblings.firstIndex(where: { $0.id == firstSelected.id }) else {
+            return nil
+        }
+
+        let selectedIDs = Set(selectedSiblings.map(\.id))
+        var finalSiblings: [SceneCard] = []
+        finalSiblings.reserveCapacity(max(1, oldSiblings.count - selectedSiblings.count + 1))
+
+        for (index, sibling) in oldSiblings.enumerated() {
+            if index == insertionIndex {
+                finalSiblings.append(newParent)
+            }
+            guard !selectedIDs.contains(sibling.id) else { continue }
+            guard sibling.parent?.id == parent?.id else { continue }
+            finalSiblings.append(sibling)
+        }
+
+        if insertionIndex >= oldSiblings.count {
+            finalSiblings.append(newParent)
+        }
+
+        return finalSiblings
+    }
+
+    @discardableResult
+    func createUpperCardFromSourceCards(
+        _ sourceCards: [SceneCard],
+        initialContent: String,
+        startEditing: Bool,
+        actionName: String
+    ) -> SceneCard? {
+        guard let selectedSiblings = sortedCardsForUpperCardCreation(sourceCards),
+              let firstSelected = selectedSiblings.first else { return nil }
+        let parent = firstSelected.parent
+        let oldSiblings = liveOrderedSiblings(parent: parent)
         let prevState = captureScenarioState()
         suppressMainFocusRestoreAfterFinishEditing = true
         finishEditing()
 
-        let parent = firstSelected.parent
         let insertionIndex = firstSelected.orderIndex
         let newParent = SceneCard(
-            content: "",
+            content: initialContent,
             orderIndex: insertionIndex,
             parent: parent,
             scenario: scenario,
             category: parent?.category ?? firstSelected.category
         )
-        scenario.cards.append(newParent)
 
-        scenario.performBatchedCardMutation {
-            for (childIndex, selectedCard) in selectedSiblings.enumerated() {
-                selectedCard.parent = newParent
-                selectedCard.orderIndex = childIndex
-            }
-
-            normalizeIndices(parent: parent)
-            normalizeIndices(parent: newParent)
+        guard let finalOldSiblings = upperCardCreationSiblingLayout(
+            parent: parent,
+            selectedSiblings: selectedSiblings,
+            newParent: newParent,
+            oldSiblings: oldSiblings
+        ) else {
+            return nil
         }
 
-        scenario.bumpCardsVersion()
+        scenario.performBatchedCardMutation {
+            scenario.cards.append(newParent)
+
+            for (childIndex, selectedCard) in selectedSiblings.enumerated() {
+                selectedCard.parent = newParent
+                if selectedCard.orderIndex != childIndex {
+                    selectedCard.orderIndex = childIndex
+                }
+            }
+
+            for (index, sibling) in finalOldSiblings.enumerated() {
+                if sibling.orderIndex != index {
+                    sibling.orderIndex = index
+                }
+            }
+        }
+
         keyboardRangeSelectionAnchorCardID = nil
         selectedCardIDs = [newParent.id]
         changeActiveCard(to: newParent, shouldFocusMain: false)
-        editingCardID = newParent.id
-        editingStartContent = newParent.content
-        editingStartState = captureScenarioState()
-        editingIsNewCard = false
+        if startEditing {
+            editingCardID = newParent.id
+            editingStartContent = newParent.content
+            editingStartState = captureScenarioState()
+            editingIsNewCard = false
+            mainCaretLocationByCardID[newParent.id] = (newParent.content as NSString).length
+            requestMainCaretRestore(for: newParent.id)
+            requestCoalescedMainCaretEnsure(minInterval: mainCaretSelectionEnsureMinInterval, delay: 0.0)
+        } else {
+            editingCardID = nil
+        }
         pendingNewCardPrevState = nil
-        mainCaretLocationByCardID[newParent.id] = (newParent.content as NSString).length
-        requestMainCaretRestore(for: newParent.id)
-        requestCoalescedMainCaretEnsure(minInterval: mainCaretSelectionEnsureMinInterval, delay: 0.0)
         isMainViewFocused = true
-        commitCardMutation(previousState: prevState, actionName: "새 상위 카드 만들기")
+        commitCardMutation(previousState: prevState, actionName: actionName)
+        return newParent
+    }
+
+    func createEmptyUpperCard(from request: UpperCardCreationRequest) {
+        pendingUpperCardCreationRequest = nil
+        let sourceCards = request.sourceCardIDs.compactMap { findCard(by: $0) }
+        guard sourceCards.count == request.sourceCardIDs.count else {
+            setAIStatusError("원본 카드 상태가 바뀌어 상위 카드를 만들 수 없습니다.")
+            return
+        }
+        _ = createUpperCardFromSourceCards(
+            sourceCards,
+            initialContent: "",
+            startEditing: true,
+            actionName: "새 상위 카드 만들기"
+        )
+    }
+
+    @discardableResult
+    func createUpperCardWithResolvedSummary(sourceCards: [SceneCard], summary: String) -> SceneCard? {
+        createUpperCardFromSourceCards(
+            sourceCards,
+            initialContent: summary,
+            startEditing: false,
+            actionName: "AI 요약 상위 카드 만들기"
+        )
     }
 
     func canSummarizeDirectChildren(for parentCard: SceneCard) -> Bool {
@@ -2213,7 +2421,7 @@ extension ScenarioWriterView {
         new.content = lowerContent
         scenario.cards.append(new)
         scenario.bumpCardsVersion()
-        store.saveAll()
+        saveWriterChanges()
 
         selectedCardIDs = [new.id]
         changeActiveCard(to: new, shouldFocusMain: false)
@@ -2246,7 +2454,7 @@ extension ScenarioWriterView {
         let new = SceneCard(orderIndex: target, parent: card.parent, scenario: scenario, category: card.category)
         scenario.cards.append(new)
         scenario.bumpCardsVersion()
-        store.saveAll()
+        saveWriterChanges()
         selectedCardIDs = [new.id]
         changeActiveCard(to: new, shouldFocusMain: false)
         editingCardID = new.id
@@ -2270,7 +2478,7 @@ extension ScenarioWriterView {
         let new = SceneCard(orderIndex: card.children.count, parent: card, scenario: scenario, category: card.category)
         scenario.cards.append(new)
         scenario.bumpCardsVersion()
-        store.saveAll()
+        saveWriterChanges()
         selectedCardIDs = [new.id]
         changeActiveCard(to: new, shouldFocusMain: false)
         editingCardID = new.id

@@ -703,7 +703,45 @@ extension ScenarioWriterView {
         }
     }
 
+    func requestHistoryAutosave(immediate: Bool = false) {
+        let throttleInterval: TimeInterval = 0.45
+
+        if immediate {
+            historySaveRequestWorkItem?.cancel()
+            historySaveRequestWorkItem = nil
+            historySaveRequestNextAllowedAt = Date().addingTimeInterval(throttleInterval)
+            saveWriterChanges()
+            return
+        }
+
+        let now = Date()
+        if now >= historySaveRequestNextAllowedAt {
+            historySaveRequestNextAllowedAt = now.addingTimeInterval(throttleInterval)
+            saveWriterChanges()
+            return
+        }
+
+        historySaveRequestWorkItem?.cancel()
+        let delay = max(0, historySaveRequestNextAllowedAt.timeIntervalSince(now))
+        let work = DispatchWorkItem {
+            historySaveRequestWorkItem = nil
+            historySaveRequestNextAllowedAt = Date().addingTimeInterval(throttleInterval)
+            saveWriterChanges()
+        }
+        historySaveRequestWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    func flushPendingHistoryAutosaveIfNeeded() {
+        guard historySaveRequestWorkItem != nil else { return }
+        historySaveRequestWorkItem?.cancel()
+        historySaveRequestWorkItem = nil
+        historySaveRequestNextAllowedAt = Date()
+        saveWriterChanges()
+    }
+
     func finishNamedSnapshotNoteEditing(restoreMainFocus: Bool) {
+        flushPendingHistoryAutosaveIfNeeded()
         isNamedSnapshotNoteEditing = false
         isNamedSnapshotNoteEditorFocused = false
         if restoreMainFocus {
@@ -840,7 +878,7 @@ extension ScenarioWriterView {
     func disconnectLinkedCardFromAnchor(linkedCardID: UUID) {
         guard let anchorID = resolvedLinkedCardsAnchorID() else { return }
         scenario.disconnectLinkedCard(focusCardID: anchorID, linkedCardID: linkedCardID)
-        store.saveAll()
+        requestHistoryAutosave(immediate: true)
     }
 
     func filteredTimelineCards() -> [SceneCard] {
@@ -984,7 +1022,7 @@ extension ScenarioWriterView {
                 }()
                 if card.content != syncedValue {
                     card.content = syncedValue
-                    store.saveAll()
+                    requestHistoryAutosave()
                 }
             }
         )
@@ -1128,7 +1166,7 @@ extension ScenarioWriterView {
             }
         }
         if didMutate {
-            store.saveAll()
+            requestHistoryAutosave(immediate: true)
         }
         if showHistoryBar {
             syncNamedSnapshotNoteForCurrentSelection(focusEditor: false)
@@ -1161,7 +1199,7 @@ extension ScenarioWriterView {
             }
             scenario.changeCountSinceLastSnapshot = 0
             applyHistoryRetentionPolicyIfNeeded()
-            store.saveAll()
+            requestHistoryAutosave(immediate: true)
             DispatchQueue.main.async {
                 self.historyIndex = Double(max(0, self.scenario.sortedSnapshots.count - 1))
                 if self.showHistoryBar {
@@ -1174,7 +1212,7 @@ extension ScenarioWriterView {
         scenario.snapshots.append(newSnapshot)
         scenario.changeCountSinceLastSnapshot = 0
         applyHistoryRetentionPolicyIfNeeded()
-        store.saveAll()
+        requestHistoryAutosave(immediate: true)
         DispatchQueue.main.async { self.historyIndex = Double(max(0, self.scenario.sortedSnapshots.count - 1)) }
     }
 
@@ -1250,7 +1288,7 @@ extension ScenarioWriterView {
             }
         }
         if didMutate {
-            store.saveAll()
+            requestHistoryAutosave()
         }
         return noteCard
     }
@@ -1761,7 +1799,7 @@ extension ScenarioWriterView {
         }
         for snap in targetCardSnapshots { if let parentID = snap.parentID, let card = idMapping[snap.cardID] { card.parent = idMapping[parentID] } }
         scenario.bumpCardsVersion()
-        store.saveAll(); takeSnapshot(force: true); exitPreviewMode()
+        saveWriterChanges(); takeSnapshot(force: true); exitPreviewMode()
         withAnimation(quickEaseAnimation) { showHistoryBar = false }; if let first = scenario.rootCards.first { changeActiveCard(to: first) }
     }
 

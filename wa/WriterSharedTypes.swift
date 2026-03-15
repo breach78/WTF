@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import Combine
 
 let focusModeBodySafetyInset: CGFloat = 8
 
@@ -45,6 +46,186 @@ enum MainCanvasLayoutMetrics {
 
     static var textWidth: CGFloat {
         max(1, cardWidth - (MainEditorLayoutMetrics.mainEditorHorizontalPadding * 2))
+    }
+}
+
+// Imperative editor caches that do not need SwiftUI-driven invalidation.
+final class WriterInteractionRuntime {
+    var activeAncestorIDs: Set<UUID> = []
+    var activeDescendantIDs: Set<UUID> = []
+    var activeSiblingIDs: Set<UUID> = []
+    var activeRelationSourceCardID: UUID? = nil
+    var activeRelationSourceCardsVersion: Int = -1
+    var lastActiveCardID: UUID? = nil
+    var lastScrolledLevel: Int = 0
+    var pendingActiveCardID: UUID? = nil
+    var mainColumnLastFocusRequestByKey: [String: ScenarioWriterView.MainColumnFocusRequest] = [:]
+    var mainColumnViewportOffsetByKey: [String: CGFloat] = [:]
+    var mainColumnViewportCaptureSuspendedUntil: Date = .distantPast
+    var mainColumnViewportRestoreUntil: Date = .distantPast
+    var mainCaretLocationByCardID: [UUID: Int] = [:]
+    var mainLineSpacingAppliedCardID: UUID? = nil
+    var mainLineSpacingAppliedValue: CGFloat = -1
+    var mainLineSpacingAppliedResponderID: ObjectIdentifier? = nil
+    var suppressMainFocusRestoreAfterFinishEditing: Bool = false
+    var mainSelectionLastCardID: UUID? = nil
+    var mainSelectionLastLocation: Int = -1
+    var mainSelectionLastLength: Int = -1
+    var mainSelectionLastTextLength: Int = -1
+    var mainSelectionLastResponderID: ObjectIdentifier? = nil
+    var mainSelectionActiveEdge: ScenarioWriterView.MainSelectionActiveEdge = .end
+    var mainCaretEnsureLastScheduledAt: Date = .distantPast
+    var pendingFocusModeEntryCaretHint: (cardID: UUID, location: Int)? = nil
+    var focusResponderCardByObjectID: [ObjectIdentifier: UUID] = [:]
+    var focusSelectionLastCardID: UUID? = nil
+    var focusSelectionLastLocation: Int = -1
+    var focusSelectionLastLength: Int = -1
+    var focusSelectionLastTextLength: Int = -1
+    var focusSelectionLastResponderID: ObjectIdentifier? = nil
+    var focusCaretEnsureLastScheduledAt: Date = .distantPast
+    var focusProgrammaticCaretExpectedCardID: UUID? = nil
+    var focusProgrammaticCaretExpectedLocation: Int = -1
+    var focusProgrammaticCaretSelectionIgnoreUntil: Date = .distantPast
+    var focusOffsetNormalizationLastAt: Date = .distantPast
+    var historySaveRequestWorkItem: DispatchWorkItem? = nil
+    var historySaveRequestNextAllowedAt: Date = .distantPast
+}
+
+final class MainCardDragSessionTracker {
+    static let shared = MainCardDragSessionTracker()
+
+    private var localMonitor: Any?
+    private var globalMonitor: Any?
+    private var pollingTimer: Timer?
+    private(set) var isDragging = false
+    private(set) var isCommandPressed = false
+
+    private init() {}
+
+    func refreshCommandState() {
+        isCommandPressed = NSEvent.modifierFlags
+            .intersection(.deviceIndependentFlagsMask)
+            .contains(.command)
+    }
+
+    func begin() {
+        if isDragging {
+            refreshCommandState()
+            return
+        }
+
+        isDragging = true
+        refreshCommandState()
+
+        localMonitor = NSEvent.addLocalMonitorForEvents(
+            matching: [.flagsChanged, .leftMouseUp, .rightMouseUp, .otherMouseUp]
+        ) { [weak self] event in
+            guard let self else { return event }
+            switch event.type {
+            case .flagsChanged:
+                self.isCommandPressed = event.modifierFlags
+                    .intersection(.deviceIndependentFlagsMask)
+                    .contains(.command)
+            case .leftMouseUp, .rightMouseUp, .otherMouseUp:
+                self.end()
+            default:
+                break
+            }
+            return event
+        }
+
+        globalMonitor = NSEvent.addGlobalMonitorForEvents(
+            matching: [.flagsChanged, .leftMouseUp, .rightMouseUp, .otherMouseUp]
+        ) { [weak self] event in
+            guard let self else { return }
+            switch event.type {
+            case .flagsChanged:
+                self.isCommandPressed = event.modifierFlags
+                    .intersection(.deviceIndependentFlagsMask)
+                    .contains(.command)
+            case .leftMouseUp, .rightMouseUp, .otherMouseUp:
+                self.end()
+            default:
+                break
+            }
+        }
+
+        let timer = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in
+            guard let self, self.isDragging else { return }
+            self.refreshCommandState()
+        }
+        timer.tolerance = 0.02
+        RunLoop.main.add(timer, forMode: .common)
+        pollingTimer = timer
+    }
+
+    func end() {
+        if let localMonitor {
+            NSEvent.removeMonitor(localMonitor)
+            self.localMonitor = nil
+        }
+        if let globalMonitor {
+            NSEvent.removeMonitor(globalMonitor)
+            self.globalMonitor = nil
+        }
+        pollingTimer?.invalidate()
+        pollingTimer = nil
+        isDragging = false
+        isCommandPressed = false
+    }
+}
+
+final class MainCanvasViewState: ObservableObject {
+    @Published var pendingRestoreCardID: UUID? = nil
+    @Published var suppressAutoScrollOnce: Bool = false
+    @Published var suppressHorizontalAutoScroll: Bool = false
+    @Published var maxLevelCount: Int = 0
+}
+
+@MainActor
+final class ScenarioWriterObservedState: ObservableObject {
+    @Published private(set) var cardsVersion: Int = 0
+    @Published private(set) var historyVersion: Int = 0
+    @Published private(set) var linkedCardsVersion: Int = 0
+
+    private var boundScenarioObjectID: ObjectIdentifier?
+    private var cancellables: Set<AnyCancellable> = []
+
+    init(scenario: Scenario) {
+        bind(to: scenario)
+    }
+
+    func bind(to scenario: Scenario) {
+        let objectID = ObjectIdentifier(scenario)
+        guard boundScenarioObjectID != objectID else { return }
+
+        boundScenarioObjectID = objectID
+        cancellables.removeAll()
+
+        cardsVersion = scenario.cardsVersion
+        historyVersion &+= 1
+        linkedCardsVersion &+= 1
+
+        scenario.$cardsVersion
+            .removeDuplicates()
+            .sink { [weak self] newValue in
+                self?.cardsVersion = newValue
+            }
+            .store(in: &cancellables)
+
+        scenario.$snapshots
+            .dropFirst()
+            .sink { [weak self] _ in
+                self?.historyVersion &+= 1
+            }
+            .store(in: &cancellables)
+
+        scenario.$linkedCardEditDatesByFocusCardID
+            .dropFirst()
+            .sink { [weak self] _ in
+                self?.linkedCardsVersion &+= 1
+            }
+            .store(in: &cancellables)
     }
 }
 
@@ -1102,23 +1283,9 @@ struct FocusModeCardFramePreferenceKey: PreferenceKey {
     }
 }
 
-struct MainCardHeightPreferenceKey: PreferenceKey {
-    static var defaultValue: [UUID: CGFloat] = [:]
-    static func reduce(value: inout [UUID: CGFloat], nextValue: () -> [UUID: CGFloat]) {
-        value.merge(nextValue(), uniquingKeysWith: { _, new in new })
-    }
-}
-
 struct HistoryBarHeightPreferenceKey: PreferenceKey {
     static var defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = max(value, nextValue())
-    }
-}
-
-struct WorkspaceRootSizePreferenceKey: PreferenceKey {
-    static var defaultValue: CGSize = .zero
-    static func reduce(value: inout CGSize, nextValue: () -> CGSize) {
-        value = nextValue()
     }
 }

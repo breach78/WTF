@@ -40,13 +40,22 @@ struct ScenarioWriterView: View {
         let viewportHeightBucket: Int
     }
 
+    struct UpperCardCreationRequest: Identifiable {
+        let id = UUID()
+        let contextCardID: UUID
+        let sourceCardIDs: [UUID]
+    }
+
     @EnvironmentObject var store: FileStore
     @EnvironmentObject var referenceCardStore: ReferenceCardStore
-    @ObservedObject var scenario: Scenario
+    let scenario: Scenario
     let showWorkspaceTopToolbar: Bool
     let splitModeEnabled: Bool
     let splitPaneID: Int
     @State var isSplitPaneActive: Bool
+    @State private var interactionRuntime = WriterInteractionRuntime()
+    @StateObject private var mainCanvasViewState = MainCanvasViewState()
+    @StateObject private var scenarioObservedState: ScenarioWriterObservedState
 
     init(
         scenario: Scenario,
@@ -54,11 +63,12 @@ struct ScenarioWriterView: View {
         splitModeEnabled: Bool = false,
         splitPaneID: Int = 2
     ) {
-        self._scenario = ObservedObject(wrappedValue: scenario)
+        self.scenario = scenario
         self.showWorkspaceTopToolbar = showWorkspaceTopToolbar
         self.splitModeEnabled = splitModeEnabled
         self.splitPaneID = splitPaneID
         self._isSplitPaneActive = State(initialValue: !splitModeEnabled || splitPaneID == 2)
+        self._scenarioObservedState = StateObject(wrappedValue: ScenarioWriterObservedState(scenario: scenario))
     }
 
     @AppStorage("fontSize") var fontSize: Double = 14.0
@@ -88,21 +98,10 @@ struct ScenarioWriterView: View {
     @AppStorage("lastEditedCardID") var lastEditedCardID: String = ""
 
     @State var activeCardID: UUID? = nil
-    @State var activeAncestorIDs: Set<UUID> = []
-    @State var activeDescendantIDs: Set<UUID> = []
-    @State var activeSiblingIDs: Set<UUID> = []
-    @State var activeRelationSourceCardID: UUID? = nil
-    @State var activeRelationSourceCardsVersion: Int = -1
-    @State var lastActiveCardID: UUID? = nil
     @State var selectedCardIDs: Set<UUID> = []
-    @State var suppressAutoScrollOnce: Bool = false
-    @State var suppressHorizontalAutoScroll: Bool = false
-    @State var maxLevelCount: Int = 0
-    @State var lastWorkspaceRootSize: CGSize = .zero
     @State var editingCardID: UUID? = nil
     @State var showDeleteAlert: Bool = false
-    @State var lastScrolledLevel: Int = 0
-    @State var activeDropTarget: DropTarget? = nil
+    @State var pendingUpperCardCreationRequest: UpperCardCreationRequest? = nil
     
     @State var showTimeline: Bool = false
     @State var showAIChat: Bool = false
@@ -176,42 +175,13 @@ struct ScenarioWriterView: View {
     @State var mainCaretEnsureWorkItem: DispatchWorkItem? = nil
     @State var focusExcludedResponderObjectID: ObjectIdentifier? = nil
     @State var focusExcludedResponderUntil: Date = .distantPast
-    @State var focusResponderCardByObjectID: [ObjectIdentifier: UUID] = [:]
     @State var focusDeleteSelectionLockedCardID: UUID? = nil
     @State var focusDeleteSelectionLockUntil: Date = .distantPast
-    @State var pendingActiveCardID: UUID? = nil
-    @State var pendingMainCanvasRestoreCardID: UUID? = nil
-    @State var mainColumnLastFocusRequestByKey: [String: MainColumnFocusRequest] = [:]
-    @State var mainColumnViewportOffsetByKey: [String: CGFloat] = [:]
-    @State var mainColumnViewportCaptureSuspendedUntil: Date = .distantPast
-    @State var mainColumnViewportRestoreUntil: Date = .distantPast
-    @State var mainCaretLocationByCardID: [UUID: Int] = [:]
     @State var mainCaretRestoreRequestID: Int = 0
-    @State var mainLineSpacingAppliedCardID: UUID? = nil
-    @State var mainLineSpacingAppliedValue: CGFloat = -1
-    @State var mainLineSpacingAppliedResponderID: ObjectIdentifier? = nil
-    @State var suppressMainFocusRestoreAfterFinishEditing: Bool = false
-    @State var mainSelectionLastCardID: UUID? = nil
-    @State var mainSelectionLastLocation: Int = -1
-    @State var mainSelectionLastLength: Int = -1
-    @State var mainSelectionLastTextLength: Int = -1
-    @State var mainSelectionLastResponderID: ObjectIdentifier? = nil
-    @State var mainSelectionActiveEdge: MainSelectionActiveEdge = .end
-    @State var mainCaretEnsureLastScheduledAt: Date = .distantPast
-    @State var pendingFocusModeEntryCaretHint: (cardID: UUID, location: Int)? = nil
     @State var focusCaretEnsureWorkItem: DispatchWorkItem? = nil
     @State var focusCaretPendingTypewriter: Bool = false
     @State var focusTypewriterDeferredUntilCompositionEnd: Bool = false
     @State var focusObservedBodyHeightByCardID: [UUID: CGFloat] = [:]
-    @State var focusSelectionLastCardID: UUID? = nil
-    @State var focusSelectionLastLocation: Int = -1
-    @State var focusSelectionLastLength: Int = -1
-    @State var focusSelectionLastTextLength: Int = -1
-    @State var focusSelectionLastResponderID: ObjectIdentifier? = nil
-    @State var focusCaretEnsureLastScheduledAt: Date = .distantPast
-    @State var focusProgrammaticCaretExpectedCardID: UUID? = nil
-    @State var focusProgrammaticCaretExpectedLocation: Int = -1
-    @State var focusProgrammaticCaretSelectionIgnoreUntil: Date = .distantPast
     @State var undoStack: [ScenarioState] = []
     @State var redoStack: [ScenarioState] = []
     @State var mainTypingUndoStack: [ScenarioState] = []
@@ -236,7 +206,6 @@ struct ScenarioWriterView: View {
     @State var pendingFocusUndoCaretHint: (cardID: UUID, location: Int)? = nil
     @State var focusUndoSelectionEnsureSuppressed: Bool = false
     @State var focusUndoSelectionEnsureRequestID: Int? = nil
-    @State var focusOffsetNormalizationLastAt: Date = .distantPast
     @State var aiOptionsSheetAction: AICardAction? = nil
     @State var aiSelectedGenerationOptions: Set<AIGenerationOption> = [.balanced]
     @State var aiIsGenerating: Bool = false
@@ -259,7 +228,6 @@ struct ScenarioWriterView: View {
     @State var mainBoundaryChildRightArmCardID: UUID? = nil
     @State var mainBoundaryChildRightArmAt: Date = .distantPast
     @State var keyboardRangeSelectionAnchorCardID: UUID? = nil
-    @State var mainCardHeights: [UUID: CGFloat] = [:]
     @State var mainBottomRevealCardID: UUID? = nil
     @State var mainBottomRevealTick: Int = 0
     @State var mainEditTabArmCardID: UUID? = nil
@@ -331,6 +299,228 @@ struct ScenarioWriterView: View {
         !splitModeEnabled || isSplitPaneActive
     }
 
+    var activeAncestorIDs: Set<UUID> {
+        get { interactionRuntime.activeAncestorIDs }
+        nonmutating set { interactionRuntime.activeAncestorIDs = newValue }
+    }
+
+    var activeDescendantIDs: Set<UUID> {
+        get { interactionRuntime.activeDescendantIDs }
+        nonmutating set { interactionRuntime.activeDescendantIDs = newValue }
+    }
+
+    var activeSiblingIDs: Set<UUID> {
+        get { interactionRuntime.activeSiblingIDs }
+        nonmutating set { interactionRuntime.activeSiblingIDs = newValue }
+    }
+
+    var activeRelationSourceCardID: UUID? {
+        get { interactionRuntime.activeRelationSourceCardID }
+        nonmutating set { interactionRuntime.activeRelationSourceCardID = newValue }
+    }
+
+    var activeRelationSourceCardsVersion: Int {
+        get { interactionRuntime.activeRelationSourceCardsVersion }
+        nonmutating set { interactionRuntime.activeRelationSourceCardsVersion = newValue }
+    }
+
+    var lastActiveCardID: UUID? {
+        get { interactionRuntime.lastActiveCardID }
+        nonmutating set { interactionRuntime.lastActiveCardID = newValue }
+    }
+
+    var lastScrolledLevel: Int {
+        get { interactionRuntime.lastScrolledLevel }
+        nonmutating set { interactionRuntime.lastScrolledLevel = newValue }
+    }
+
+    var pendingMainCanvasRestoreCardID: UUID? {
+        get { mainCanvasViewState.pendingRestoreCardID }
+        nonmutating set { mainCanvasViewState.pendingRestoreCardID = newValue }
+    }
+
+    var suppressAutoScrollOnce: Bool {
+        get { mainCanvasViewState.suppressAutoScrollOnce }
+        nonmutating set { mainCanvasViewState.suppressAutoScrollOnce = newValue }
+    }
+
+    var suppressHorizontalAutoScroll: Bool {
+        get { mainCanvasViewState.suppressHorizontalAutoScroll }
+        nonmutating set { mainCanvasViewState.suppressHorizontalAutoScroll = newValue }
+    }
+
+    var maxLevelCount: Int {
+        get { mainCanvasViewState.maxLevelCount }
+        nonmutating set { mainCanvasViewState.maxLevelCount = newValue }
+    }
+
+    var scenarioCardsVersion: Int {
+        scenarioObservedState.cardsVersion
+    }
+
+    var scenarioHistoryVersion: Int {
+        scenarioObservedState.historyVersion
+    }
+
+    var scenarioLinkedCardsVersion: Int {
+        scenarioObservedState.linkedCardsVersion
+    }
+
+    var pendingActiveCardID: UUID? {
+        get { interactionRuntime.pendingActiveCardID }
+        nonmutating set { interactionRuntime.pendingActiveCardID = newValue }
+    }
+
+    var mainColumnLastFocusRequestByKey: [String: MainColumnFocusRequest] {
+        get { interactionRuntime.mainColumnLastFocusRequestByKey }
+        nonmutating set { interactionRuntime.mainColumnLastFocusRequestByKey = newValue }
+    }
+
+    var mainColumnViewportOffsetByKey: [String: CGFloat] {
+        get { interactionRuntime.mainColumnViewportOffsetByKey }
+        nonmutating set { interactionRuntime.mainColumnViewportOffsetByKey = newValue }
+    }
+
+    var mainColumnViewportCaptureSuspendedUntil: Date {
+        get { interactionRuntime.mainColumnViewportCaptureSuspendedUntil }
+        nonmutating set { interactionRuntime.mainColumnViewportCaptureSuspendedUntil = newValue }
+    }
+
+    var mainColumnViewportRestoreUntil: Date {
+        get { interactionRuntime.mainColumnViewportRestoreUntil }
+        nonmutating set { interactionRuntime.mainColumnViewportRestoreUntil = newValue }
+    }
+
+    var mainCaretLocationByCardID: [UUID: Int] {
+        get { interactionRuntime.mainCaretLocationByCardID }
+        nonmutating set { interactionRuntime.mainCaretLocationByCardID = newValue }
+    }
+
+    var mainLineSpacingAppliedCardID: UUID? {
+        get { interactionRuntime.mainLineSpacingAppliedCardID }
+        nonmutating set { interactionRuntime.mainLineSpacingAppliedCardID = newValue }
+    }
+
+    var mainLineSpacingAppliedValue: CGFloat {
+        get { interactionRuntime.mainLineSpacingAppliedValue }
+        nonmutating set { interactionRuntime.mainLineSpacingAppliedValue = newValue }
+    }
+
+    var mainLineSpacingAppliedResponderID: ObjectIdentifier? {
+        get { interactionRuntime.mainLineSpacingAppliedResponderID }
+        nonmutating set { interactionRuntime.mainLineSpacingAppliedResponderID = newValue }
+    }
+
+    var suppressMainFocusRestoreAfterFinishEditing: Bool {
+        get { interactionRuntime.suppressMainFocusRestoreAfterFinishEditing }
+        nonmutating set { interactionRuntime.suppressMainFocusRestoreAfterFinishEditing = newValue }
+    }
+
+    var mainSelectionLastCardID: UUID? {
+        get { interactionRuntime.mainSelectionLastCardID }
+        nonmutating set { interactionRuntime.mainSelectionLastCardID = newValue }
+    }
+
+    var mainSelectionLastLocation: Int {
+        get { interactionRuntime.mainSelectionLastLocation }
+        nonmutating set { interactionRuntime.mainSelectionLastLocation = newValue }
+    }
+
+    var mainSelectionLastLength: Int {
+        get { interactionRuntime.mainSelectionLastLength }
+        nonmutating set { interactionRuntime.mainSelectionLastLength = newValue }
+    }
+
+    var mainSelectionLastTextLength: Int {
+        get { interactionRuntime.mainSelectionLastTextLength }
+        nonmutating set { interactionRuntime.mainSelectionLastTextLength = newValue }
+    }
+
+    var mainSelectionLastResponderID: ObjectIdentifier? {
+        get { interactionRuntime.mainSelectionLastResponderID }
+        nonmutating set { interactionRuntime.mainSelectionLastResponderID = newValue }
+    }
+
+    var mainSelectionActiveEdge: MainSelectionActiveEdge {
+        get { interactionRuntime.mainSelectionActiveEdge }
+        nonmutating set { interactionRuntime.mainSelectionActiveEdge = newValue }
+    }
+
+    var mainCaretEnsureLastScheduledAt: Date {
+        get { interactionRuntime.mainCaretEnsureLastScheduledAt }
+        nonmutating set { interactionRuntime.mainCaretEnsureLastScheduledAt = newValue }
+    }
+
+    var pendingFocusModeEntryCaretHint: (cardID: UUID, location: Int)? {
+        get { interactionRuntime.pendingFocusModeEntryCaretHint }
+        nonmutating set { interactionRuntime.pendingFocusModeEntryCaretHint = newValue }
+    }
+
+    var focusResponderCardByObjectID: [ObjectIdentifier: UUID] {
+        get { interactionRuntime.focusResponderCardByObjectID }
+        nonmutating set { interactionRuntime.focusResponderCardByObjectID = newValue }
+    }
+
+    var focusSelectionLastCardID: UUID? {
+        get { interactionRuntime.focusSelectionLastCardID }
+        nonmutating set { interactionRuntime.focusSelectionLastCardID = newValue }
+    }
+
+    var focusSelectionLastLocation: Int {
+        get { interactionRuntime.focusSelectionLastLocation }
+        nonmutating set { interactionRuntime.focusSelectionLastLocation = newValue }
+    }
+
+    var focusSelectionLastLength: Int {
+        get { interactionRuntime.focusSelectionLastLength }
+        nonmutating set { interactionRuntime.focusSelectionLastLength = newValue }
+    }
+
+    var focusSelectionLastTextLength: Int {
+        get { interactionRuntime.focusSelectionLastTextLength }
+        nonmutating set { interactionRuntime.focusSelectionLastTextLength = newValue }
+    }
+
+    var focusSelectionLastResponderID: ObjectIdentifier? {
+        get { interactionRuntime.focusSelectionLastResponderID }
+        nonmutating set { interactionRuntime.focusSelectionLastResponderID = newValue }
+    }
+
+    var focusCaretEnsureLastScheduledAt: Date {
+        get { interactionRuntime.focusCaretEnsureLastScheduledAt }
+        nonmutating set { interactionRuntime.focusCaretEnsureLastScheduledAt = newValue }
+    }
+
+    var focusProgrammaticCaretExpectedCardID: UUID? {
+        get { interactionRuntime.focusProgrammaticCaretExpectedCardID }
+        nonmutating set { interactionRuntime.focusProgrammaticCaretExpectedCardID = newValue }
+    }
+
+    var focusProgrammaticCaretExpectedLocation: Int {
+        get { interactionRuntime.focusProgrammaticCaretExpectedLocation }
+        nonmutating set { interactionRuntime.focusProgrammaticCaretExpectedLocation = newValue }
+    }
+
+    var focusProgrammaticCaretSelectionIgnoreUntil: Date {
+        get { interactionRuntime.focusProgrammaticCaretSelectionIgnoreUntil }
+        nonmutating set { interactionRuntime.focusProgrammaticCaretSelectionIgnoreUntil = newValue }
+    }
+
+    var focusOffsetNormalizationLastAt: Date {
+        get { interactionRuntime.focusOffsetNormalizationLastAt }
+        nonmutating set { interactionRuntime.focusOffsetNormalizationLastAt = newValue }
+    }
+
+    var historySaveRequestWorkItem: DispatchWorkItem? {
+        get { interactionRuntime.historySaveRequestWorkItem }
+        nonmutating set { interactionRuntime.historySaveRequestWorkItem = newValue }
+    }
+
+    var historySaveRequestNextAllowedAt: Date {
+        get { interactionRuntime.historySaveRequestNextAllowedAt }
+        nonmutating set { interactionRuntime.historySaveRequestNextAllowedAt = newValue }
+    }
+
     var isInactiveSplitPane: Bool {
         splitModeEnabled && !isSplitPaneActive
     }
@@ -344,6 +534,172 @@ struct ScenarioWriterView: View {
     struct LevelData {
         let cards: [SceneCard]
         let parent: SceneCard?
+    }
+
+    struct MainCanvasRenderState: Equatable {
+        let size: CGSize
+        let availableWidth: CGFloat
+        let historyIndex: Int
+        let activeCardID: UUID?
+        let acceptsKeyboardInput: Bool
+        let isPreviewingHistory: Bool
+        let backgroundSignature: String
+        let contentFingerprint: Int
+    }
+
+    struct MainCanvasHost: View, Equatable {
+        let renderState: MainCanvasRenderState
+        @ObservedObject var viewState: MainCanvasViewState
+        let backgroundColor: Color
+        let onBackgroundTap: () -> Void
+        let onHistoryIndexChange: (ScrollViewProxy) -> Void
+        let onActiveCardChange: (UUID?, ScrollViewProxy, CGFloat) -> Void
+        let onRestoreRequest: (ScrollViewProxy, CGFloat) -> Void
+        let onAppear: (ScrollViewProxy, CGFloat) -> Void
+        let scrollableContent: () -> AnyView
+
+        static func == (lhs: MainCanvasHost, rhs: MainCanvasHost) -> Bool {
+            lhs.renderState == rhs.renderState
+        }
+
+        var body: some View {
+            ZStack {
+                backgroundColor
+                    .ignoresSafeArea()
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        if !renderState.isPreviewingHistory {
+                            onBackgroundTap()
+                        }
+                    }
+
+                ScrollViewReader { proxy in
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        scrollableContent()
+                    }
+                    .onChange(of: renderState.historyIndex) { _, _ in
+                        onHistoryIndexChange(proxy)
+                    }
+                    .onChange(of: renderState.activeCardID) { _, newID in
+                        onActiveCardChange(newID, proxy, renderState.availableWidth)
+                    }
+                    .onChange(of: viewState.pendingRestoreCardID) { _, _ in
+                        onRestoreRequest(proxy, renderState.availableWidth)
+                    }
+                    .onAppear {
+                        onAppear(proxy, renderState.availableWidth)
+                    }
+                }
+            }
+            .allowsHitTesting(true)
+        }
+    }
+
+    enum WorkspaceTrailingPanelMode: Int {
+        case hidden
+        case timeline
+        case aiChat
+    }
+
+    struct TrailingWorkspacePanelRenderState: Equatable {
+        let mode: WorkspaceTrailingPanelMode
+        let appearanceSignature: String
+        let contentFingerprint: Int
+    }
+
+    struct TrailingWorkspacePanelHost: View, Equatable {
+        let renderState: TrailingWorkspacePanelRenderState
+        let panelWidth: CGFloat
+        let backgroundColor: Color
+        let dividerColor: Color
+        let content: () -> AnyView
+
+        static func == (lhs: TrailingWorkspacePanelHost, rhs: TrailingWorkspacePanelHost) -> Bool {
+            lhs.renderState == rhs.renderState
+        }
+
+        var body: some View {
+            if renderState.mode != .hidden {
+                HStack(spacing: 0) {
+                    Divider().background(dividerColor)
+                    content()
+                        .frame(width: panelWidth)
+                        .background(backgroundColor)
+                        .transition(.move(edge: .trailing))
+                }
+            }
+        }
+    }
+
+    struct HistoryOverlayRenderState: Equatable {
+        let appearanceSignature: String
+        let contentFingerprint: Int
+        let containerHeightBucket: Int
+        let bottomInsetBucket: Int
+    }
+
+    struct HistoryOverlayHost: View, Equatable {
+        let renderState: HistoryOverlayRenderState
+        let panelWidth: CGFloat
+        let containerHeight: CGFloat
+        let bottomInset: CGFloat
+        let backgroundColor: Color
+        let dividerColor: Color
+        let content: () -> AnyView
+
+        static func == (lhs: HistoryOverlayHost, rhs: HistoryOverlayHost) -> Bool {
+            lhs.renderState == rhs.renderState
+        }
+
+        var body: some View {
+            HStack(spacing: 0) {
+                Divider().background(dividerColor)
+                content()
+                    .frame(width: panelWidth, height: max(320, containerHeight - bottomInset))
+                    .background(backgroundColor)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+            .padding(.bottom, bottomInset)
+        }
+    }
+
+    struct WorkspaceToolbarRenderState: Equatable {
+        let appearanceSignature: String
+        let isHistoryVisible: Bool
+        let isTimelineVisible: Bool
+        let isAIChatVisible: Bool
+        let contentFingerprint: Int
+    }
+
+    struct WorkspaceToolbarHost: View, Equatable {
+        let renderState: WorkspaceToolbarRenderState
+        let content: () -> AnyView
+
+        static func == (lhs: WorkspaceToolbarHost, rhs: WorkspaceToolbarHost) -> Bool {
+            lhs.renderState == rhs.renderState
+        }
+
+        var body: some View {
+            content()
+        }
+    }
+
+    struct BottomHistoryBarRenderState: Equatable {
+        let appearanceSignature: String
+        let contentFingerprint: Int
+    }
+
+    struct BottomHistoryBarHost: View, Equatable {
+        let renderState: BottomHistoryBarRenderState
+        let content: () -> AnyView
+
+        static func == (lhs: BottomHistoryBarHost, rhs: BottomHistoryBarHost) -> Bool {
+            lhs.renderState == rhs.renderState
+        }
+
+        var body: some View {
+            content()
+        }
     }
 
     var activeCategory: String? {
@@ -385,11 +741,6 @@ struct ScenarioWriterView: View {
             .focusable()
             .focused($isMainViewFocused)
             .focusEffectDisabled()
-            .background(
-                GeometryReader { proxy in
-                    Color.clear.preference(key: WorkspaceRootSizePreferenceKey.self, value: proxy.size)
-                }
-            )
     }
 
     func workspaceLifecycleBoundRoot<Content: View>(_ root: Content) -> some View {
@@ -415,11 +766,17 @@ struct ScenarioWriterView: View {
             .onChange(of: isSplitPaneActive) { _, _ in
                 syncScenarioTimestampSuppressionIfNeeded()
             }
-            .onChange(of: scenario.cardsVersion) { _, _ in
+            .onChange(of: scenario.id) { _, _ in
+                syncScenarioObservedState()
+            }
+            .onChange(of: scenarioCardsVersion) { _, _ in
                 handleScenarioCardsVersionChange()
             }
-            .onPreferenceChange(WorkspaceRootSizePreferenceKey.self) { size in
-                handleWorkspaceRootSizePreferenceChange(size)
+            .onChange(of: scenarioHistoryVersion) { _, _ in
+                handleScenarioHistoryVersionChange()
+            }
+            .onChange(of: scenarioLinkedCardsVersion) { _, _ in
+                handleScenarioLinkedCardsVersionChange()
             }
             .onDisappear {
                 handleWorkspaceDisappear()
@@ -484,6 +841,35 @@ struct ScenarioWriterView: View {
                     Text(hasChildren ? "이 카드는 하위 카드를 가지고 있습니다. 삭제하면 하위 카드까지 함께 삭제됩니다. 계속하시겠습니까?" : "카드를 삭제하시겠습니까?")
                 }
             }
+            .confirmationDialog(
+                "새 상위 카드 만들기",
+                isPresented: Binding(
+                    get: { pendingUpperCardCreationRequest != nil },
+                    set: { isPresented in
+                        if !isPresented {
+                            pendingUpperCardCreationRequest = nil
+                        }
+                    }
+                ),
+                titleVisibility: .visible,
+                presenting: pendingUpperCardCreationRequest
+            ) { request in
+                Button("빈 카드") {
+                    createEmptyUpperCard(from: request)
+                }
+                Button("AI 요약") {
+                    requestAIUpperCardSummary(from: request)
+                }
+                Button("취소", role: .cancel) {
+                    pendingUpperCardCreationRequest = nil
+                }
+            } message: { request in
+                if request.sourceCardIDs.count > 1 {
+                    Text("선택한 카드들을 묶어 새 상위 카드를 만듭니다.")
+                } else {
+                    Text("현재 카드 위에 새 상위 카드를 만듭니다.")
+                }
+            }
             .task {
                 startMainNavKeyMonitor()
                 startMainCaretMonitor()
@@ -533,6 +919,7 @@ struct ScenarioWriterView: View {
     }
 
     func handleWorkspaceAppear() {
+        syncScenarioObservedState()
         if activeCardID == nil, let startupCard = startupActiveCard() { changeActiveCard(to: startupCard) }
         syncSplitPaneActiveCardState(activeCardID)
         isMainViewFocused = true
@@ -602,6 +989,9 @@ struct ScenarioWriterView: View {
         if let newID, scenario.rootCards.contains(where: { $0.id == newID }) {
             mainColumnViewportRestoreUntil = Date().addingTimeInterval(0.35)
         }
+        if let newID, findCard(by: newID) != nil {
+            persistLastEditedCard(newID)
+        }
         syncSplitPaneActiveCardState(newID)
         if linkedCardsFilterEnabled, let newID, findCard(by: newID) != nil {
             linkedCardAnchorID = newID
@@ -620,6 +1010,29 @@ struct ScenarioWriterView: View {
         pruneAICandidateTracking()
     }
 
+    func handleScenarioHistoryVersionChange() {
+        guard showHistoryBar else { return }
+        let maxIndex = max(0, scenario.sortedSnapshots.count - 1)
+        if historyIndex > Double(maxIndex) {
+            historyIndex = Double(maxIndex)
+            return
+        }
+        if isPreviewingHistory {
+            handleHistoryIndexChange()
+        }
+    }
+
+    func handleScenarioLinkedCardsVersionChange() {
+        guard linkedCardsFilterEnabled else { return }
+        guard resolvedLinkedCardsAnchorID() == nil else { return }
+        linkedCardsFilterEnabled = false
+        linkedCardAnchorID = nil
+    }
+
+    func syncScenarioObservedState() {
+        scenarioObservedState.bind(to: scenario)
+    }
+
     func handleWorkspaceDisappear() {
         releaseScenarioTimestampSuppressionIfNeeded()
         cancelInactivePaneSnapshotRefresh()
@@ -635,13 +1048,6 @@ struct ScenarioWriterView: View {
         stopMainCaretMonitor()
         stopSplitPaneMouseMonitor()
         stopDictationRecording(discardAudio: true)
-    }
-
-    func handleWorkspaceRootSizePreferenceChange(_ size: CGSize) {
-        let widthChanged = abs(size.width - lastWorkspaceRootSize.width) > 0.5
-        let heightChanged = abs(size.height - lastWorkspaceRootSize.height) > 0.5
-        guard widthChanged || heightChanged else { return }
-        lastWorkspaceRootSize = size
     }
 
     func handleShowFocusModeChange(_ isOn: Bool) {
@@ -925,14 +1331,14 @@ struct ScenarioWriterView: View {
         if showHistoryBar && !showFocusMode {
             ZStack(alignment: .topTrailing) {
                 primaryWorkspaceColumn(size: geometry.size, availableWidth: geometry.size.width)
-                namedSnapshotManagerOverlay(containerHeight: geometry.size.height)
+                historyOverlayHost(containerHeight: geometry.size.height)
                     .transition(.move(edge: .trailing))
             }
         } else {
             HStack(spacing: 0) {
                 primaryWorkspaceColumn(size: geometry.size, availableWidth: availableWidth)
                 if !showFocusMode {
-                    trailingWorkspacePanel
+                    trailingWorkspacePanelHost
                 }
             }
         }
@@ -950,14 +1356,14 @@ struct ScenarioWriterView: View {
                 } else {
                     mainCanvasWithOptionalZoom(size: size, availableWidth: availableWidth)
                     if showWorkspaceTopToolbar {
-                        workspaceTopToolbar
+                        workspaceTopToolbarHost
                     }
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             if showHistoryBar && !showFocusMode {
-                bottomHistoryBar
+                bottomHistoryBarHost
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
@@ -986,7 +1392,18 @@ struct ScenarioWriterView: View {
         }
     }
 
-    var workspaceTopToolbar: some View {
+    @ViewBuilder
+    var workspaceTopToolbarHost: some View {
+        WorkspaceToolbarHost(
+            renderState: workspaceToolbarRenderState(),
+            content: {
+                AnyView(workspaceTopToolbarContent)
+            }
+        )
+        .equatable()
+    }
+
+    var workspaceTopToolbarContent: some View {
         VStack {
             HStack(spacing: 12) {
                 Spacer()
@@ -999,6 +1416,17 @@ struct ScenarioWriterView: View {
             Spacer()
         }
         .ignoresSafeArea(.container, edges: [.top, .leading, .trailing, .bottom])
+    }
+
+    @ViewBuilder
+    var bottomHistoryBarHost: some View {
+        BottomHistoryBarHost(
+            renderState: bottomHistoryBarRenderState(),
+            content: {
+                AnyView(bottomHistoryBar)
+            }
+        )
+        .equatable()
     }
 
     var checkpointToolbarButton: some View {
@@ -1156,32 +1584,49 @@ struct ScenarioWriterView: View {
     }
 
     @ViewBuilder
-    var trailingWorkspacePanel: some View {
-        if showTimeline {
-            Divider().background(appearance == "light" ? Color.black.opacity(0.1) : Color.white.opacity(0.15))
-            timelineView
-                .frame(width: timelineWidth)
-                .background(resolvedTimelineBackgroundColor())
-                .transition(.move(edge: .trailing))
-        } else if showAIChat {
-            Divider().background(appearance == "light" ? Color.black.opacity(0.1) : Color.white.opacity(0.15))
-            aiChatView
-                .frame(width: timelineWidth)
-                .background(resolvedTimelineBackgroundColor())
-                .transition(.move(edge: .trailing))
+    var trailingWorkspacePanelHost: some View {
+        let renderState = trailingWorkspacePanelRenderState()
+        if renderState.mode != .hidden {
+            TrailingWorkspacePanelHost(
+                renderState: renderState,
+                panelWidth: timelineWidth,
+                backgroundColor: resolvedTimelineBackgroundColor(),
+                dividerColor: appearance == "light" ? Color.black.opacity(0.1) : Color.white.opacity(0.15),
+                content: {
+                    AnyView(trailingWorkspacePanelContent)
+                }
+            )
+            .equatable()
         }
     }
 
-    func namedSnapshotManagerOverlay(containerHeight: CGFloat) -> some View {
-        let bottomInset = historyBarMeasuredHeight > 0 ? historyBarMeasuredHeight : historyOverlayBottomInset
-        return HStack(spacing: 0) {
-            Divider().background(appearance == "light" ? Color.black.opacity(0.1) : Color.white.opacity(0.15))
-            namedSnapshotManagerView
-                .frame(width: timelineWidth, height: max(320, containerHeight - bottomInset))
-                .background(resolvedTimelineBackgroundColor())
+    @ViewBuilder
+    var trailingWorkspacePanelContent: some View {
+        switch trailingWorkspacePanelMode() {
+        case .timeline:
+            timelineView
+        case .aiChat:
+            aiChatView
+        case .hidden:
+            EmptyView()
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-        .padding(.bottom, bottomInset)
+    }
+
+    @ViewBuilder
+    func historyOverlayHost(containerHeight: CGFloat) -> some View {
+        let bottomInset = historyBarMeasuredHeight > 0 ? historyBarMeasuredHeight : historyOverlayBottomInset
+        HistoryOverlayHost(
+            renderState: historyOverlayRenderState(containerHeight: containerHeight, bottomInset: bottomInset),
+            panelWidth: timelineWidth,
+            containerHeight: containerHeight,
+            bottomInset: bottomInset,
+            backgroundColor: resolvedTimelineBackgroundColor(),
+            dividerColor: appearance == "light" ? Color.black.opacity(0.1) : Color.white.opacity(0.15),
+            content: {
+                AnyView(namedSnapshotManagerView)
+            }
+        )
+        .equatable()
     }
 
     var cloneCardPasteDialogOverlay: some View {
@@ -1373,47 +1818,35 @@ struct ScenarioWriterView: View {
 
     @ViewBuilder
     func mainCanvas(size: CGSize, availableWidth: CGFloat) -> some View {
-        ZStack {
-            mainCanvasBackgroundLayer
-            mainCanvasScrollContainer(size: size, availableWidth: availableWidth)
-        }
-        .allowsHitTesting(true)
-    }
-
-    var mainCanvasBackgroundLayer: some View {
-        resolvedBackgroundColor()
-            .ignoresSafeArea()
-            .contentShape(Rectangle())
-            .onTapGesture {
-                if !isPreviewingHistory {
-                    deselectAll()
-                    isMainViewFocused = true
-                }
-            }
-    }
-
-    func mainCanvasScrollContainer(size: CGSize, availableWidth: CGFloat) -> some View {
-        ScrollViewReader { hProxy in
-            ScrollView(.horizontal, showsIndicators: false) {
-                mainCanvasScrollableContent(size: size, availableWidth: availableWidth)
-            }
-            .onChange(of: Int(historyIndex)) { _, _ in
+        MainCanvasHost(
+            renderState: mainCanvasRenderState(size: size, availableWidth: availableWidth),
+            viewState: mainCanvasViewState,
+            backgroundColor: resolvedBackgroundColor(),
+            onBackgroundTap: {
+                deselectAll()
+                isMainViewFocused = true
+            },
+            onHistoryIndexChange: { proxy in
                 guard !showFocusMode else { return }
-                handleMainCanvasHistoryIndexChange(hProxy: hProxy)
-            }
-            .onChange(of: activeCardID) { _, newID in
+                handleMainCanvasHistoryIndexChange(hProxy: proxy)
+            },
+            onActiveCardChange: { newID, proxy, width in
                 guard !showFocusMode else { return }
-                handleMainCanvasActiveCardChange(newID, hProxy: hProxy, availableWidth: availableWidth)
-            }
-            .onChange(of: pendingMainCanvasRestoreCardID) { _, _ in
+                handleMainCanvasActiveCardChange(newID, hProxy: proxy, availableWidth: width)
+            },
+            onRestoreRequest: { proxy, width in
                 guard !showFocusMode else { return }
-                handleMainCanvasRestoreRequest(hProxy: hProxy, availableWidth: availableWidth)
-            }
-            .onAppear {
+                handleMainCanvasRestoreRequest(hProxy: proxy, availableWidth: width)
+            },
+            onAppear: { proxy, width in
                 guard !showFocusMode else { return }
-                handleMainCanvasAppear(hProxy: hProxy, availableWidth: availableWidth)
+                handleMainCanvasAppear(hProxy: proxy, availableWidth: width)
+            },
+            scrollableContent: {
+                AnyView(mainCanvasScrollableContent(size: size, availableWidth: availableWidth))
             }
-        }
+        )
+        .equatable()
     }
 
     @ViewBuilder
@@ -1475,6 +1908,224 @@ struct ScenarioWriterView: View {
             return cards
         }
         return scenario.filteredCards(atLevel: levelIndex, category: category)
+    }
+
+    func mainCanvasRenderState(size: CGSize, availableWidth: CGFloat) -> MainCanvasRenderState {
+        MainCanvasRenderState(
+            size: size,
+            availableWidth: availableWidth,
+            historyIndex: Int(historyIndex),
+            activeCardID: activeCardID,
+            acceptsKeyboardInput: acceptsKeyboardInput,
+            isPreviewingHistory: isPreviewingHistory,
+            backgroundSignature: "\(appearance)|\(backgroundColorHex)|\(darkBackgroundColorHex)",
+            contentFingerprint: mainCanvasContentFingerprint()
+        )
+    }
+
+    func mainCanvasContentFingerprint() -> Int {
+        var hasher = Hasher()
+        hasher.combine(scenarioCardsVersion)
+        hasher.combine(scenarioLinkedCardsVersion)
+        hasher.combine(activeCardID)
+        hasher.combine(editingCardID)
+        hasher.combine(selectedCardIDs.count)
+        for id in selectedCardIDs.sorted(by: { $0.uuidString < $1.uuidString }) {
+            hasher.combine(id)
+        }
+        hasher.combine(activeAncestorIDs.count)
+        for id in activeAncestorIDs.sorted(by: { $0.uuidString < $1.uuidString }) {
+            hasher.combine(id)
+        }
+        hasher.combine(activeDescendantIDs.count)
+        for id in activeDescendantIDs.sorted(by: { $0.uuidString < $1.uuidString }) {
+            hasher.combine(id)
+        }
+        hasher.combine(activeSiblingIDs.count)
+        for id in activeSiblingIDs.sorted(by: { $0.uuidString < $1.uuidString }) {
+            hasher.combine(id)
+        }
+        hasher.combine(isPreviewingHistory)
+        hasher.combine(aiCandidateState.cardIDs.count)
+        for id in aiCandidateState.cardIDs {
+            hasher.combine(id)
+        }
+        hasher.combine(aiChildSummaryLoadingCardIDs.count)
+        for id in aiChildSummaryLoadingCardIDs.sorted(by: { $0.uuidString < $1.uuidString }) {
+            hasher.combine(id)
+        }
+        hasher.combine(aiIsGenerating)
+        hasher.combine(dictationIsRecording)
+        hasher.combine(dictationIsProcessing)
+        hasher.combine(inactivePaneSnapshotState.maxLevelCount)
+        for level in inactivePaneSnapshotState.levelsData {
+            hasher.combine(level.parent?.id)
+            hasher.combine(level.cards.count)
+            for card in level.cards {
+                hasher.combine(card.id)
+            }
+        }
+        hasher.combine(previewDiffs.count)
+        for diff in previewDiffs {
+            hasher.combine(diff.id)
+            switch diff.status {
+            case .added: hasher.combine(1)
+            case .deleted: hasher.combine(2)
+            case .modified: hasher.combine(3)
+            case .none: hasher.combine(4)
+            }
+        }
+        hasher.combine(historyPreviewSelectedCardIDs.count)
+        for id in historyPreviewSelectedCardIDs.sorted(by: { $0.uuidString < $1.uuidString }) {
+            hasher.combine(id)
+        }
+        return hasher.finalize()
+    }
+
+    func trailingWorkspacePanelMode() -> WorkspaceTrailingPanelMode {
+        if showTimeline {
+            return .timeline
+        }
+        if showAIChat {
+            return .aiChat
+        }
+        return .hidden
+    }
+
+    func trailingWorkspacePanelRenderState() -> TrailingWorkspacePanelRenderState {
+        TrailingWorkspacePanelRenderState(
+            mode: trailingWorkspacePanelMode(),
+            appearanceSignature: appearance,
+            contentFingerprint: trailingWorkspacePanelContentFingerprint()
+        )
+    }
+
+    func trailingWorkspacePanelContentFingerprint() -> Int {
+        var hasher = Hasher()
+        let mode = trailingWorkspacePanelMode()
+        hasher.combine(mode.rawValue)
+        hasher.combine(appearance)
+
+        switch mode {
+        case .timeline:
+            hasher.combine(searchText)
+            hasher.combine(linkedCardsFilterEnabled)
+            hasher.combine(linkedCardAnchorID)
+            hasher.combine(activeCardID)
+            hasher.combine(editingCardID)
+            hasher.combine(selectedCardIDs.count)
+            for id in selectedCardIDs.sorted(by: { $0.uuidString < $1.uuidString }) {
+                hasher.combine(id)
+            }
+            hasher.combine(scenarioCardsVersion)
+            hasher.combine(scenarioLinkedCardsVersion)
+            hasher.combine(aiCandidateState.cardIDs.count)
+            for id in aiCandidateState.cardIDs {
+                hasher.combine(id)
+            }
+            hasher.combine(aiChildSummaryLoadingCardIDs.count)
+            for id in aiChildSummaryLoadingCardIDs.sorted(by: { $0.uuidString < $1.uuidString }) {
+                hasher.combine(id)
+            }
+            hasher.combine(aiIsGenerating)
+        case .aiChat:
+            hasher.combine(aiChatThreads.count)
+            for thread in aiChatThreads {
+                hasher.combine(thread.id)
+                hasher.combine(thread.title)
+                hasher.combine(thread.mode.rawValue)
+                hasher.combine(thread.scope.type.rawValue)
+                hasher.combine(thread.scope.includeChildrenDepth)
+                hasher.combine(thread.scope.cardIDs.count)
+                for cardID in thread.scope.cardIDs {
+                    hasher.combine(cardID)
+                }
+                hasher.combine(thread.messages.count)
+                hasher.combine(thread.rollingSummary)
+                hasher.combine(thread.decisionLog.count)
+                hasher.combine(thread.unresolvedQuestions.count)
+                hasher.combine(thread.updatedAt.timeIntervalSince1970.bitPattern)
+            }
+            hasher.combine(activeAIChatThreadID)
+            hasher.combine(aiChatInput)
+            hasher.combine(isAIChatLoading)
+            hasher.combine(aiChatActiveRequestID)
+            hasher.combine(aiStatusMessage)
+            hasher.combine(aiStatusIsError)
+            hasher.combine(activeCardID)
+            hasher.combine(selectedCardIDs.count)
+            hasher.combine(scenarioCardsVersion)
+        case .hidden:
+            break
+        }
+
+        return hasher.finalize()
+    }
+
+    func historyOverlayRenderState(containerHeight: CGFloat, bottomInset: CGFloat) -> HistoryOverlayRenderState {
+        HistoryOverlayRenderState(
+            appearanceSignature: appearance,
+            contentFingerprint: historyOverlayContentFingerprint(),
+            containerHeightBucket: Int(containerHeight.rounded()),
+            bottomInsetBucket: Int(bottomInset.rounded())
+        )
+    }
+
+    func workspaceToolbarRenderState() -> WorkspaceToolbarRenderState {
+        WorkspaceToolbarRenderState(
+            appearanceSignature: appearance,
+            isHistoryVisible: showHistoryBar,
+            isTimelineVisible: showTimeline,
+            isAIChatVisible: showAIChat,
+            contentFingerprint: workspaceToolbarContentFingerprint()
+        )
+    }
+
+    func workspaceToolbarContentFingerprint() -> Int {
+        var hasher = Hasher()
+        hasher.combine(appearance)
+        hasher.combine(showHistoryBar)
+        hasher.combine(showTimeline)
+        hasher.combine(showAIChat)
+        hasher.combine(showCheckpointDialog)
+        hasher.combine(isPreviewingHistory)
+        hasher.combine(scenarioHistoryVersion)
+        return hasher.finalize()
+    }
+
+    func bottomHistoryBarRenderState() -> BottomHistoryBarRenderState {
+        BottomHistoryBarRenderState(
+            appearanceSignature: appearance,
+            contentFingerprint: bottomHistoryBarContentFingerprint()
+        )
+    }
+
+    func bottomHistoryBarContentFingerprint() -> Int {
+        var hasher = Hasher()
+        hasher.combine(appearance)
+        hasher.combine(scenarioHistoryVersion)
+        hasher.combine(Int(historyIndex))
+        hasher.combine(isPreviewingHistory)
+        hasher.combine(editingSnapshotID)
+        hasher.combine(editedSnapshotName)
+        hasher.combine(showHistoryBar)
+        hasher.combine(historyBarMeasuredHeight.rounded(.toNearestOrAwayFromZero))
+        return hasher.finalize()
+    }
+
+    func historyOverlayContentFingerprint() -> Int {
+        var hasher = Hasher()
+        hasher.combine(appearance)
+        hasher.combine(scenarioHistoryVersion)
+        hasher.combine(scenarioCardsVersion)
+        hasher.combine(Int(historyIndex))
+        hasher.combine(historySelectedNamedSnapshotNoteCardID)
+        hasher.combine(isNamedSnapshotNoteEditing)
+        hasher.combine(isNamedSnapshotNoteEditorFocused)
+        hasher.combine(snapshotNoteSearchText)
+        hasher.combine(editingSnapshotID)
+        hasher.combine(editedSnapshotName)
+        return hasher.finalize()
     }
 
     func handleMainCanvasInnerTap() {
@@ -1652,7 +2303,7 @@ struct ScenarioWriterView: View {
            !restored.isArchived {
             return restored
         }
-        return scenario.rootCards.first
+        return scenario.rootCards.last
     }
 
     private func persistLastEditedCard(_ cardID: UUID) {

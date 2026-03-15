@@ -22,6 +22,7 @@ final class ReferenceCardStore: ObservableObject {
     private static let persistedEntriesKey = "reference.card.entries.v1"
     private let maxUndoCount = 1200
     private let typingIdleInterval: TimeInterval = 1.5
+    private let saveRequestThrottleInterval: TimeInterval = 0.45
 
     @Published private(set) var entries: [Entry] = []
 
@@ -40,6 +41,8 @@ final class ReferenceCardStore: ObservableObject {
     private var pendingReturnBoundary: Bool = false
     private var lastCommittedContentByEntryID: [String: String] = [:]
     private var programmaticContentSuppressUntil: Date = .distantPast
+    private var pendingSaveRequestWorkItem: DispatchWorkItem? = nil
+    private var nextAllowedSaveRequestAt: Date = .distantPast
 
     init() {
         loadPersistedEntries()
@@ -84,13 +87,13 @@ final class ReferenceCardStore: ObservableObject {
 
         if Date() < programmaticContentSuppressUntil {
             lastCommittedContentByEntryID[id] = newValue
-            fileStore.saveAll()
+            requestCoalescedSave(fileStore: fileStore)
             return
         }
 
         if let textView = NSApp.keyWindow?.firstResponder as? NSTextView,
            textView.hasMarkedText() {
-            fileStore.saveAll()
+            requestCoalescedSave(fileStore: fileStore)
             return
         }
 
@@ -115,7 +118,7 @@ final class ReferenceCardStore: ObservableObject {
             pendingReturnBoundary = false
             if delta.newChangedLength > 0 && delta.inserted.contains("\n") {
                 finalizeTypingCoalescing(reason: "typing-boundary-return")
-                fileStore.saveAll()
+                requestCoalescedSave(fileStore: fileStore, immediate: true)
                 return
             }
         }
@@ -124,7 +127,7 @@ final class ReferenceCardStore: ObservableObject {
             finalizeTypingCoalescing(reason: "typing-boundary")
         }
 
-        fileStore.saveAll()
+        requestCoalescedSave(fileStore: fileStore)
     }
 
     func performUndo(fileStore: FileStore) -> Bool {
@@ -144,7 +147,7 @@ final class ReferenceCardStore: ObservableObject {
         programmaticContentSuppressUntil = Date().addingTimeInterval(0.4)
         card.content = previous.content
         lastCommittedContentByEntryID[entryID(scenarioID: previous.scenarioID, cardID: previous.cardID)] = previous.content
-        fileStore.saveAll()
+        requestCoalescedSave(fileStore: fileStore, immediate: true)
         return true
     }
 
@@ -165,8 +168,44 @@ final class ReferenceCardStore: ObservableObject {
         programmaticContentSuppressUntil = Date().addingTimeInterval(0.4)
         card.content = next.content
         lastCommittedContentByEntryID[entryID(scenarioID: next.scenarioID, cardID: next.cardID)] = next.content
-        fileStore.saveAll()
+        requestCoalescedSave(fileStore: fileStore, immediate: true)
         return true
+    }
+
+    private func requestCoalescedSave(fileStore: FileStore, immediate: Bool = false) {
+        if immediate {
+            pendingSaveRequestWorkItem?.cancel()
+            pendingSaveRequestWorkItem = nil
+            nextAllowedSaveRequestAt = Date().addingTimeInterval(saveRequestThrottleInterval)
+            fileStore.saveAll()
+            return
+        }
+
+        let now = Date()
+        if now >= nextAllowedSaveRequestAt {
+            nextAllowedSaveRequestAt = now.addingTimeInterval(saveRequestThrottleInterval)
+            fileStore.saveAll()
+            return
+        }
+
+        pendingSaveRequestWorkItem?.cancel()
+        let delay = max(0, nextAllowedSaveRequestAt.timeIntervalSince(now))
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.pendingSaveRequestWorkItem = nil
+            self.nextAllowedSaveRequestAt = Date().addingTimeInterval(self.saveRequestThrottleInterval)
+            fileStore.saveAll()
+        }
+        pendingSaveRequestWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    func flushPendingSaveIfNeeded(fileStore: FileStore) {
+        guard pendingSaveRequestWorkItem != nil else { return }
+        pendingSaveRequestWorkItem?.cancel()
+        pendingSaveRequestWorkItem = nil
+        nextAllowedSaveRequestAt = Date()
+        fileStore.saveAll()
     }
 
     private func pushUndoState(_ previous: UndoSnapshot) {
@@ -329,6 +368,14 @@ struct ReferenceWindowView: View {
         .background(FloatingReferenceWindowAccessor())
         .onAppear {
             referenceCardStore.pruneMissingEntries(fileStore: store)
+        }
+        .onChange(of: focusedEntryID) { _, newValue in
+            if newValue == nil {
+                referenceCardStore.flushPendingSaveIfNeeded(fileStore: store)
+            }
+        }
+        .onDisappear {
+            referenceCardStore.flushPendingSaveIfNeeded(fileStore: store)
         }
     }
 }

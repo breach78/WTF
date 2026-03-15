@@ -6,25 +6,13 @@ import UniformTypeIdentifiers
 
 struct DropSpacer: View {
     let target: DropTarget
-    @Binding var activeDropTarget: DropTarget?
     var alignment: Alignment = .center
-    let onDrop: ([NSItemProvider]) -> Void
+    let onDrop: ([NSItemProvider], Bool) -> Void
     @AppStorage("mainCardVerticalGap") private var mainCardVerticalGap: Double = 0.0
-
     @State private var isHovering: Bool = false
 
     private var centerGapHeight: CGFloat { max(0, CGFloat(mainCardVerticalGap)) }
     private var centerHitAreaHeight: CGFloat { max(12, centerGapHeight) }
-
-    private func updateHoverState(_ newValue: Bool) {
-        withAnimation(.easeInOut(duration: 0.15)) {
-            if newValue {
-                activeDropTarget = target
-            } else if activeDropTarget == target {
-                activeDropTarget = nil
-            }
-        }
-    }
 
     var body: some View {
         Group {
@@ -34,7 +22,7 @@ struct DropSpacer: View {
                     .overlay(alignment: .center) {
                         ZStack {
                             Color.black.opacity(0.001)
-                            if activeDropTarget == target {
+                            if isHovering {
                                 Rectangle()
                                     .fill(Color.accentColor)
                                     .frame(height: 4)
@@ -45,7 +33,7 @@ struct DropSpacer: View {
                         .frame(height: centerHitAreaHeight)
                         .contentShape(Rectangle())
                         .onDrop(of: [.text], isTargeted: $isHovering) { providers in
-                            onDrop(providers)
+                            onDrop(providers, isTrailingSiblingBlockDragActive())
                             return true
                         }
                     }
@@ -54,7 +42,7 @@ struct DropSpacer: View {
                     Color.black.opacity(0.001)
                         .contentShape(Rectangle())
 
-                    if activeDropTarget == target {
+                    if isHovering {
                         Rectangle()
                             .fill(Color.accentColor)
                             .frame(height: 4)
@@ -63,14 +51,12 @@ struct DropSpacer: View {
                     }
                 }
                 .onDrop(of: [.text], isTargeted: $isHovering) { providers in
-                    onDrop(providers)
+                    onDrop(providers, isTrailingSiblingBlockDragActive())
                     return true
                 }
             }
         }
-        .onChange(of: isHovering) { _, newValue in
-            updateHoverState(newValue)
-        }
+        .animation(.easeInOut(duration: 0.15), value: isHovering)
     }
 }
 
@@ -293,7 +279,6 @@ struct FocusModeCardEditor: View {
 struct CardItem: View {
     @ObservedObject var card: SceneCard
     let isActive, isSelected, isMultiSelected, isArchived, isAncestor, isDescendant, isEditing: Bool
-    let dropTarget: DropTarget?
     let preferredTextMeasureWidth: CGFloat
     let forceNamedSnapshotNoteStyle: Bool
     let forceCustomColorVisibility: Bool
@@ -324,9 +309,11 @@ struct CardItem: View {
     var onCloneCard: (() -> Void)? = nil
     var clonePeerDestinations: [ClonePeerMenuDestination] = []
     var onNavigateToClonePeer: ((UUID) -> Void)? = nil
+    var onCardDrop: (([NSItemProvider], Bool) -> Void)? = nil
     @State private var mainEditingMeasuredBodyHeight: CGFloat = 0
     @State private var mainEditingMeasureWorkItem: DispatchWorkItem? = nil
     @State private var mainEditingMeasureLastAt: Date = .distantPast
+    @State private var isOntoDropTargeted: Bool = false
     @FocusState private var editorFocus: Bool
     @AppStorage("fontSize") private var fontSize: Double = 14.0
     @AppStorage("appearance") private var appearance: String = "dark"
@@ -356,7 +343,6 @@ struct CardItem: View {
         return true
     }
 
-    private var isOntoTarget: Bool { if case .onto(let id) = dropTarget { return id == card.id } else { return false } }
     private var isCandidateVisualCard: Bool {
         (forceCustomColorVisibility || card.isAICandidate) && card.colorHex != nil
     }
@@ -385,7 +371,7 @@ struct CardItem: View {
         }
         let active = resolvedActiveRGB()
         let related = resolvedRelatedRGB()
-        if isOntoTarget || isActive {
+        if isActive {
             return active
         }
         if isAncestor || isDescendant {
@@ -591,6 +577,14 @@ struct CardItem: View {
     private var cardSurface: some View {
         ZStack(alignment: .topLeading) {
             backgroundColor
+            if isOntoDropTargeted {
+                Color(
+                    red: resolvedActiveRGB().r,
+                    green: resolvedActiveRGB().g,
+                    blue: resolvedActiveRGB().b
+                )
+                .transition(.opacity)
+            }
 
             ZStack(alignment: .topLeading) {
                 if !isEditing {
@@ -740,6 +734,11 @@ struct CardItem: View {
             .contextMenu {
                 cardContextMenuContent
             }
+            .modifier(CardItemDropModifier(
+                card: card,
+                isTargeted: $isOntoDropTargeted,
+                onDrop: onCardDrop
+            ))
     }
 
     private func resolvedBaseRGB() -> (r: Double, g: Double, b: Double) {
@@ -802,29 +801,62 @@ struct CardItem: View {
 
 // MARK: - 드래그 앤 드롭 델리게이트 (카드 본체용)
 
+private func isTrailingSiblingBlockDragActive() -> Bool {
+    let tracker = MainCardDragSessionTracker.shared
+    if tracker.isDragging {
+        tracker.refreshCommandState()
+        return tracker.isCommandPressed
+    }
+    return NSEvent.modifierFlags.intersection(.deviceIndependentFlagsMask).contains(.command)
+}
+
 struct AdvancedCardDropDelegate: DropDelegate {
     let targetCard: SceneCard
-    @Binding var activeDropTarget: DropTarget?
-    let performAction: ([NSItemProvider], DropTarget) -> Void
+    @Binding var isTargeted: Bool
+    let performAction: ([NSItemProvider], Bool) -> Void
 
     func dropUpdated(info: DropInfo) -> DropProposal? {
-        return DropProposal(operation: .move)
+        MainCardDragSessionTracker.shared.refreshCommandState()
+        return DropProposal(operation: isTrailingSiblingBlockDragActive() ? .copy : .move)
     }
 
     func dropEntered(info: DropInfo) {
-        withAnimation(.easeInOut(duration: 0.15)) { activeDropTarget = .onto(targetCard.id) }
+        withAnimation(.easeInOut(duration: 0.15)) { isTargeted = true }
     }
 
     func dropExited(info: DropInfo) {
-        if activeDropTarget == .onto(targetCard.id) {
-            withAnimation(.easeInOut(duration: 0.15)) { activeDropTarget = nil }
+        if isTargeted {
+            withAnimation(.easeInOut(duration: 0.15)) { isTargeted = false }
         }
     }
 
     func performDrop(info: DropInfo) -> Bool {
         let providers = info.itemProviders(for: [.text])
-        performAction(providers, .onto(targetCard.id))
-        activeDropTarget = nil
+        guard !providers.isEmpty else { return false }
+        performAction(providers, isTrailingSiblingBlockDragActive())
+        isTargeted = false
+        MainCardDragSessionTracker.shared.end()
         return true
+    }
+}
+
+private struct CardItemDropModifier: ViewModifier {
+    let card: SceneCard
+    @Binding var isTargeted: Bool
+    let onDrop: (([NSItemProvider], Bool) -> Void)?
+
+    func body(content: Content) -> some View {
+        if let onDrop {
+            content.onDrop(
+                of: [.text],
+                delegate: AdvancedCardDropDelegate(
+                    targetCard: card,
+                    isTargeted: $isTargeted,
+                    performAction: onDrop
+                )
+            )
+        } else {
+            content
+        }
     }
 }
