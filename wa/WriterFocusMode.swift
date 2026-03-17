@@ -1791,6 +1791,25 @@ extension ScenarioWriterView {
         focusSelectionLastLength = selected.length
         focusSelectionLastTextLength = textLength
         focusSelectionLastResponderID = responderID
+
+        guard let trackedCardID else { return }
+        let caretLocation = resolvedFocusCaretPersistenceLocation(selected: selected, textLength: textLength)
+        mainCaretLocationByCardID[trackedCardID] = caretLocation
+        persistLastFocusSnapshot(
+            cardID: trackedCardID,
+            caretLocation: caretLocation,
+            isEditing: true,
+            inFocusMode: true
+        )
+    }
+
+    private func resolvedFocusCaretPersistenceLocation(selected: NSRange, textLength: Int) -> Int {
+        let start = min(max(0, selected.location), textLength)
+        let end = min(max(start, selected.location + selected.length), textLength)
+        if selected.length == 0 {
+            return end
+        }
+        return (_focusSelectionActiveEdge == .start) ? start : end
     }
 
     func scheduleFocusCaretEnsureForSelectionChange() {

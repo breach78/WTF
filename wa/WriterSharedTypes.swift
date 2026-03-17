@@ -1,8 +1,33 @@
 import SwiftUI
 import AppKit
 import Combine
+import QuartzCore
 
 let focusModeBodySafetyInset: CGFloat = 8
+
+#if DEBUG
+func bounceDebugLog(_ message: @autoclosure () -> String) {}
+#else
+func bounceDebugLog(_ message: @autoclosure () -> String) {}
+#endif
+
+@MainActor
+func playSoftBoundaryFeedbackSound() {
+    enum SoftBoundaryFeedbackSound {
+        @MainActor static let shared: NSSound? = {
+            let url = URL(fileURLWithPath: "/System/Library/Sounds/Pop.aiff")
+            let sound = NSSound(contentsOf: url, byReference: true)
+            sound?.volume = 0.16
+            return sound
+        }()
+    }
+
+    guard let sound = SoftBoundaryFeedbackSound.shared else { return }
+    if sound.isPlaying {
+        sound.stop()
+    }
+    sound.play()
+}
 
 enum ScenarioCardCategory {
     static let plot = "플롯"
@@ -56,11 +81,19 @@ final class WriterInteractionRuntime {
     var activeSiblingIDs: Set<UUID> = []
     var activeRelationSourceCardID: UUID? = nil
     var activeRelationSourceCardsVersion: Int = -1
+    var activeRelationFingerprint: Int = 0
     var lastActiveCardID: UUID? = nil
     var lastScrolledLevel: Int = 0
     var pendingActiveCardID: UUID? = nil
+    var resolvedLevelsWithParentsVersion: Int = -1
+    var resolvedLevelsWithParentsCache: [ScenarioWriterView.LevelData] = []
+    var displayedMainLevelsCacheKey: ScenarioWriterView.DisplayedMainLevelsCacheKey? = nil
+    var displayedMainLevelsCache: [ScenarioWriterView.LevelData] = []
+    var displayedMainCardLocationByIDCache: [UUID: (level: Int, index: Int)] = [:]
     var mainColumnLastFocusRequestByKey: [String: ScenarioWriterView.MainColumnFocusRequest] = [:]
     var mainColumnViewportOffsetByKey: [String: CGFloat] = [:]
+    var mainColumnObservedCardFramesByKey: [String: [UUID: CGRect]] = [:]
+    var mainColumnLayoutSnapshotByKey: [ScenarioWriterView.MainColumnLayoutCacheKey: ScenarioWriterView.MainColumnLayoutSnapshot] = [:]
     var mainColumnViewportCaptureSuspendedUntil: Date = .distantPast
     var mainColumnViewportRestoreUntil: Date = .distantPast
     var mainCaretLocationByCardID: [UUID: Int] = [:]
@@ -180,6 +213,49 @@ final class MainCanvasViewState: ObservableObject {
     @Published var suppressAutoScrollOnce: Bool = false
     @Published var suppressHorizontalAutoScroll: Bool = false
     @Published var maxLevelCount: Int = 0
+}
+
+@MainActor
+final class WriterAIFeatureState: ObservableObject {
+    @Published var chatThreads: [AIChatThread] = []
+    @Published var activeThreadID: UUID? = nil
+    @Published var chatInput: String = ""
+    @Published var lastContextPreview: AIChatContextPreview? = nil
+    @Published var isChatLoading: Bool = false
+    @Published var chatActiveRequestID: UUID? = nil
+    @Published var optionsSheetAction: AICardAction? = nil
+    @Published var selectedGenerationOptions: Set<AIGenerationOption> = [.balanced]
+    @Published var isGenerating: Bool = false
+    @Published var statusMessage: String? = nil
+    @Published var statusIsError: Bool = false
+    @Published var candidateState = ScenarioWriterView.AICandidateTrackingState()
+    @Published var childSummaryLoadingCardIDs: Set<UUID> = []
+
+    var cardDigestCache: [UUID: AICardDigest] = [:]
+    var embeddingIndexByCardID: [UUID: AIEmbeddingRecord] = [:]
+    var embeddingIndexModelID: String = "gemini-embedding-001"
+    var threadsLoadedScenarioID: UUID? = nil
+    var embeddingIndexLoadedScenarioID: UUID? = nil
+    var threadsSaveWorkItem: DispatchWorkItem? = nil
+    var embeddingIndexSaveWorkItem: DispatchWorkItem? = nil
+    var chatRequestTask: Task<Void, Never>? = nil
+
+    deinit {
+        threadsSaveWorkItem?.cancel()
+        embeddingIndexSaveWorkItem?.cancel()
+        chatRequestTask?.cancel()
+    }
+}
+
+@MainActor
+final class WriterEditEndAutoBackupState: ObservableObject {
+    var pendingWorkItem: DispatchWorkItem? = nil
+    var isRunning: Bool = false
+    var hasPendingRequest: Bool = false
+
+    deinit {
+        pendingWorkItem?.cancel()
+    }
 }
 
 @MainActor
@@ -855,6 +931,28 @@ func sharedSearchTokensValue(from text: String) -> [String] {
 }
 
 enum CaretScrollCoordinator {
+    static func resolvedVerticalTargetY(
+        visibleRect: CGRect,
+        targetY: CGFloat,
+        minY: CGFloat,
+        maxY: CGFloat,
+        snapToPixel: Bool = false
+    ) -> CGFloat {
+        let clampedY = min(max(minY, targetY), maxY)
+        return snapToPixel ? round(clampedY) : clampedY
+    }
+
+    static func resolvedVerticalAnimationDuration(
+        currentY: CGFloat,
+        targetY: CGFloat,
+        viewportHeight: CGFloat
+    ) -> TimeInterval {
+        let distance = abs(targetY - currentY)
+        let reference = max(1, viewportHeight)
+        let normalized = min(1.8, distance / reference)
+        return 0.18 + (0.10 * Double(normalized))
+    }
+
     @discardableResult
     static func applyVerticalScrollIfNeeded(
         scrollView: NSScrollView,
@@ -865,13 +963,100 @@ enum CaretScrollCoordinator {
         deadZone: CGFloat = 1.0,
         snapToPixel: Bool = false
     ) -> Bool {
-        let clampedY = min(max(minY, targetY), maxY)
-        let resolvedTargetY = snapToPixel ? round(clampedY) : clampedY
+        let resolvedTargetY = resolvedVerticalTargetY(
+            visibleRect: visibleRect,
+            targetY: targetY,
+            minY: minY,
+            maxY: maxY,
+            snapToPixel: snapToPixel
+        )
         guard abs(resolvedTargetY - visibleRect.origin.y) > deadZone else { return false }
 
         scrollView.contentView.setBoundsOrigin(NSPoint(x: visibleRect.origin.x, y: resolvedTargetY))
         scrollView.reflectScrolledClipView(scrollView.contentView)
         return true
+    }
+
+    @discardableResult
+    static func applyAnimatedVerticalScrollIfNeeded(
+        scrollView: NSScrollView,
+        visibleRect: CGRect,
+        targetY: CGFloat,
+        minY: CGFloat,
+        maxY: CGFloat,
+        deadZone: CGFloat = 1.0,
+        snapToPixel: Bool = false,
+        duration: TimeInterval? = nil
+    ) -> TimeInterval? {
+        let resolvedTargetY = resolvedVerticalTargetY(
+            visibleRect: visibleRect,
+            targetY: targetY,
+            minY: minY,
+            maxY: maxY,
+            snapToPixel: snapToPixel
+        )
+        guard abs(resolvedTargetY - visibleRect.origin.y) > deadZone else { return nil }
+
+        let resolvedDuration = duration ?? resolvedVerticalAnimationDuration(
+            currentY: visibleRect.origin.y,
+            targetY: resolvedTargetY,
+            viewportHeight: visibleRect.height
+        )
+
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = resolvedDuration
+            context.timingFunction = CAMediaTimingFunction(controlPoints: 0.22, 0.86, 0.24, 1.0)
+            scrollView.contentView.animator().setBoundsOrigin(
+                NSPoint(x: visibleRect.origin.x, y: resolvedTargetY)
+            )
+            scrollView.reflectScrolledClipView(scrollView.contentView)
+        } completionHandler: {
+            scrollView.reflectScrolledClipView(scrollView.contentView)
+        }
+
+        return resolvedDuration
+    }
+}
+
+@MainActor
+final class MainColumnScrollRegistry {
+    static let shared = MainColumnScrollRegistry()
+
+    private final class Entry {
+        weak var scrollView: NSScrollView?
+
+        init(scrollView: NSScrollView) {
+            self.scrollView = scrollView
+        }
+    }
+
+    private var entriesByKey: [String: Entry] = [:]
+
+    private init() {}
+
+    func register(scrollView: NSScrollView, for key: String) {
+        entriesByKey[key] = Entry(scrollView: scrollView)
+        pruneReleasedEntries()
+    }
+
+    func unregister(key: String, matching scrollView: NSScrollView? = nil) {
+        guard let entry = entriesByKey[key] else { return }
+        if let scrollView {
+            guard entry.scrollView === scrollView else { return }
+        }
+        entriesByKey.removeValue(forKey: key)
+    }
+
+    func scrollView(for key: String) -> NSScrollView? {
+        if let scrollView = entriesByKey[key]?.scrollView {
+            return scrollView
+        }
+        entriesByKey.removeValue(forKey: key)
+        return nil
+    }
+
+    private func pruneReleasedEntries() {
+        entriesByKey = entriesByKey.filter { $0.value.scrollView != nil }
     }
 }
 
@@ -902,6 +1087,7 @@ struct MainColumnScrollViewAccessor: NSViewRepresentable {
         private var observer: NSObjectProtocol?
         private var attachedColumnKey: String?
         private var lastReportedOffsetY: CGFloat = .nan
+        private var offsetChangeHandler: ((CGFloat) -> Void)?
 
         deinit {
             detach()
@@ -924,12 +1110,20 @@ struct MainColumnScrollViewAccessor: NSViewRepresentable {
             if scrollView !== resolvedScrollView {
                 detach()
                 scrollView = resolvedScrollView
-                installObserver(for: resolvedScrollView, onOffsetChange: onOffsetChange)
+                installObserver(for: resolvedScrollView)
             }
 
             let keyChanged = attachedColumnKey != columnKey
+            if keyChanged, let previousKey = attachedColumnKey {
+                MainColumnScrollRegistry.shared.unregister(key: previousKey, matching: resolvedScrollView)
+            }
             attachedColumnKey = columnKey
-            publishCurrentOffset(onOffsetChange)
+            MainColumnScrollRegistry.shared.register(scrollView: resolvedScrollView, for: columnKey)
+            offsetChangeHandler = onOffsetChange
+            if keyChanged {
+                lastReportedOffsetY = .nan
+            }
+            publishCurrentOffset()
 
             if keyChanged, let storedOffsetY, storedOffsetY > 1 {
                 applyStoredOffsetIfNeeded(storedOffsetY)
@@ -937,6 +1131,9 @@ struct MainColumnScrollViewAccessor: NSViewRepresentable {
         }
 
         private func detach() {
+            if let attachedColumnKey, let scrollView {
+                MainColumnScrollRegistry.shared.unregister(key: attachedColumnKey, matching: scrollView)
+            }
             if let observer {
                 NotificationCenter.default.removeObserver(observer)
             }
@@ -944,26 +1141,27 @@ struct MainColumnScrollViewAccessor: NSViewRepresentable {
             scrollView = nil
             attachedColumnKey = nil
             lastReportedOffsetY = .nan
+            offsetChangeHandler = nil
         }
 
-        private func installObserver(for scrollView: NSScrollView, onOffsetChange: @escaping (CGFloat) -> Void) {
+        private func installObserver(for scrollView: NSScrollView) {
             scrollView.contentView.postsBoundsChangedNotifications = true
             observer = NotificationCenter.default.addObserver(
                 forName: NSView.boundsDidChangeNotification,
                 object: scrollView.contentView,
                 queue: .main
             ) { [weak self] _ in
-                self?.publishCurrentOffset(onOffsetChange)
+                self?.publishCurrentOffset()
             }
         }
 
-        private func publishCurrentOffset(_ onOffsetChange: @escaping (CGFloat) -> Void) {
-            guard let scrollView else { return }
+        private func publishCurrentOffset() {
+            guard let scrollView, let offsetChangeHandler else { return }
             let originY = scrollView.contentView.bounds.origin.y
             guard lastReportedOffsetY.isNaN || abs(lastReportedOffsetY - originY) > 0.5 else { return }
             lastReportedOffsetY = originY
             DispatchQueue.main.async {
-                onOffsetChange(originY)
+                offsetChangeHandler(originY)
             }
         }
 
@@ -974,6 +1172,11 @@ struct MainColumnScrollViewAccessor: NSViewRepresentable {
                 let visible = scrollView.documentVisibleRect
                 let documentHeight = scrollView.documentView?.bounds.height ?? 0
                 let maxY = max(0, documentHeight - visible.height)
+                bounceDebugLog(
+                    "applyStoredOffset key=\(self.attachedColumnKey ?? "nil") " +
+                    "stored=\(String(format: "%.1f", storedOffsetY)) current=\(String(format: "%.1f", visible.origin.y)) " +
+                    "max=\(String(format: "%.1f", maxY))"
+                )
                 let applied = CaretScrollCoordinator.applyVerticalScrollIfNeeded(
                     scrollView: scrollView,
                     visibleRect: visible,
@@ -1277,6 +1480,13 @@ struct FocusModeCardRootHeightKey: PreferenceKey {
 }
 
 struct FocusModeCardFramePreferenceKey: PreferenceKey {
+    static var defaultValue: [UUID: CGRect] = [:]
+    static func reduce(value: inout [UUID: CGRect], nextValue: () -> [UUID: CGRect]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, new in new })
+    }
+}
+
+struct MainColumnCardFramePreferenceKey: PreferenceKey {
     static var defaultValue: [UUID: CGRect] = [:]
     static func reduce(value: inout [UUID: CGRect], nextValue: () -> [UUID: CGRect]) {
         value.merge(nextValue(), uniquingKeysWith: { _, new in new })

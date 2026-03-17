@@ -138,6 +138,22 @@ extension ScenarioWriterView {
         mainSelectionLastLength = context.selected.length
         mainSelectionLastTextLength = context.textLength
         mainSelectionLastResponderID = context.responderID
+
+        let caretLocation = resolvedMainCaretPersistenceLocation(using: context)
+        mainCaretLocationByCardID[context.editingID] = caretLocation
+        persistLastFocusSnapshot(
+            cardID: context.editingID,
+            caretLocation: caretLocation,
+            isEditing: true,
+            inFocusMode: false
+        )
+    }
+
+    private func resolvedMainCaretPersistenceLocation(using context: MainSelectionChangeContext) -> Int {
+        if context.selected.length == 0 {
+            return context.selectedEnd
+        }
+        return (mainSelectionActiveEdge == .start) ? context.selectedStart : context.selectedEnd
     }
 
     func stopMainCaretMonitor() {

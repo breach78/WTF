@@ -382,7 +382,7 @@ extension ScenarioWriterView {
                 
                 HStack(alignment: .bottom, spacing: 10) {
                     if #available(macOS 13.0, *) {
-                        TextField("AI에게 질문하기...", text: $aiChatInput, axis: .vertical)
+                        TextField("AI에게 질문하기...", text: aiChatInputBinding, axis: .vertical)
                             .textFieldStyle(.plain)
                             .font(.system(size: 15))
                             .lineLimit(1...6)
@@ -397,7 +397,7 @@ extension ScenarioWriterView {
                                 sendAIChatMessage()
                             }
                     } else {
-                        TextField("AI에게 질문하기...", text: $aiChatInput)
+                        TextField("AI에게 질문하기...", text: aiChatInputBinding)
                             .textFieldStyle(.plain)
                             .font(.system(size: 15))
                             .padding(12)

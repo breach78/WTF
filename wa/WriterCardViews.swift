@@ -277,11 +277,23 @@ struct FocusModeCardEditor: View {
 // MARK: - 메인 카드 아이템
 
 struct CardItem: View {
+    private enum InlineInsertZoneEdge {
+        case top
+        case bottom
+        case trailing
+    }
+
     @ObservedObject var card: SceneCard
     let isActive, isSelected, isMultiSelected, isArchived, isAncestor, isDescendant, isEditing: Bool
     let preferredTextMeasureWidth: CGFloat
     let forceNamedSnapshotNoteStyle: Bool
     let forceCustomColorVisibility: Bool
+    var onInsertSiblingAbove: (() -> Void)? = nil
+    var onInsertSiblingBelow: (() -> Void)? = nil
+    var onAddChildCard: (() -> Void)? = nil
+    var onDropBefore: (([NSItemProvider], Bool) -> Void)? = nil
+    var onDropAfter: (([NSItemProvider], Bool) -> Void)? = nil
+    var onDropOnto: (([NSItemProvider], Bool) -> Void)? = nil
     var onSelect, onDoubleClick, onEndEdit: () -> Void
     var onContentChange: ((String, String) -> Void)? = nil
     var onColorChange: ((String?) -> Void)? = nil
@@ -309,11 +321,16 @@ struct CardItem: View {
     var onCloneCard: (() -> Void)? = nil
     var clonePeerDestinations: [ClonePeerMenuDestination] = []
     var onNavigateToClonePeer: ((UUID) -> Void)? = nil
-    var onCardDrop: (([NSItemProvider], Bool) -> Void)? = nil
     @State private var mainEditingMeasuredBodyHeight: CGFloat = 0
     @State private var mainEditingMeasureWorkItem: DispatchWorkItem? = nil
     @State private var mainEditingMeasureLastAt: Date = .distantPast
-    @State private var isOntoDropTargeted: Bool = false
+    @State private var isTopInsertZoneHovered: Bool = false
+    @State private var isBottomInsertZoneHovered: Bool = false
+    @State private var isTrailingInsertZoneHovered: Bool = false
+    @State private var isTopInsertZoneDropTargeted: Bool = false
+    @State private var isBottomInsertZoneDropTargeted: Bool = false
+    @State private var isTrailingInsertZoneDropTargeted: Bool = false
+    @State private var isBodyDropTargeted: Bool = false
     @FocusState private var editorFocus: Bool
     @AppStorage("fontSize") private var fontSize: Double = 14.0
     @AppStorage("appearance") private var appearance: String = "dark"
@@ -386,12 +403,113 @@ struct CardItem: View {
         return Color(red: rgb.r, green: rgb.g, blue: rgb.b)
     }
 
-    private var backgroundColor: Color {
+    private var insertZoneHighlightColor: Color {
+        usesDarkPalette ? Color.white.opacity(0.22) : Color.black.opacity(0.18)
+    }
+
+    private var insertIndicatorColor: Color {
+        usesDarkPalette ? Color.white.opacity(0.92) : Color.black.opacity(0.72)
+    }
+
+    private var shouldShowInlineInsertControls: Bool {
+        !isArchived && !isEditing
+    }
+
+    private var bodyDropTrailingInset: CGFloat {
+        (shouldShowInlineInsertControls && onAddChildCard != nil) ? trailingInsertZoneWidth : 0
+    }
+
+    private var baseBackgroundColor: Color {
         if isArchived {
             return appearance == "light" ? Color.gray.opacity(0.25) : Color.gray.opacity(0.35)
         }
-        let rgb = resolvedCardRGB
+        if isMultiSelected {
+            let base = resolvedBaseRGB()
+            let overlay = usesDarkPalette ? (r: 0.42, g: 0.56, b: 0.78) : (r: 0.70, g: 0.83, b: 0.98)
+            let amount = usesDarkPalette ? 0.58 : 0.62
+            let rgb = mix(base: base, overlay: overlay, amount: amount)
+            return Color(red: rgb.r, green: rgb.g, blue: rgb.b)
+        }
+        let rgb = resolvedBaseRGB()
         return Color(red: rgb.r, green: rgb.g, blue: rgb.b)
+    }
+
+    private var relatedBackgroundColor: Color {
+        let rgb = resolvedRelatedRGB()
+        return Color(red: rgb.r, green: rgb.g, blue: rgb.b)
+    }
+
+    private var activeBackgroundColor: Color {
+        let rgb = resolvedActiveRGB()
+        return Color(red: rgb.r, green: rgb.g, blue: rgb.b)
+    }
+
+    private var usesFocusFadeTint: Bool {
+        !isArchived && !isMultiSelected && !isCandidateVisualCard
+    }
+
+    private var relatedTintOpacity: Double {
+        guard usesFocusFadeTint else { return 0 }
+        return (!isActive && (isAncestor || isDescendant)) ? 1 : 0
+    }
+
+    private var activeTintOpacity: Double {
+        guard usesFocusFadeTint else { return 0 }
+        return isActive ? 1 : 0
+    }
+
+    private var focusFadeAnimationKey: Int {
+        var hasher = Hasher()
+        hasher.combine(isActive)
+        hasher.combine(isAncestor)
+        hasher.combine(isDescendant)
+        hasher.combine(isArchived)
+        hasher.combine(isMultiSelected)
+        hasher.combine(isCandidateVisualCard)
+        return hasher.finalize()
+    }
+
+    private var cardBorderColor: Color {
+        if usesDarkPalette {
+            return Color.white.opacity(0.12)
+        }
+        return Color.black.opacity(0.10)
+    }
+
+    private let horizontalInsertZoneHeight: CGFloat = 27
+    private let horizontalInsertZoneWidth: CGFloat = 60
+    private let trailingInsertZoneWidth: CGFloat = 30
+
+    private func insertZoneHighlightFill(for edge: InlineInsertZoneEdge) -> AnyShapeStyle {
+        let strong = usesDarkPalette ? Color.white.opacity(0.32) : Color.black.opacity(0.24)
+        let soft = usesDarkPalette ? Color.white.opacity(0.16) : Color.black.opacity(0.10)
+
+        switch edge {
+        case .top:
+            return AnyShapeStyle(
+                LinearGradient(
+                    colors: [strong, soft, .clear],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            )
+        case .bottom:
+            return AnyShapeStyle(
+                LinearGradient(
+                    colors: [strong, soft, .clear],
+                    startPoint: .bottom,
+                    endPoint: .top
+                )
+            )
+        case .trailing:
+            return AnyShapeStyle(
+                LinearGradient(
+                    colors: [strong, soft, .clear],
+                    startPoint: .trailing,
+                    endPoint: .leading
+                )
+            )
+        }
     }
 
     private var mainEditingTextMeasureWidth: CGFloat {
@@ -576,14 +694,14 @@ struct CardItem: View {
     @ViewBuilder
     private var cardSurface: some View {
         ZStack(alignment: .topLeading) {
-            backgroundColor
-            if isOntoDropTargeted {
-                Color(
-                    red: resolvedActiveRGB().r,
-                    green: resolvedActiveRGB().g,
-                    blue: resolvedActiveRGB().b
-                )
-                .transition(.opacity)
+            baseBackgroundColor
+
+            if usesFocusFadeTint {
+                relatedBackgroundColor
+                    .opacity(relatedTintOpacity)
+
+                activeBackgroundColor
+                    .opacity(activeTintOpacity)
             }
 
             ZStack(alignment: .topLeading) {
@@ -663,13 +781,59 @@ struct CardItem: View {
                 }
             }
         }
-        .overlay(alignment: .trailing) {
-            if shouldShowChildRightEdge {
-                Rectangle()
-                    .fill(childRightEdgeColor)
-                    .frame(width: 4)
-                    .allowsHitTesting(false)
+        .overlay {
+            if let onDropOnto {
+                cardBodyDropZone(onDrop: onDropOnto)
             }
+        }
+        .overlay(alignment: .trailing) {
+            ZStack(alignment: .trailing) {
+                if shouldShowInlineInsertControls, let onAddChildCard {
+                    inlineInsertZone(
+                        isHovered: $isTrailingInsertZoneHovered,
+                        isDropTargeted: $isTrailingInsertZoneDropTargeted,
+                        edge: .trailing,
+                        axis: .vertical,
+                        action: onAddChildCard,
+                        onDrop: nil
+                    )
+                }
+                if shouldShowChildRightEdge {
+                    Rectangle()
+                        .fill(childRightEdgeColor)
+                        .frame(width: 4)
+                        .allowsHitTesting(false)
+                }
+            }
+        }
+        .overlay(alignment: .top) {
+            if shouldShowInlineInsertControls, let onInsertSiblingAbove {
+                inlineInsertZone(
+                    isHovered: $isTopInsertZoneHovered,
+                    isDropTargeted: $isTopInsertZoneDropTargeted,
+                    edge: .top,
+                    axis: .horizontal,
+                    action: onInsertSiblingAbove,
+                    onDrop: onDropBefore
+                )
+            }
+        }
+        .overlay(alignment: .bottom) {
+            if shouldShowInlineInsertControls, let onInsertSiblingBelow {
+                inlineInsertZone(
+                    isHovered: $isBottomInsertZoneHovered,
+                    isDropTargeted: $isBottomInsertZoneDropTargeted,
+                    edge: .bottom,
+                    axis: .horizontal,
+                    action: onInsertSiblingBelow,
+                    onDrop: onDropAfter
+                )
+            }
+        }
+        .overlay {
+            Rectangle()
+                .stroke(cardBorderColor, lineWidth: 1)
+                .allowsHitTesting(false)
         }
         .overlay(alignment: .topTrailing) {
             ZStack(alignment: .topTrailing) {
@@ -715,6 +879,7 @@ struct CardItem: View {
         }
         .onTapGesture { onSelect() }
         .simultaneousGesture(TapGesture(count: 2).onEnded { onDoubleClick() })
+        .animation(.easeInOut(duration: 0.14), value: focusFadeAnimationKey)
         .onChange(of: isEditing) { _, newValue in
             if newValue {
                 scheduleMainEditingMeasuredBodyHeightRefresh(immediate: true)
@@ -734,11 +899,6 @@ struct CardItem: View {
             .contextMenu {
                 cardContextMenuContent
             }
-            .modifier(CardItemDropModifier(
-                card: card,
-                isTargeted: $isOntoDropTargeted,
-                onDrop: onCardDrop
-            ))
     }
 
     private func resolvedBaseRGB() -> (r: Double, g: Double, b: Double) {
@@ -778,6 +938,99 @@ struct CardItem: View {
         return (0.17, 0.30, 0.19)
     }
 
+    @ViewBuilder
+    private func inlineInsertZone(
+        isHovered: Binding<Bool>,
+        isDropTargeted: Binding<Bool>,
+        edge: InlineInsertZoneEdge,
+        axis: Axis,
+        action: @escaping () -> Void,
+        onDrop: (([NSItemProvider], Bool) -> Void)?
+    ) -> some View {
+        if let onDrop {
+            inlineInsertZoneContent(
+                isHovered: isHovered,
+                isDropTargeted: isDropTargeted,
+                edge: edge,
+                axis: axis,
+                action: action
+            )
+            .onDrop(
+                of: [.text],
+                delegate: CardActionZoneDropDelegate(
+                    isTargeted: isDropTargeted,
+                    performAction: onDrop
+                )
+            )
+        } else {
+            inlineInsertZoneContent(
+                isHovered: isHovered,
+                isDropTargeted: isDropTargeted,
+                edge: edge,
+                axis: axis,
+                action: action
+            )
+        }
+    }
+
+    private func inlineInsertZoneContent(
+        isHovered: Binding<Bool>,
+        isDropTargeted: Binding<Bool>,
+        edge: InlineInsertZoneEdge,
+        axis: Axis,
+        action: @escaping () -> Void
+    ) -> some View {
+        let isHighlighted = isHovered.wrappedValue || isDropTargeted.wrappedValue
+        return ZStack {
+            Rectangle()
+                .fill(isHighlighted ? insertZoneHighlightFill(for: edge) : AnyShapeStyle(Color.clear))
+
+            if isHighlighted {
+                Text("+")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(insertIndicatorColor)
+                    .transition(.opacity)
+            }
+        }
+        .contentShape(Rectangle())
+        .onHover { hovering in
+            withAnimation(.easeInOut(duration: 0.12)) {
+                isHovered.wrappedValue = hovering
+            }
+        }
+        .onTapGesture {
+            action()
+        }
+        .frame(
+            width: axis == .vertical ? trailingInsertZoneWidth : horizontalInsertZoneWidth,
+            height: axis == .horizontal ? horizontalInsertZoneHeight : nil
+        )
+        .frame(
+            maxHeight: axis == .vertical ? .infinity : nil
+        )
+    }
+
+    @ViewBuilder
+    private func cardBodyDropZone(onDrop: @escaping ([NSItemProvider], Bool) -> Void) -> some View {
+        GeometryReader { geometry in
+            let bodyWidth = max(0, geometry.size.width - bodyDropTrailingInset)
+            let bodyHeight = max(0, geometry.size.height - (horizontalInsertZoneHeight * 2))
+
+            Rectangle()
+                .fill(isBodyDropTargeted ? insertZoneHighlightColor : .clear)
+                .frame(width: bodyWidth, height: bodyHeight, alignment: .topLeading)
+                .offset(x: 0, y: horizontalInsertZoneHeight)
+                .contentShape(Rectangle())
+                .onDrop(
+                    of: [.text],
+                    delegate: CardActionZoneDropDelegate(
+                        isTargeted: $isBodyDropTargeted,
+                        performAction: onDrop
+                    )
+                )
+        }
+    }
+
     private func resolvedActiveRGB() -> (r: Double, g: Double, b: Double) {
         let fallbackLight: (Double, Double, Double) = (0.75, 0.84, 1.0)
         let fallbackDark: (Double, Double, Double) = (0.16, 0.23, 0.31)
@@ -799,7 +1052,7 @@ struct CardItem: View {
     }
 }
 
-// MARK: - 드래그 앤 드롭 델리게이트 (카드 본체용)
+// MARK: - 드래그 앤 드롭 델리게이트 (카드 영역용)
 
 private func isTrailingSiblingBlockDragActive() -> Bool {
     let tracker = MainCardDragSessionTracker.shared
@@ -810,8 +1063,7 @@ private func isTrailingSiblingBlockDragActive() -> Bool {
     return NSEvent.modifierFlags.intersection(.deviceIndependentFlagsMask).contains(.command)
 }
 
-struct AdvancedCardDropDelegate: DropDelegate {
-    let targetCard: SceneCard
+private struct CardActionZoneDropDelegate: DropDelegate {
     @Binding var isTargeted: Bool
     let performAction: ([NSItemProvider], Bool) -> Void
 
@@ -837,26 +1089,5 @@ struct AdvancedCardDropDelegate: DropDelegate {
         isTargeted = false
         MainCardDragSessionTracker.shared.end()
         return true
-    }
-}
-
-private struct CardItemDropModifier: ViewModifier {
-    let card: SceneCard
-    @Binding var isTargeted: Bool
-    let onDrop: (([NSItemProvider], Bool) -> Void)?
-
-    func body(content: Content) -> some View {
-        if let onDrop {
-            content.onDrop(
-                of: [.text],
-                delegate: AdvancedCardDropDelegate(
-                    targetCard: card,
-                    isTargeted: $isTargeted,
-                    performAction: onDrop
-                )
-            )
-        } else {
-            content
-        }
     }
 }

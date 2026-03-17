@@ -474,6 +474,9 @@ extension ScenarioWriterView {
     }
 
     func handleIdleArrowNavigationShortcut(_ press: KeyPress) -> KeyPress.Result? {
+        if mainNavKeyMonitor != nil {
+            return nil
+        }
         guard !press.modifiers.contains(.command),
               !press.modifiers.contains(.option),
               !press.modifiers.contains(.control) else { return nil }
@@ -602,8 +605,8 @@ extension ScenarioWriterView {
         guard textView.string == editingCard.content else { return false }
         guard !textView.hasMarkedText() else { return false }
 
-        let levels = resolvedAllLevels()
-        guard let location = scenario.cardLocationByID(editingID) else { return false }
+        let levels = resolvedLevelsWithParents().map(\.cards)
+        guard let location = displayedMainCardLocationByID(editingID, in: levels) else { return false }
         let levelIndex = location.level
         let cardIndex = location.index
         guard levels.indices.contains(levelIndex),
@@ -693,9 +696,30 @@ extension ScenarioWriterView {
         isShiftSelection: Bool,
         isRepeat: Bool
     ) -> Bool {
-        guard atTopBoundary, cardIndex > 0 else { return false }
-        let target = currentLevel[cardIndex - 1]
-        if isRepeat && levelIndex >= 2 && target.category != editingCard.category {
+        guard atTopBoundary else { return false }
+        let isRapidBurst = registerMainVerticalArrowPress(for: 126)
+
+        let target: SceneCard
+        if cardIndex > 0 {
+            target = currentLevel[cardIndex - 1]
+        } else if let boundaryTarget = mainCrossCategoryBoundaryTarget(
+            for: editingCard,
+            levelIndex: levelIndex,
+            step: -1
+        ) {
+            target = boundaryTarget
+        } else {
+            return false
+        }
+
+        if shouldSuppressCrossCategoryVerticalTransition(
+            from: editingCard,
+            to: target,
+            levelIndex: levelIndex,
+            keyCode: 126,
+            isRepeat: isRepeat,
+            isRapidBurst: isRapidBurst
+        ) {
             return true
         }
         clearMainEditTabArm()
@@ -703,7 +727,16 @@ extension ScenarioWriterView {
         clearMainBoundaryChildRightArm()
         clearMainNoChildRightArm()
         if isShiftSelection && press.phase == .down {
-            applyMainBoundaryShiftSelection(from: editingCard, to: target, in: currentLevel)
+            applyMainBoundaryShiftSelection(
+                from: editingCard,
+                to: target,
+                in: resolvedMainSelectionLevel(
+                    for: editingCard,
+                    target: target,
+                    levelIndex: levelIndex,
+                    fallback: currentLevel
+                )
+            )
             return true
         }
         let targetLength = (target.content as NSString).length
@@ -726,9 +759,30 @@ extension ScenarioWriterView {
         isShiftSelection: Bool,
         isRepeat: Bool
     ) -> Bool {
-        guard atBottomBoundary, cardIndex < currentLevel.count - 1 else { return false }
-        let target = currentLevel[cardIndex + 1]
-        if isRepeat && levelIndex >= 2 && target.category != editingCard.category {
+        guard atBottomBoundary else { return false }
+        let isRapidBurst = registerMainVerticalArrowPress(for: 125)
+
+        let target: SceneCard
+        if cardIndex < currentLevel.count - 1 {
+            target = currentLevel[cardIndex + 1]
+        } else if let boundaryTarget = mainCrossCategoryBoundaryTarget(
+            for: editingCard,
+            levelIndex: levelIndex,
+            step: 1
+        ) {
+            target = boundaryTarget
+        } else {
+            return false
+        }
+
+        if shouldSuppressCrossCategoryVerticalTransition(
+            from: editingCard,
+            to: target,
+            levelIndex: levelIndex,
+            keyCode: 125,
+            isRepeat: isRepeat,
+            isRapidBurst: isRapidBurst
+        ) {
             return true
         }
         clearMainEditTabArm()
@@ -736,7 +790,16 @@ extension ScenarioWriterView {
         clearMainBoundaryChildRightArm()
         clearMainNoChildRightArm()
         if isShiftSelection && press.phase == .down {
-            applyMainBoundaryShiftSelection(from: editingCard, to: target, in: currentLevel)
+            applyMainBoundaryShiftSelection(
+                from: editingCard,
+                to: target,
+                in: resolvedMainSelectionLevel(
+                    for: editingCard,
+                    target: target,
+                    levelIndex: levelIndex,
+                    fallback: currentLevel
+                )
+            )
             return true
         }
         switchMainEditingTarget(
@@ -850,7 +913,7 @@ extension ScenarioWriterView {
             return true
         }
 
-        if preferredChild(for: editingCard, matching: editingCard.category) == nil {
+        if preferredMainNavigationChild(for: editingCard, matching: editingCard.category) == nil {
             armMainNoChildRight(for: editingCard.id)
         }
         armMainBoundaryChildRight(for: editingCard.id)
@@ -970,7 +1033,22 @@ extension ScenarioWriterView {
             if event.modifierFlags.contains(.command) || event.modifierFlags.contains(.option) || event.modifierFlags.contains(.control) {
                 return event
             }
-            if handleNavigationKeyCode(event.keyCode, isRepeat: event.isARepeat, isShiftPressed: flags.contains(.shift)) {
+            if event.isARepeat {
+                mainArrowRepeatAnimationSuppressedUntil = Date().addingTimeInterval(0.16)
+            }
+            bounceDebugLog(
+                "mainNavKeyMonitor keyCode=\(event.keyCode) repeat=\(event.isARepeat) " +
+                "active=\(activeCardID?.uuidString ?? "nil")"
+            )
+            if handleNavigationKeyCode(
+                event.keyCode,
+                isRepeat: event.isARepeat,
+                isShiftPressed: flags.contains(.shift)
+            ) {
+                return nil
+            }
+            if [123, 124, 125, 126].contains(event.keyCode) {
+                playMainBoundaryFeedbackIfNeeded(for: event.keyCode, activeID: activeCardID)
                 return nil
             }
             return event
@@ -982,6 +1060,55 @@ extension ScenarioWriterView {
             NSEvent.removeMonitor(monitor)
             mainNavKeyMonitor = nil
         }
+    }
+
+    func clearMainBoundaryFeedbackGate() {
+        mainBoundaryFeedbackCardID = nil
+        mainBoundaryFeedbackKeyCode = nil
+    }
+
+    func playMainBoundaryFeedbackIfNeeded(for keyCode: UInt16, activeID: UUID?) {
+        guard mainBoundaryFeedbackCardID != activeID || mainBoundaryFeedbackKeyCode != keyCode else {
+            return
+        }
+        mainBoundaryFeedbackCardID = activeID
+        mainBoundaryFeedbackKeyCode = keyCode
+        playSoftBoundaryFeedbackSound()
+    }
+
+    func boundaryFeedbackKeyCode(for key: KeyEquivalent) -> UInt16? {
+        switch key {
+        case .upArrow: return 126
+        case .downArrow: return 125
+        case .rightArrow: return 124
+        case .leftArrow: return 123
+        default: return nil
+        }
+    }
+
+    func registerMainVerticalArrowPress(for keyCode: UInt16) -> Bool {
+        let now = Date()
+        let isRapidBurst =
+            mainRecentVerticalArrowKeyCode == keyCode &&
+            now.timeIntervalSince(mainRecentVerticalArrowAt) <= 0.24
+        mainRecentVerticalArrowKeyCode = keyCode
+        mainRecentVerticalArrowAt = now
+        return isRapidBurst
+    }
+
+    func shouldSuppressCrossCategoryVerticalTransition(
+        from source: SceneCard,
+        to target: SceneCard,
+        levelIndex: Int,
+        keyCode: UInt16,
+        isRepeat: Bool,
+        isRapidBurst: Bool
+    ) -> Bool {
+        guard levelIndex >= 2 else { return false }
+        guard target.category != source.category else { return false }
+        guard isRepeat || isRapidBurst else { return false }
+        playMainBoundaryFeedbackIfNeeded(for: keyCode, activeID: source.id)
+        return true
     }
 
     func clearMainNoChildRightArm() {
@@ -1045,6 +1172,50 @@ extension ScenarioWriterView {
         }
 
         return card.sortedChildren.first(where: { $0.category == category })
+    }
+
+    func preferredMainNavigationChild(for card: SceneCard, matching category: String?) -> SceneCard? {
+        if let matched = preferredChild(for: card, matching: category) {
+            return matched
+        }
+        return preferredChild(for: card)
+    }
+
+    func resolvedMainUnfilteredLevel(at levelIndex: Int) -> [SceneCard]? {
+        let levels = resolvedLevelsWithParents()
+        guard levels.indices.contains(levelIndex) else { return nil }
+        return levels[levelIndex].cards
+    }
+
+    func mainCrossCategoryBoundaryTarget(
+        for card: SceneCard,
+        levelIndex: Int,
+        step: Int
+    ) -> SceneCard? {
+        guard levelIndex >= 2 else { return nil }
+        guard let level = resolvedMainUnfilteredLevel(at: levelIndex),
+              let index = level.firstIndex(where: { $0.id == card.id }) else {
+            return nil
+        }
+
+        let targetIndex = index + step
+        guard level.indices.contains(targetIndex) else { return nil }
+        let target = level[targetIndex]
+        guard target.category != card.category else { return nil }
+        return target
+    }
+
+    func resolvedMainSelectionLevel(
+        for card: SceneCard,
+        target: SceneCard,
+        levelIndex: Int,
+        fallback: [SceneCard]
+    ) -> [SceneCard] {
+        guard target.category != card.category,
+              let fullLevel = resolvedMainUnfilteredLevel(at: levelIndex) else {
+            return fallback
+        }
+        return fullLevel
     }
 
     func nearestChildInSibling(
@@ -1115,7 +1286,7 @@ extension ScenarioWriterView {
                 continue
             }
 
-            guard let preferred = preferredChild(for: entry.element, matching: category),
+            guard let preferred = preferredMainNavigationChild(for: entry.element, matching: category),
                   let nextRank = rankedNextLevel.firstIndex(where: { $0.id == preferred.id }) else {
                 continue
             }
@@ -1183,7 +1354,7 @@ extension ScenarioWriterView {
         currentIndex: Int,
         allowDoublePressFallback: Bool
     ) -> MainRightResolution {
-        if let child = preferredChild(for: card, matching: card.category) {
+        if let child = preferredMainNavigationChild(for: card, matching: card.category) {
             clearMainNoChildRightArm()
             return .target(child)
         }
@@ -1198,6 +1369,14 @@ extension ScenarioWriterView {
                 nextLevel: nextLevel,
                 around: currentIndex,
                 matching: card.category
+            ) {
+                return .target(target)
+            }
+            if let target = nearestLevelChildTarget(
+                in: currentLevel,
+                nextLevel: nextLevel,
+                around: currentIndex,
+                matching: nil
             ) {
                 return .target(target)
             }
@@ -1217,6 +1396,7 @@ extension ScenarioWriterView {
     ) -> Bool {
         guard let id = activeCardID else {
             if let first = scenario.rootCards.first {
+                clearMainBoundaryFeedbackGate()
                 changeActiveCard(to: first, deferToMainAsync: false)
                 selectedCardIDs = [first.id]
                 if seedRangeAnchorWhenNoActive && isShiftPressed {
@@ -1229,8 +1409,8 @@ extension ScenarioWriterView {
             return false
         }
 
-        let levels = resolvedAllLevels()
-        guard let location = scenario.cardLocationByID(id) else { return false }
+        let levels = resolvedLevelsWithParents().map(\.cards)
+        guard let location = displayedMainCardLocationByID(id, in: levels) else { return false }
         let levelIndex = location.level
         let cardIndex = location.index
         guard levels.indices.contains(levelIndex),
@@ -1248,14 +1428,42 @@ extension ScenarioWriterView {
         switch direction {
         case .up:
             clearMainNoChildRightArm()
-            guard cardIndex > 0 else { return false }
-            let target = currentLevel[cardIndex - 1]
-            if isRepeat && levelIndex >= 2 && target.category != card.category {
+            let isRapidBurst = registerMainVerticalArrowPress(for: 126)
+            let target: SceneCard
+            if cardIndex > 0 {
+                target = currentLevel[cardIndex - 1]
+            } else if let boundaryTarget = mainCrossCategoryBoundaryTarget(
+                for: card,
+                levelIndex: levelIndex,
+                step: -1
+            ) {
+                target = boundaryTarget
+            } else {
+                return false
+            }
+            if shouldSuppressCrossCategoryVerticalTransition(
+                from: card,
+                to: target,
+                levelIndex: levelIndex,
+                keyCode: 126,
+                isRepeat: isRepeat,
+                isRapidBurst: isRapidBurst
+            ) {
                 return true
             }
+            clearMainBoundaryFeedbackGate()
             changeActiveCard(to: target, deferToMainAsync: false)
             if isShiftPressed {
-                updateKeyboardRangeSelection(from: card, to: target, in: currentLevel)
+                updateKeyboardRangeSelection(
+                    from: card,
+                    to: target,
+                    in: resolvedMainSelectionLevel(
+                        for: card,
+                        target: target,
+                        levelIndex: levelIndex,
+                        fallback: currentLevel
+                    )
+                )
             } else {
                 selectedCardIDs = [target.id]
                 clearKeyboardRangeSelectionAnchor()
@@ -1264,11 +1472,20 @@ extension ScenarioWriterView {
 
         case .down:
             clearMainNoChildRightArm()
+            let isRapidBurst = registerMainVerticalArrowPress(for: 125)
             if cardIndex < currentLevel.count - 1 {
                 let target = currentLevel[cardIndex + 1]
-                if isRepeat && levelIndex >= 2 && target.category != card.category {
+                if shouldSuppressCrossCategoryVerticalTransition(
+                    from: card,
+                    to: target,
+                    levelIndex: levelIndex,
+                    keyCode: 125,
+                    isRepeat: isRepeat,
+                    isRapidBurst: isRapidBurst
+                ) {
                     return true
                 }
+                clearMainBoundaryFeedbackGate()
                 changeActiveCard(to: target, deferToMainAsync: false)
                 if isShiftPressed {
                     updateKeyboardRangeSelection(from: card, to: target, in: currentLevel)
@@ -1279,9 +1496,44 @@ extension ScenarioWriterView {
                 return true
             }
             if requestMainBottomRevealIfNeeded(currentLevel: currentLevel, currentIndex: cardIndex, card: card) {
+                clearMainBoundaryFeedbackGate()
                 return true
             }
-            return false
+            guard let target = mainCrossCategoryBoundaryTarget(
+                for: card,
+                levelIndex: levelIndex,
+                step: 1
+            ) else {
+                return false
+            }
+            if shouldSuppressCrossCategoryVerticalTransition(
+                from: card,
+                to: target,
+                levelIndex: levelIndex,
+                keyCode: 125,
+                isRepeat: isRepeat,
+                isRapidBurst: isRapidBurst
+            ) {
+                return true
+            }
+            clearMainBoundaryFeedbackGate()
+            changeActiveCard(to: target, deferToMainAsync: false)
+            if isShiftPressed {
+                updateKeyboardRangeSelection(
+                    from: card,
+                    to: target,
+                    in: resolvedMainSelectionLevel(
+                        for: card,
+                        target: target,
+                        levelIndex: levelIndex,
+                        fallback: currentLevel
+                    )
+                )
+            } else {
+                selectedCardIDs = [target.id]
+                clearKeyboardRangeSelectionAnchor()
+            }
+            return true
 
         case .right:
             let allowDoublePressFallback = !isRepeat
@@ -1293,6 +1545,7 @@ extension ScenarioWriterView {
                 allowDoublePressFallback: allowDoublePressFallback
             )
             if case .target(let target) = result {
+                clearMainBoundaryFeedbackGate()
                 changeActiveCard(to: target, deferToMainAsync: false)
                 selectedCardIDs = [target.id]
                 clearKeyboardRangeSelectionAnchor()
@@ -1306,6 +1559,7 @@ extension ScenarioWriterView {
         case .left:
             clearMainNoChildRightArm()
             guard let parent = card.parent else { return false }
+            clearMainBoundaryFeedbackGate()
             changeActiveCard(to: parent, deferToMainAsync: false)
             selectedCardIDs = [parent.id]
             clearKeyboardRangeSelectionAnchor()
@@ -1362,9 +1616,17 @@ extension ScenarioWriterView {
         }
         let isShiftPressed = press.modifiers.contains(.shift)
         let isRepeat = (press.phase == .repeat)
+        if isRepeat {
+            mainArrowRepeatAnimationSuppressedUntil = Date().addingTimeInterval(0.16)
+        }
+        let handled: Bool
+        bounceDebugLog(
+            "handleNavigation key=\(String(describing: press.key)) phase=\(String(describing: press.phase)) " +
+            "repeat=\(isRepeat) active=\(activeCardID?.uuidString ?? "nil")"
+        )
         switch press.key {
         case .upArrow:
-            _ = performMainArrowNavigation(
+            handled = performMainArrowNavigation(
                 .up,
                 isRepeat: isRepeat,
                 isShiftPressed: isShiftPressed,
@@ -1372,7 +1634,7 @@ extension ScenarioWriterView {
                 seedRangeAnchorWhenNoActive: false
             )
         case .downArrow:
-            _ = performMainArrowNavigation(
+            handled = performMainArrowNavigation(
                 .down,
                 isRepeat: isRepeat,
                 isShiftPressed: isShiftPressed,
@@ -1380,7 +1642,7 @@ extension ScenarioWriterView {
                 seedRangeAnchorWhenNoActive: false
             )
         case .rightArrow:
-            _ = performMainArrowNavigation(
+            handled = performMainArrowNavigation(
                 .right,
                 isRepeat: isRepeat,
                 isShiftPressed: isShiftPressed,
@@ -1388,7 +1650,7 @@ extension ScenarioWriterView {
                 seedRangeAnchorWhenNoActive: false
             )
         case .leftArrow:
-            _ = performMainArrowNavigation(
+            handled = performMainArrowNavigation(
                 .left,
                 isRepeat: isRepeat,
                 isShiftPressed: isShiftPressed,
@@ -1396,6 +1658,9 @@ extension ScenarioWriterView {
                 seedRangeAnchorWhenNoActive: false
             )
         default: return .ignored
+        }
+        if !handled, let keyCode = boundaryFeedbackKeyCode(for: press.key) {
+            playMainBoundaryFeedbackIfNeeded(for: keyCode, activeID: activeCardID)
         }
         return .handled
     }

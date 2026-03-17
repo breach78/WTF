@@ -1,0 +1,14 @@
+{
+  "name": "wa-scenario-mcp",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "MCP server for a single WTF scenario workspace",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.27.1",
+    "zod": "^3.25.76"
+  }
+}

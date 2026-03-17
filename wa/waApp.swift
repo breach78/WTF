@@ -591,7 +591,6 @@ struct waApp: App {
                         MainContainerView()
                             .environmentObject(store)
                             .environmentObject(referenceCardStore)
-                            .preferredColorScheme(appearance == "dark" ? .dark : (appearance == "light" ? .light : nil))
                     } else {
                         // 컨테이너가 없으면(최초 실행 시) 설정 화면 표시
                         storageSetupView
@@ -601,6 +600,7 @@ struct waApp: App {
             .background(MainWindowTitleHider())
             .background(MainWindowSizePersistenceAccessor())
             .onAppear {
+                applyApplicationAppearance()
                 if !didResetForV2 {
                     store?.flushPendingSaves()
                     storageBookmark = nil
@@ -617,6 +617,9 @@ struct waApp: App {
                 setupStore()
                 focusModeWindowBackgroundActive = false
                 hideReferenceWindowOnLaunchOnce()
+            }
+            .onChange(of: appearance) { _, _ in
+                applyApplicationAppearance()
             }
             .onChange(of: forceWorkspaceReset) { _, newValue in
                 if newValue {
@@ -640,7 +643,6 @@ struct waApp: App {
                     ReferenceWindowView()
                         .frame(width: ReferenceWindowConstants.windowWidth)
                         .environmentObject(store)
-                        .preferredColorScheme(appearance == "dark" ? .dark : (appearance == "light" ? .light : nil))
                 } else {
                     Text("작업 파일을 먼저 열어주세요.")
                         .padding(20)
@@ -693,16 +695,19 @@ struct waApp: App {
                 Button("메인 작업창 줌 축소") {
                     adjustMainWorkspaceZoom(by: -0.05)
                 }
+                .keyboardShortcut("-", modifiers: [.command])
                 .disabled(mainWorkspaceZoomScale <= 0.70)
 
                 Button("메인 작업창 줌 확대") {
                     adjustMainWorkspaceZoom(by: 0.05)
                 }
+                .keyboardShortcut("=", modifiers: [.command])
                 .disabled(mainWorkspaceZoomScale >= 1.60)
 
                 Button("메인 작업창 줌 100%") {
                     mainWorkspaceZoomScale = 1.0
                 }
+                .keyboardShortcut("0", modifiers: [.command])
                 Divider()
 
                 Menu("편집기") {
@@ -725,7 +730,6 @@ struct waApp: App {
         
         Settings {
             SettingsView(onUpdateStore: { setupStore() })
-                .preferredColorScheme(.light)
         }
     }
     
@@ -870,6 +874,20 @@ struct waApp: App {
 
     private var resolvedWindowBackgroundColor: NSColor {
         nsColorFromHex(resolvedWindowBackgroundHex()) ?? NSColor.windowBackgroundColor
+    }
+
+    private func applyApplicationAppearance() {
+        NSApp.appearance = resolvedApplicationAppearance()
+    }
+
+    private func resolvedApplicationAppearance() -> NSAppearance? {
+        if appearance == "dark" {
+            return NSAppearance(named: .darkAqua)
+        }
+        if appearance == "light" {
+            return NSAppearance(named: .aqua)
+        }
+        return nil
     }
 
     private func nsColorFromHex(_ hex: String) -> NSColor? {

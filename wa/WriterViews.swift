@@ -55,6 +55,8 @@ struct ScenarioWriterView: View {
     @State var isSplitPaneActive: Bool
     @State private var interactionRuntime = WriterInteractionRuntime()
     @StateObject private var mainCanvasViewState = MainCanvasViewState()
+    @StateObject private var aiFeatureState = WriterAIFeatureState()
+    @StateObject private var editEndAutoBackupState = WriterEditEndAutoBackupState()
     @StateObject private var scenarioObservedState: ScenarioWriterObservedState
 
     init(
@@ -89,6 +91,7 @@ struct ScenarioWriterView: View {
     @AppStorage("focusTypewriterBaseline") var focusTypewriterBaseline: Double = 0.60
     @AppStorage("focusModeLineSpacingValueTemp") var focusModeLineSpacingValue: Double = 4.5
     @AppStorage("mainCardLineSpacingValueV2") var mainCardLineSpacingValue: Double = 5.0
+    @AppStorage("mainCardVerticalGap") var mainCardVerticalGap: Double = 0.0
     @AppStorage("mainWorkspaceZoomScale") var mainWorkspaceZoomScale: Double = 1.0
     @AppStorage("geminiModelID") var geminiModelID: String = "gemini-3.1-pro-preview"
     @AppStorage("focusModeWindowBackgroundActive") var focusModeWindowBackgroundActive: Bool = false
@@ -96,29 +99,24 @@ struct ScenarioWriterView: View {
     @AppStorage("autoBackupDirectoryPath") var autoBackupDirectoryPath: String = ""
     @AppStorage("lastEditedScenarioID") var lastEditedScenarioID: String = ""
     @AppStorage("lastEditedCardID") var lastEditedCardID: String = ""
+    @AppStorage("lastFocusedScenarioID") var lastFocusedScenarioID: String = ""
+    @AppStorage("lastFocusedCardID") var lastFocusedCardID: String = ""
+    @AppStorage("lastFocusedCaretLocation") var lastFocusedCaretLocation: Int = -1
+    @AppStorage("lastFocusedWasEditing") var lastFocusedWasEditing: Bool = false
+    @AppStorage("lastFocusedWasFocusMode") var lastFocusedWasFocusMode: Bool = false
+    @AppStorage("lastFocusedViewportScenarioID") var lastFocusedViewportScenarioID: String = ""
+    @AppStorage("lastFocusedViewportOffsetsJSON") var lastFocusedViewportOffsetsJSON: String = ""
 
     @State var activeCardID: UUID? = nil
     @State var selectedCardIDs: Set<UUID> = []
     @State var editingCardID: UUID? = nil
     @State var showDeleteAlert: Bool = false
     @State var pendingUpperCardCreationRequest: UpperCardCreationRequest? = nil
+    @State var mainArrowRepeatAnimationSuppressedUntil: Date = .distantPast
+    @State var splitPaneAutoLinkEditsEnabled: Bool = true
     
     @State var showTimeline: Bool = false
     @State var showAIChat: Bool = false
-    @State var aiChatThreads: [AIChatThread] = []
-    @State var activeAIChatThreadID: UUID? = nil
-    @State var aiChatInput: String = ""
-    @State var aiCardDigestCache: [UUID: AICardDigest] = [:]
-    @State var aiEmbeddingIndexByCardID: [UUID: AIEmbeddingRecord] = [:]
-    @State var aiEmbeddingIndexModelID: String = "gemini-embedding-001"
-    @State var aiLastContextPreview: AIChatContextPreview? = nil
-    @State var aiThreadsLoadedScenarioID: UUID? = nil
-    @State var aiEmbeddingIndexLoadedScenarioID: UUID? = nil
-    @State var aiThreadsSaveWorkItem: DispatchWorkItem? = nil
-    @State var aiEmbeddingIndexSaveWorkItem: DispatchWorkItem? = nil
-    @State var isAIChatLoading: Bool = false
-    @State var aiChatRequestTask: Task<Void, Never>? = nil
-    @State var aiChatActiveRequestID: UUID? = nil
     @FocusState var isAIChatInputFocused: Bool
 
     @State var exportMessage: String? = nil
@@ -206,13 +204,6 @@ struct ScenarioWriterView: View {
     @State var pendingFocusUndoCaretHint: (cardID: UUID, location: Int)? = nil
     @State var focusUndoSelectionEnsureSuppressed: Bool = false
     @State var focusUndoSelectionEnsureRequestID: Int? = nil
-    @State var aiOptionsSheetAction: AICardAction? = nil
-    @State var aiSelectedGenerationOptions: Set<AIGenerationOption> = [.balanced]
-    @State var aiIsGenerating: Bool = false
-    @State var aiStatusMessage: String? = nil
-    @State var aiStatusIsError: Bool = false
-    @State var aiCandidateState = AICandidateTrackingState()
-    @State var aiChildSummaryLoadingCardIDs: Set<UUID> = []
     @State var dictationRecorder: LiveSpeechDictationRecorder? = nil
     @State var dictationIsRecording: Bool = false
     @State var dictationIsProcessing: Bool = false
@@ -227,6 +218,10 @@ struct ScenarioWriterView: View {
     @State var mainBoundaryParentLeftArmAt: Date = .distantPast
     @State var mainBoundaryChildRightArmCardID: UUID? = nil
     @State var mainBoundaryChildRightArmAt: Date = .distantPast
+    @State var mainBoundaryFeedbackCardID: UUID? = nil
+    @State var mainBoundaryFeedbackKeyCode: UInt16? = nil
+    @State var mainRecentVerticalArrowKeyCode: UInt16? = nil
+    @State var mainRecentVerticalArrowAt: Date = .distantPast
     @State var keyboardRangeSelectionAnchorCardID: UUID? = nil
     @State var mainBottomRevealCardID: UUID? = nil
     @State var mainBottomRevealTick: Int = 0
@@ -247,12 +242,12 @@ struct ScenarioWriterView: View {
     @State var historyBarMeasuredHeight: CGFloat = 0
     @State var historyRetentionLastAppliedCount: Int = 0
     @State var caretEnsureBurstWorkItems: [DispatchWorkItem] = []
+    @State var mainColumnPendingFocusWorkItemByKey: [String: DispatchWorkItem] = [:]
     @State var inactivePaneSnapshotState = InactivePaneSnapshotState()
     @State var scenarioTimestampSuppressionActive: Bool = false
     @State var editingSessionHadTextMutation: Bool = false
-    @State var pendingEditEndAutoBackupWorkItem: DispatchWorkItem? = nil
-    @State var isEditEndAutoBackupRunning: Bool = false
-    @State var hasPendingEditEndAutoBackupRequest: Bool = false
+    @State var didRestoreStartupFocusState: Bool = false
+    @State var didRestoreStartupViewportState: Bool = false
     @FocusState var isNamedSnapshotNoteEditorFocused: Bool
     let focusTypingIdleInterval: TimeInterval = 1.5
     let focusOffsetNormalizationMinInterval: TimeInterval = 0.08
@@ -277,6 +272,7 @@ struct ScenarioWriterView: View {
     let timelineWidth: CGFloat = TimelinePanelLayoutMetrics.panelWidth
     let historyOverlayBottomInset: CGFloat = 88
     let columnWidth: CGFloat = MainCanvasLayoutMetrics.columnWidth
+    let mainParentGroupSeparatorHeight: CGFloat = 3
 
     var clampedMainWorkspaceZoomScale: CGFloat {
         CGFloat(min(max(mainWorkspaceZoomScale, 0.70), 1.60))
@@ -322,6 +318,11 @@ struct ScenarioWriterView: View {
     var activeRelationSourceCardsVersion: Int {
         get { interactionRuntime.activeRelationSourceCardsVersion }
         nonmutating set { interactionRuntime.activeRelationSourceCardsVersion = newValue }
+    }
+
+    var activeRelationFingerprint: Int {
+        get { interactionRuntime.activeRelationFingerprint }
+        nonmutating set { interactionRuntime.activeRelationFingerprint = newValue }
     }
 
     var lastActiveCardID: UUID? {
@@ -371,6 +372,31 @@ struct ScenarioWriterView: View {
         nonmutating set { interactionRuntime.pendingActiveCardID = newValue }
     }
 
+    var resolvedLevelsWithParentsVersion: Int {
+        get { interactionRuntime.resolvedLevelsWithParentsVersion }
+        nonmutating set { interactionRuntime.resolvedLevelsWithParentsVersion = newValue }
+    }
+
+    var resolvedLevelsWithParentsCache: [LevelData] {
+        get { interactionRuntime.resolvedLevelsWithParentsCache }
+        nonmutating set { interactionRuntime.resolvedLevelsWithParentsCache = newValue }
+    }
+
+    var displayedMainLevelsCacheKey: DisplayedMainLevelsCacheKey? {
+        get { interactionRuntime.displayedMainLevelsCacheKey }
+        nonmutating set { interactionRuntime.displayedMainLevelsCacheKey = newValue }
+    }
+
+    var displayedMainLevelsCache: [LevelData] {
+        get { interactionRuntime.displayedMainLevelsCache }
+        nonmutating set { interactionRuntime.displayedMainLevelsCache = newValue }
+    }
+
+    var displayedMainCardLocationByIDCache: [UUID: (level: Int, index: Int)] {
+        get { interactionRuntime.displayedMainCardLocationByIDCache }
+        nonmutating set { interactionRuntime.displayedMainCardLocationByIDCache = newValue }
+    }
+
     var mainColumnLastFocusRequestByKey: [String: MainColumnFocusRequest] {
         get { interactionRuntime.mainColumnLastFocusRequestByKey }
         nonmutating set { interactionRuntime.mainColumnLastFocusRequestByKey = newValue }
@@ -379,6 +405,16 @@ struct ScenarioWriterView: View {
     var mainColumnViewportOffsetByKey: [String: CGFloat] {
         get { interactionRuntime.mainColumnViewportOffsetByKey }
         nonmutating set { interactionRuntime.mainColumnViewportOffsetByKey = newValue }
+    }
+
+    var mainColumnObservedCardFramesByKey: [String: [UUID: CGRect]] {
+        get { interactionRuntime.mainColumnObservedCardFramesByKey }
+        nonmutating set { interactionRuntime.mainColumnObservedCardFramesByKey = newValue }
+    }
+
+    var mainColumnLayoutSnapshotByKey: [MainColumnLayoutCacheKey: MainColumnLayoutSnapshot] {
+        get { interactionRuntime.mainColumnLayoutSnapshotByKey }
+        nonmutating set { interactionRuntime.mainColumnLayoutSnapshotByKey = newValue }
     }
 
     var mainColumnViewportCaptureSuspendedUntil: Date {
@@ -521,6 +557,140 @@ struct ScenarioWriterView: View {
         nonmutating set { interactionRuntime.historySaveRequestNextAllowedAt = newValue }
     }
 
+    var aiChatThreads: [AIChatThread] {
+        get { aiFeatureState.chatThreads }
+        nonmutating set { aiFeatureState.chatThreads = newValue }
+    }
+
+    var activeAIChatThreadID: UUID? {
+        get { aiFeatureState.activeThreadID }
+        nonmutating set { aiFeatureState.activeThreadID = newValue }
+    }
+
+    var aiChatInput: String {
+        get { aiFeatureState.chatInput }
+        nonmutating set { aiFeatureState.chatInput = newValue }
+    }
+
+    var aiCardDigestCache: [UUID: AICardDigest] {
+        get { aiFeatureState.cardDigestCache }
+        nonmutating set { aiFeatureState.cardDigestCache = newValue }
+    }
+
+    var aiEmbeddingIndexByCardID: [UUID: AIEmbeddingRecord] {
+        get { aiFeatureState.embeddingIndexByCardID }
+        nonmutating set { aiFeatureState.embeddingIndexByCardID = newValue }
+    }
+
+    var aiEmbeddingIndexModelID: String {
+        get { aiFeatureState.embeddingIndexModelID }
+        nonmutating set { aiFeatureState.embeddingIndexModelID = newValue }
+    }
+
+    var aiLastContextPreview: AIChatContextPreview? {
+        get { aiFeatureState.lastContextPreview }
+        nonmutating set { aiFeatureState.lastContextPreview = newValue }
+    }
+
+    var aiThreadsLoadedScenarioID: UUID? {
+        get { aiFeatureState.threadsLoadedScenarioID }
+        nonmutating set { aiFeatureState.threadsLoadedScenarioID = newValue }
+    }
+
+    var aiEmbeddingIndexLoadedScenarioID: UUID? {
+        get { aiFeatureState.embeddingIndexLoadedScenarioID }
+        nonmutating set { aiFeatureState.embeddingIndexLoadedScenarioID = newValue }
+    }
+
+    var aiThreadsSaveWorkItem: DispatchWorkItem? {
+        get { aiFeatureState.threadsSaveWorkItem }
+        nonmutating set { aiFeatureState.threadsSaveWorkItem = newValue }
+    }
+
+    var aiEmbeddingIndexSaveWorkItem: DispatchWorkItem? {
+        get { aiFeatureState.embeddingIndexSaveWorkItem }
+        nonmutating set { aiFeatureState.embeddingIndexSaveWorkItem = newValue }
+    }
+
+    var isAIChatLoading: Bool {
+        get { aiFeatureState.isChatLoading }
+        nonmutating set { aiFeatureState.isChatLoading = newValue }
+    }
+
+    var aiChatRequestTask: Task<Void, Never>? {
+        get { aiFeatureState.chatRequestTask }
+        nonmutating set { aiFeatureState.chatRequestTask = newValue }
+    }
+
+    var aiChatActiveRequestID: UUID? {
+        get { aiFeatureState.chatActiveRequestID }
+        nonmutating set { aiFeatureState.chatActiveRequestID = newValue }
+    }
+
+    var aiOptionsSheetAction: AICardAction? {
+        get { aiFeatureState.optionsSheetAction }
+        nonmutating set { aiFeatureState.optionsSheetAction = newValue }
+    }
+
+    var aiSelectedGenerationOptions: Set<AIGenerationOption> {
+        get { aiFeatureState.selectedGenerationOptions }
+        nonmutating set { aiFeatureState.selectedGenerationOptions = newValue }
+    }
+
+    var aiIsGenerating: Bool {
+        get { aiFeatureState.isGenerating }
+        nonmutating set { aiFeatureState.isGenerating = newValue }
+    }
+
+    var aiStatusMessage: String? {
+        get { aiFeatureState.statusMessage }
+        nonmutating set { aiFeatureState.statusMessage = newValue }
+    }
+
+    var aiStatusIsError: Bool {
+        get { aiFeatureState.statusIsError }
+        nonmutating set { aiFeatureState.statusIsError = newValue }
+    }
+
+    var aiCandidateState: AICandidateTrackingState {
+        get { aiFeatureState.candidateState }
+        nonmutating set { aiFeatureState.candidateState = newValue }
+    }
+
+    var aiChildSummaryLoadingCardIDs: Set<UUID> {
+        get { aiFeatureState.childSummaryLoadingCardIDs }
+        nonmutating set { aiFeatureState.childSummaryLoadingCardIDs = newValue }
+    }
+
+    var pendingEditEndAutoBackupWorkItem: DispatchWorkItem? {
+        get { editEndAutoBackupState.pendingWorkItem }
+        nonmutating set { editEndAutoBackupState.pendingWorkItem = newValue }
+    }
+
+    var isEditEndAutoBackupRunning: Bool {
+        get { editEndAutoBackupState.isRunning }
+        nonmutating set { editEndAutoBackupState.isRunning = newValue }
+    }
+
+    var hasPendingEditEndAutoBackupRequest: Bool {
+        get { editEndAutoBackupState.hasPendingRequest }
+        nonmutating set { editEndAutoBackupState.hasPendingRequest = newValue }
+    }
+
+    var aiChatInputBinding: Binding<String> {
+        Binding(
+            get: { aiChatInput },
+            set: { aiChatInput = $0 }
+        )
+    }
+
+    var aiOptionsSheetActionBinding: Binding<AICardAction?> {
+        Binding(
+            get: { aiOptionsSheetAction },
+            set: { aiOptionsSheetAction = $0 }
+        )
+    }
+
     var isInactiveSplitPane: Bool {
         splitModeEnabled && !isSplitPaneActive
     }
@@ -534,6 +704,35 @@ struct ScenarioWriterView: View {
     struct LevelData {
         let cards: [SceneCard]
         let parent: SceneCard?
+    }
+
+    struct DisplayedMainLevelsCacheKey: Equatable {
+        let cardsVersion: Int
+        let activeCategory: String?
+        let isActiveCardRoot: Bool
+    }
+
+    struct MainColumnLayoutFrame: Equatable {
+        let minY: CGFloat
+        let maxY: CGFloat
+
+        var height: CGFloat { maxY - minY }
+    }
+
+    struct MainColumnLayoutCacheKey: Hashable {
+        let recordsVersion: Int
+        let contentVersion: Int
+        let viewportHeightBucket: Int
+        let fontSizeBucket: Int
+        let lineSpacingBucket: Int
+        let cardIDs: [UUID]
+    }
+
+    struct MainColumnLayoutSnapshot {
+        let key: MainColumnLayoutCacheKey
+        let framesByCardID: [UUID: MainColumnLayoutFrame]
+        let orderedCardIDs: [UUID]
+        let contentBottomY: CGFloat
     }
 
     struct MainCanvasRenderState: Equatable {
@@ -784,6 +983,10 @@ struct ScenarioWriterView: View {
             .onChange(of: showFocusMode) { _, isOn in
                 handleShowFocusModeChange(isOn)
             }
+            .onChange(of: mainWorkspaceZoomScale) { oldValue, newValue in
+                guard abs(newValue - oldValue) > 0.0001 else { return }
+                requestMainCanvasRestoreForZoomChange()
+            }
             .onChange(of: focusTypewriterEnabled) { _, isOn in
                 handleFocusTypewriterEnabledChange(isOn)
             }
@@ -878,7 +1081,7 @@ struct ScenarioWriterView: View {
             .sheet(isPresented: $showCheckpointDialog) {
                 namedCheckpointSheet
             }
-            .sheet(item: $aiOptionsSheetAction) { action in
+            .sheet(item: aiOptionsSheetActionBinding) { action in
                 aiOptionsSheet(action: action)
             }
             .sheet(isPresented: $dictationPopupPresented) {
@@ -920,7 +1123,10 @@ struct ScenarioWriterView: View {
 
     func handleWorkspaceAppear() {
         syncScenarioObservedState()
+        restoreStartupViewportIfNeeded()
         if activeCardID == nil, let startupCard = startupActiveCard() { changeActiveCard(to: startupCard) }
+        restoreStartupFocusIfNeeded()
+        requestStartupMainCanvasRestoreIfNeeded()
         syncSplitPaneActiveCardState(activeCardID)
         isMainViewFocused = true
         if scenario.sortedSnapshots.isEmpty { takeSnapshot(force: true) }
@@ -985,12 +1191,20 @@ struct ScenarioWriterView: View {
     }
 
     func handleActiveCardIDChange(_ newID: UUID?) {
+        let clearedRequestCount = mainColumnLastFocusRequestByKey.count
         mainColumnLastFocusRequestByKey = [:]
         if let newID, scenario.rootCards.contains(where: { $0.id == newID }) {
             mainColumnViewportRestoreUntil = Date().addingTimeInterval(0.35)
         }
+        bounceDebugLog(
+            "handleActiveCardIDChange new=\(debugCardIDString(newID)) clearedRequests=\(clearedRequestCount) " +
+            "restoreUntil=\(mainColumnViewportRestoreUntil.timeIntervalSince1970) \(debugFocusStateSummary())"
+        )
         if let newID, findCard(by: newID) != nil {
             persistLastEditedCard(newID)
+            if editingCardID == nil && !showFocusMode {
+                persistLastFocusSnapshot(cardID: newID, isEditing: false, inFocusMode: false)
+            }
         }
         syncSplitPaneActiveCardState(newID)
         if linkedCardsFilterEnabled, let newID, findCard(by: newID) != nil {
@@ -1001,6 +1215,10 @@ struct ScenarioWriterView: View {
     }
 
     func handleScenarioCardsVersionChange() {
+        bounceDebugLog(
+            "handleScenarioCardsVersionChange version=\(scenario.cardsVersion) " +
+            "\(debugFocusStateSummary())"
+        )
         mainColumnLastFocusRequestByKey = [:]
         if isInactiveSplitPane {
             scheduleInactivePaneSnapshotRefresh()
@@ -1034,8 +1252,13 @@ struct ScenarioWriterView: View {
     }
 
     func handleWorkspaceDisappear() {
+        persistCurrentFocusSnapshotIfPossible()
+        persistCurrentViewportSnapshotIfPossible()
         releaseScenarioTimestampSuppressionIfNeeded()
         cancelInactivePaneSnapshotRefresh()
+        cancelAIChatRequest()
+        flushAIThreadsPersistence()
+        flushAIEmbeddingPersistence()
         pendingEditEndAutoBackupWorkItem?.cancel()
         pendingEditEndAutoBackupWorkItem = nil
         hasPendingEditEndAutoBackupRequest = false
@@ -1097,6 +1320,9 @@ struct ScenarioWriterView: View {
             startMainNavKeyMonitor()
             startMainCaretMonitor()
             requestMainCanvasRestoreForFocusExit()
+            if let activeID = activeCardID {
+                persistLastFocusSnapshot(cardID: activeID, isEditing: false, inFocusMode: false)
+            }
         }
     }
 
@@ -1112,6 +1338,9 @@ struct ScenarioWriterView: View {
     func handleEditingCardIDChange(oldID: UUID?, newID: UUID?) {
         if let newID {
             persistLastEditedCard(newID)
+            if !showFocusMode {
+                persistLastFocusSnapshot(cardID: newID, isEditing: true, inFocusMode: false)
+            }
         }
         if oldID != nil, newID == nil {
             if editingSessionHadTextMutation {
@@ -1149,6 +1378,9 @@ struct ScenarioWriterView: View {
             mainSelectionLastTextLength = -1
             mainSelectionLastResponderID = nil
             mainSelectionActiveEdge = .end
+            if !showFocusMode, let activeID = activeCardID {
+                persistLastFocusSnapshot(cardID: activeID, isEditing: false, inFocusMode: false)
+            }
             return
         }
         mainSelectionLastCardID = nil
@@ -1377,14 +1609,19 @@ struct ScenarioWriterView: View {
     func mainCanvasWithOptionalZoom(size: CGSize, availableWidth: CGFloat) -> some View {
         let shouldApplyZoom = !showHistoryBar
         let scale = shouldApplyZoom ? clampedMainWorkspaceZoomScale : 1.0
+        let layoutAvailableWidth = max(1, availableWidth / scale)
+        let layoutSize = CGSize(
+            width: max(1, size.width / scale),
+            height: max(1, size.height / scale)
+        )
         if abs(scale - 1.0) < 0.001 {
             mainCanvas(size: size, availableWidth: availableWidth)
         } else {
-            mainCanvas(size: size, availableWidth: availableWidth)
+            mainCanvas(size: layoutSize, availableWidth: layoutAvailableWidth)
                 .scaleEffect(scale, anchor: .topLeading)
                 .frame(
-                    width: availableWidth / scale,
-                    height: size.height / scale,
+                    width: layoutAvailableWidth,
+                    height: layoutSize.height,
                     alignment: .topLeading
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -1403,12 +1640,37 @@ struct ScenarioWriterView: View {
         .equatable()
     }
 
+    var showsSplitPaneAutoLinkToggle: Bool {
+        splitModeEnabled && splitPaneID == 2
+    }
+
+    var splitPaneAutoLinkToolbarButton: some View {
+        Button {
+            splitPaneAutoLinkEditsEnabled.toggle()
+        } label: {
+            Image(systemName: "link")
+                .padding(8)
+                .background(.ultraThinMaterial)
+                .clipShape(Circle())
+                .foregroundColor(splitPaneAutoLinkEditsEnabled ? .orange : .gray)
+        }
+        .buttonStyle(.plain)
+        .padding(.top, 2)
+        .help(
+            splitPaneAutoLinkEditsEnabled
+            ? "오른쪽 편집을 왼쪽 카드의 연결 카드로 자동 기록합니다."
+            : "왼쪽과 오른쪽 편집을 독립적으로 유지합니다."
+        )
+    }
+
     var workspaceTopToolbarContent: some View {
         VStack {
             HStack(spacing: 12) {
                 Spacer()
+                if showsSplitPaneAutoLinkToggle {
+                    splitPaneAutoLinkToolbarButton
+                }
                 checkpointToolbarButton
-                    .padding(.leading, 12)
                 historyToolbarButton
                 aiChatToolbarButton
                 timelineToolbarButton
@@ -1882,12 +2144,12 @@ struct ScenarioWriterView: View {
 
     @ViewBuilder
     func mainCanvasLevelColumns(screenHeight: CGFloat) -> some View {
-        let levelsData = displayedLevelsData()
-        let visualMaxLevelCount = displayedMaxLevelCount(for: levelsData)
+        let baseLevelsData = displayedLevelsData()
+        let levelsData = displayedMainLevelsData(from: baseLevelsData)
+        let visualMaxLevelCount = displayedMaxLevelCount(for: baseLevelsData)
         ForEach(Array(levelsData.enumerated()), id: \.offset) { index, data in
-            let filteredCards = filteredCardsForMainCanvasColumn(levelIndex: index, cards: data.cards)
-            if index <= 1 || !filteredCards.isEmpty {
-                column(for: filteredCards, level: index, parent: data.parent, screenHeight: screenHeight)
+            if index <= 1 || !data.cards.isEmpty {
+                column(for: data.cards, level: index, parent: data.parent, screenHeight: screenHeight)
                     .id(index)
             } else {
                 Color.clear.frame(width: columnWidth)
@@ -1933,18 +2195,7 @@ struct ScenarioWriterView: View {
         for id in selectedCardIDs.sorted(by: { $0.uuidString < $1.uuidString }) {
             hasher.combine(id)
         }
-        hasher.combine(activeAncestorIDs.count)
-        for id in activeAncestorIDs.sorted(by: { $0.uuidString < $1.uuidString }) {
-            hasher.combine(id)
-        }
-        hasher.combine(activeDescendantIDs.count)
-        for id in activeDescendantIDs.sorted(by: { $0.uuidString < $1.uuidString }) {
-            hasher.combine(id)
-        }
-        hasher.combine(activeSiblingIDs.count)
-        for id in activeSiblingIDs.sorted(by: { $0.uuidString < $1.uuidString }) {
-            hasher.combine(id)
-        }
+        hasher.combine(activeRelationFingerprint)
         hasher.combine(isPreviewingHistory)
         hasher.combine(aiCandidateState.cardIDs.count)
         for id in aiCandidateState.cardIDs {
@@ -1957,27 +2208,32 @@ struct ScenarioWriterView: View {
         hasher.combine(aiIsGenerating)
         hasher.combine(dictationIsRecording)
         hasher.combine(dictationIsProcessing)
-        hasher.combine(inactivePaneSnapshotState.maxLevelCount)
-        for level in inactivePaneSnapshotState.levelsData {
-            hasher.combine(level.parent?.id)
-            hasher.combine(level.cards.count)
-            for card in level.cards {
-                hasher.combine(card.id)
+        hasher.combine(isInactiveSplitPane)
+        if isInactiveSplitPane {
+            hasher.combine(inactivePaneSnapshotState.maxLevelCount)
+            for level in inactivePaneSnapshotState.levelsData {
+                hasher.combine(level.parent?.id)
+                hasher.combine(level.cards.count)
+                for card in level.cards {
+                    hasher.combine(card.id)
+                }
             }
         }
-        hasher.combine(previewDiffs.count)
-        for diff in previewDiffs {
-            hasher.combine(diff.id)
-            switch diff.status {
-            case .added: hasher.combine(1)
-            case .deleted: hasher.combine(2)
-            case .modified: hasher.combine(3)
-            case .none: hasher.combine(4)
+        if isPreviewingHistory {
+            hasher.combine(previewDiffs.count)
+            for diff in previewDiffs {
+                hasher.combine(diff.id)
+                switch diff.status {
+                case .added: hasher.combine(1)
+                case .deleted: hasher.combine(2)
+                case .modified: hasher.combine(3)
+                case .none: hasher.combine(4)
+                }
             }
-        }
-        hasher.combine(historyPreviewSelectedCardIDs.count)
-        for id in historyPreviewSelectedCardIDs.sorted(by: { $0.uuidString < $1.uuidString }) {
-            hasher.combine(id)
+            hasher.combine(historyPreviewSelectedCardIDs.count)
+            for id in historyPreviewSelectedCardIDs.sorted(by: { $0.uuidString < $1.uuidString }) {
+                hasher.combine(id)
+            }
         }
         return hasher.finalize()
     }
@@ -2090,6 +2346,8 @@ struct ScenarioWriterView: View {
         hasher.combine(showCheckpointDialog)
         hasher.combine(isPreviewingHistory)
         hasher.combine(scenarioHistoryVersion)
+        hasher.combine(showsSplitPaneAutoLinkToggle)
+        hasher.combine(splitPaneAutoLinkEditsEnabled)
         return hasher.finalize()
     }
 
@@ -2161,7 +2419,8 @@ struct ScenarioWriterView: View {
             scrollToColumnIfNeeded(
                 targetCardID: id,
                 proxy: hProxy,
-                availableWidth: availableWidth
+                availableWidth: availableWidth,
+                animated: !shouldSuppressMainArrowRepeatAnimation()
             )
         }
     }
@@ -2296,7 +2555,134 @@ struct ScenarioWriterView: View {
         scenario.setSplitPaneActiveCard(cardID, for: splitPaneID)
     }
 
+    private struct StartupFocusSnapshot {
+        let card: SceneCard
+        let caretLocation: Int?
+        let restoresEditing: Bool
+        let restoresFocusMode: Bool
+    }
+
+    private func startupFocusSnapshot() -> StartupFocusSnapshot? {
+        guard scenario.id.uuidString == lastFocusedScenarioID,
+              let restoredID = UUID(uuidString: lastFocusedCardID),
+              let restored = findCard(by: restoredID),
+              !restored.isArchived else {
+            return nil
+        }
+
+        let length = (restored.content as NSString).length
+        let caretLocation =
+            lastFocusedCaretLocation >= 0
+            ? min(max(0, lastFocusedCaretLocation), length)
+            : nil
+
+        return StartupFocusSnapshot(
+            card: restored,
+            caretLocation: caretLocation,
+            restoresEditing: lastFocusedWasEditing,
+            restoresFocusMode: lastFocusedWasFocusMode
+        )
+    }
+
+    private func restoreStartupFocusIfNeeded() {
+        guard !didRestoreStartupFocusState else { return }
+        didRestoreStartupFocusState = true
+        guard acceptsKeyboardInput else { return }
+        guard let snapshot = startupFocusSnapshot() else { return }
+
+        if let caretLocation = snapshot.caretLocation {
+            mainCaretLocationByCardID[snapshot.card.id] = caretLocation
+        }
+
+        guard snapshot.restoresEditing || snapshot.restoresFocusMode else { return }
+
+        let targetID = snapshot.card.id
+        DispatchQueue.main.async {
+            guard acceptsKeyboardInput else { return }
+            guard let target = findCard(by: targetID), !target.isArchived else { return }
+            if let caretLocation = snapshot.caretLocation {
+                mainCaretLocationByCardID[target.id] = caretLocation
+            }
+            if snapshot.restoresFocusMode {
+                guard !showFocusMode else { return }
+                if activeCardID != target.id {
+                    changeActiveCard(to: target)
+                }
+                toggleFocusMode()
+                return
+            }
+            guard !showFocusMode else { return }
+            beginCardEditing(target)
+        }
+    }
+
+    private func restoredStartupViewportOffsets() -> [String: CGFloat] {
+        guard scenario.id.uuidString == lastFocusedViewportScenarioID else { return [:] }
+        guard let data = lastFocusedViewportOffsetsJSON.data(using: .utf8) else { return [:] }
+        guard let decoded = try? JSONDecoder().decode([String: Double].self, from: data) else { return [:] }
+        return decoded.reduce(into: [String: CGFloat]()) { partialResult, entry in
+            let offset = CGFloat(entry.value)
+            guard offset.isFinite, offset >= 0 else { return }
+            partialResult[entry.key] = offset
+        }
+    }
+
+    private func restoreStartupViewportIfNeeded() {
+        guard !didRestoreStartupViewportState else { return }
+        didRestoreStartupViewportState = true
+
+        let restoredOffsets = restoredStartupViewportOffsets()
+        guard !restoredOffsets.isEmpty else { return }
+
+        mainColumnViewportOffsetByKey = restoredOffsets
+        let restoreDelays: [TimeInterval] = [0.0, 0.05, 0.18]
+        for delay in restoreDelays {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                applyStoredMainColumnViewportOffsets(restoredOffsets)
+            }
+        }
+    }
+
+    private func applyStoredMainColumnViewportOffsets(_ offsets: [String: CGFloat]) {
+        guard !offsets.isEmpty else { return }
+
+        var didScheduleCaptureSuspension = false
+        for (viewportKey, storedOffsetY) in offsets.sorted(by: { $0.key < $1.key }) {
+            guard storedOffsetY > 1 else { continue }
+            guard let scrollView = MainColumnScrollRegistry.shared.scrollView(for: viewportKey) else { continue }
+
+            let visible = scrollView.documentVisibleRect
+            let documentHeight = scrollView.documentView?.bounds.height ?? 0
+            let maxY = max(0, documentHeight - visible.height)
+            if !didScheduleCaptureSuspension {
+                suspendMainColumnViewportCapture(for: 0.22)
+                didScheduleCaptureSuspension = true
+            }
+            _ = CaretScrollCoordinator.applyVerticalScrollIfNeeded(
+                scrollView: scrollView,
+                visibleRect: visible,
+                targetY: storedOffsetY,
+                minY: 0,
+                maxY: maxY,
+                deadZone: 0.5,
+                snapToPixel: true
+            )
+        }
+    }
+
+    private func requestStartupMainCanvasRestoreIfNeeded() {
+        guard let targetID = activeCardID ?? startupActiveCard()?.id else { return }
+        pendingMainCanvasRestoreCardID = nil
+        DispatchQueue.main.async {
+            guard !showFocusMode else { return }
+            pendingMainCanvasRestoreCardID = targetID
+        }
+    }
+
     private func startupActiveCard() -> SceneCard? {
+        if let snapshot = startupFocusSnapshot() {
+            return snapshot.card
+        }
         if scenario.id.uuidString == lastEditedScenarioID,
            let restoredID = UUID(uuidString: lastEditedCardID),
            let restored = findCard(by: restoredID),
@@ -2304,6 +2690,67 @@ struct ScenarioWriterView: View {
             return restored
         }
         return scenario.rootCards.last
+    }
+
+    func persistLastFocusSnapshot(
+        cardID: UUID,
+        caretLocation: Int? = nil,
+        isEditing: Bool,
+        inFocusMode: Bool
+    ) {
+        guard let card = findCard(by: cardID), !card.isArchived else { return }
+        let length = (card.content as NSString).length
+
+        let resolvedCaretLocation: Int
+        if let caretLocation {
+            resolvedCaretLocation = min(max(0, caretLocation), length)
+        } else if let savedLocation = mainCaretLocationByCardID[cardID] {
+            resolvedCaretLocation = min(max(0, savedLocation), length)
+        } else if lastFocusedScenarioID == scenario.id.uuidString,
+                  lastFocusedCardID == cardID.uuidString,
+                  lastFocusedCaretLocation >= 0 {
+            resolvedCaretLocation = min(max(0, lastFocusedCaretLocation), length)
+        } else {
+            resolvedCaretLocation = 0
+        }
+
+        lastFocusedScenarioID = scenario.id.uuidString
+        lastFocusedCardID = cardID.uuidString
+        lastFocusedCaretLocation = resolvedCaretLocation
+        lastFocusedWasEditing = isEditing
+        lastFocusedWasFocusMode = inFocusMode
+    }
+
+    private func persistCurrentFocusSnapshotIfPossible() {
+        if showFocusMode, let focusedID = focusModeEditorCardID ?? editingCardID ?? activeCardID {
+            persistLastFocusSnapshot(cardID: focusedID, isEditing: true, inFocusMode: true)
+            return
+        }
+        if let editingID = editingCardID {
+            persistLastFocusSnapshot(cardID: editingID, isEditing: true, inFocusMode: false)
+            return
+        }
+        if let activeID = activeCardID {
+            persistLastFocusSnapshot(cardID: activeID, isEditing: false, inFocusMode: false)
+        }
+    }
+
+    private func persistCurrentViewportSnapshotIfPossible() {
+        let sanitizedOffsets = mainColumnViewportOffsetByKey.reduce(into: [String: Double]()) { partialResult, entry in
+            guard entry.value.isFinite, entry.value >= 0 else { return }
+            partialResult[entry.key] = Double(entry.value)
+        }
+
+        guard !sanitizedOffsets.isEmpty,
+              let data = try? JSONEncoder().encode(sanitizedOffsets),
+              let encoded = String(data: data, encoding: .utf8) else {
+            lastFocusedViewportScenarioID = ""
+            lastFocusedViewportOffsetsJSON = ""
+            return
+        }
+
+        lastFocusedViewportScenarioID = scenario.id.uuidString
+        lastFocusedViewportOffsetsJSON = encoded
     }
 
     private func persistLastEditedCard(_ cardID: UUID) {
