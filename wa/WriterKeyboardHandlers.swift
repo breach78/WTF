@@ -1724,7 +1724,11 @@ extension ScenarioWriterView {
 
         case .up, .down:
             pendingMainHorizontalScrollAnimation = nil
-            scheduleMainArrowNavigationSettle()
+            if isRepeat || !focusNavigationAnimationEnabled {
+                scheduleMainArrowNavigationSettle()
+            } else {
+                cancelMainArrowNavigationSettle()
+            }
         }
     }
 

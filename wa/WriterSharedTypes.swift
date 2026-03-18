@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import AVFoundation
 import Combine
 import QuartzCore
 
@@ -11,21 +12,28 @@ func bounceDebugLog(_ message: @autoclosure () -> String) {}
 func bounceDebugLog(_ message: @autoclosure () -> String) {}
 #endif
 
+enum SoftBoundaryFeedbackSound {
+    @MainActor static let shared: AVAudioPlayer? = {
+        let url = URL(fileURLWithPath: "/System/Library/Sounds/Pop.aiff")
+        let player = try? AVAudioPlayer(contentsOf: url)
+        player?.volume = 0.16
+        player?.prepareToPlay()
+        return player
+    }()
+}
+
+@MainActor
+func preloadSoftBoundaryFeedbackSound() {
+    SoftBoundaryFeedbackSound.shared?.prepareToPlay()
+}
+
 @MainActor
 func playSoftBoundaryFeedbackSound() {
-    enum SoftBoundaryFeedbackSound {
-        @MainActor static let shared: NSSound? = {
-            let url = URL(fileURLWithPath: "/System/Library/Sounds/Pop.aiff")
-            let sound = NSSound(contentsOf: url, byReference: true)
-            sound?.volume = 0.16
-            return sound
-        }()
-    }
-
     guard let sound = SoftBoundaryFeedbackSound.shared else { return }
     if sound.isPlaying {
         sound.stop()
     }
+    sound.currentTime = 0
     sound.play()
 }
 

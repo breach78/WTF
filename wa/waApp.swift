@@ -557,6 +557,7 @@ struct waApp: App {
     @AppStorage("fontSize") private var fontSize: Double = 14.0
     @AppStorage("mainWorkspaceZoomScale") private var mainWorkspaceZoomScale: Double = 1.0
     @AppStorage("mainCanvasHorizontalScrollMode") private var mainCanvasHorizontalScrollModeRawValue: Int = MainCanvasHorizontalScrollMode.twoStep.rawValue
+    @AppStorage("focusNavigationAnimationEnabled") private var focusNavigationAnimationEnabled: Bool = false
     @AppStorage("focusTypewriterEnabled") private var focusTypewriterEnabled: Bool = false
     @AppStorage("mainSplitModeEnabled") private var mainSplitModeEnabled: Bool = false
     @AppStorage("appearance") private var appearance: String = "dark"
@@ -616,6 +617,7 @@ struct waApp: App {
                 }
                 initializeAutoBackupSettingsIfNeeded()
                 setupStore()
+                preloadSoftBoundaryFeedbackSound()
                 focusModeWindowBackgroundActive = false
                 hideReferenceWindowOnLaunchOnce()
             }
@@ -695,6 +697,9 @@ struct waApp: App {
                         Text(mode.title).tag(mode.rawValue)
                     }
                 }
+                Divider()
+
+                Toggle("포커스 이동 애니메이션", isOn: $focusNavigationAnimationEnabled)
                 Divider()
 
                 Toggle("포커스 모드 타이프라이터", isOn: $focusTypewriterEnabled)

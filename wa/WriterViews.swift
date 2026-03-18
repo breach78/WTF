@@ -88,6 +88,7 @@ struct ScenarioWriterView: View {
     @AppStorage("exportKoreanCharacterBold") var exportKoreanCharacterBold: Bool = true
     @AppStorage("exportKoreanCharacterAlignment") var exportKoreanCharacterAlignment: String = "right"
     @AppStorage("focusTypewriterEnabled") var focusTypewriterEnabled: Bool = false
+    @AppStorage("focusNavigationAnimationEnabled") var focusNavigationAnimationEnabled: Bool = false
     @AppStorage("focusTypewriterBaseline") var focusTypewriterBaseline: Double = 0.60
     @AppStorage("focusModeLineSpacingValueTemp") var focusModeLineSpacingValue: Double = 4.5
     @AppStorage("mainCardLineSpacingValueV2") var mainCardLineSpacingValue: Double = 5.0
@@ -268,6 +269,15 @@ struct ScenarioWriterView: View {
     let inactivePaneSyncThrottleInterval: TimeInterval = 0.16
     var quickEaseAnimation: Animation {
         .timingCurve(0.25, 0.10, 0.25, 1.00, duration: 0.24)
+    }
+
+    func performWithoutAnimation(_ updates: () -> Void) {
+        var transaction = Transaction()
+        transaction.animation = nil
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            updates()
+        }
     }
 
     let timelineWidth: CGFloat = TimelinePanelLayoutMetrics.panelWidth
@@ -2483,7 +2493,9 @@ struct ScenarioWriterView: View {
             return
         }
         if !isPreviewingHistory {
-            let animated = pendingMainHorizontalScrollAnimation ?? !shouldSuppressMainArrowRepeatAnimation()
+            let animated =
+                focusNavigationAnimationEnabled &&
+                (pendingMainHorizontalScrollAnimation ?? !shouldSuppressMainArrowRepeatAnimation())
             pendingMainHorizontalScrollAnimation = nil
             scrollToColumnIfNeeded(
                 targetCardID: id,

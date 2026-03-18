@@ -467,42 +467,28 @@ extension ScenarioWriterView {
                     )
                 }
                 .onChange(of: activeCardID) { _, newID in
-                    guard !showFocusMode else { return }
-                    guard acceptsKeyboardInput else { return }
-                    cancelPendingMainColumnFocusWorkItem(for: viewportKey)
-                    cancelPendingMainColumnFocusVerificationWorkItem(for: viewportKey)
-                    if shouldPreserveMainColumnViewportOnReveal(level: level, storageKey: viewportKey, newActiveID: newID) {
-                        return
-                    }
-                    // 메인 캔버스는 부모 정렬만 유지하고, 자식 열은 현재 오프셋을 보존합니다.
-                    let containsActiveCard = cards.contains { $0.id == newID }
-                    let containsActiveAncestor = cards.contains { activeAncestorIDs.contains($0.id) }
-                    if containsActiveCard || containsActiveAncestor {
-                        let activeCardNeedsTopReveal = containsActiveCard && {
-                            guard let newID, let targetCard = findCard(by: newID) else { return false }
-                            return resolvedMainCardHeight(for: targetCard) > screenHeight
-                        }()
-                        let shouldAnimate =
-                            (containsActiveCard || containsActiveAncestor) &&
-                            !shouldSuppressMainArrowRepeatAnimation()
-                        bounceDebugLog(
-                            "activeCardChange level=\(level) viewportKey=\(viewportKey) " +
-                            "newID=\(newID?.uuidString ?? "nil") activeColumn=\(containsActiveCard) " +
-                            "ancestorColumn=\(containsActiveAncestor) topReveal=\(activeCardNeedsTopReveal) animate=\(shouldAnimate) " +
-                            "offset=\(debugCGFloat(mainColumnViewportOffsetByKey[viewportKey] ?? 0)) " +
-                            "visible=\(debugMainColumnVisibleCardSummary(viewportKey: viewportKey, cards: cards, viewportHeight: screenHeight, offsetY: mainColumnViewportOffsetByKey[viewportKey] ?? 0))"
-                        )
-                        scheduleMainColumnActiveCardFocus(
-                            viewportKey: viewportKey,
-                            expectedActiveID: newID,
-                            cards: cards,
-                            level: level,
-                            parent: parent,
-                            proxy: proxy,
-                            viewportHeight: screenHeight,
-                            animated: shouldAnimate
-                        )
-                    }
+                    handleMainColumnActiveFocusChange(
+                        viewportKey: viewportKey,
+                        newActiveID: newID,
+                        cards: cards,
+                        level: level,
+                        parent: parent,
+                        proxy: proxy,
+                        viewportHeight: screenHeight,
+                        trigger: "activeCardChange"
+                    )
+                }
+                .onChange(of: activeRelationFingerprint) { _, _ in
+                    handleMainColumnActiveFocusChange(
+                        viewportKey: viewportKey,
+                        newActiveID: activeCardID,
+                        cards: cards,
+                        level: level,
+                        parent: parent,
+                        proxy: proxy,
+                        viewportHeight: screenHeight,
+                        trigger: "activeRelationChange"
+                    )
                 }
                 .onChange(of: mainNavigationSettleTick) { _, _ in
                     handleMainColumnNavigationSettle(
@@ -577,9 +563,15 @@ extension ScenarioWriterView {
                         "mainBottomReveal level=\(level) viewportKey=\(viewportKey) target=\(debugCardToken(requestedCard)) " +
                         "offset=\(debugCGFloat(mainColumnViewportOffsetByKey[viewportKey] ?? 0)) height=\(debugCGFloat(cardHeight))"
                     )
-                    suspendMainColumnViewportCapture(for: 0.32)
-                    withAnimation(quickEaseAnimation) {
-                        proxy.scrollTo(requestedID, anchor: .bottom)
+                    suspendMainColumnViewportCapture(for: focusNavigationAnimationEnabled ? 0.32 : 0.12)
+                    if focusNavigationAnimationEnabled {
+                        withAnimation(quickEaseAnimation) {
+                            proxy.scrollTo(requestedID, anchor: .bottom)
+                        }
+                    } else {
+                        performWithoutAnimation {
+                            proxy.scrollTo(requestedID, anchor: .bottom)
+                        }
                     }
                 }
             }
@@ -707,6 +699,55 @@ extension ScenarioWriterView {
             viewportHeight: viewportHeight,
             prefersTopAnchor: prefersTopAnchor,
             animated: animated
+        )
+    }
+
+    func handleMainColumnActiveFocusChange(
+        viewportKey: String,
+        newActiveID: UUID?,
+        cards: [SceneCard],
+        level: Int,
+        parent: SceneCard?,
+        proxy: ScrollViewProxy,
+        viewportHeight: CGFloat,
+        trigger: String
+    ) {
+        guard !showFocusMode else { return }
+        guard acceptsKeyboardInput else { return }
+        cancelPendingMainColumnFocusWorkItem(for: viewportKey)
+        cancelPendingMainColumnFocusVerificationWorkItem(for: viewportKey)
+        if shouldPreserveMainColumnViewportOnReveal(level: level, storageKey: viewportKey, newActiveID: newActiveID) {
+            return
+        }
+
+        let containsActiveCard = cards.contains { $0.id == newActiveID }
+        let containsActiveAncestor = cards.contains { activeAncestorIDs.contains($0.id) }
+        guard containsActiveCard || containsActiveAncestor else { return }
+
+        let activeCardNeedsTopReveal = containsActiveCard && {
+            guard let newActiveID, let targetCard = findCard(by: newActiveID) else { return false }
+            return resolvedMainCardHeight(for: targetCard) > viewportHeight
+        }()
+        let shouldAnimate =
+            focusNavigationAnimationEnabled &&
+            !shouldSuppressMainArrowRepeatAnimation()
+
+        bounceDebugLog(
+            "\(trigger) level=\(level) viewportKey=\(viewportKey) " +
+            "newID=\(newActiveID?.uuidString ?? "nil") activeColumn=\(containsActiveCard) " +
+            "ancestorColumn=\(containsActiveAncestor) topReveal=\(activeCardNeedsTopReveal) animate=\(shouldAnimate) " +
+            "offset=\(debugCGFloat(mainColumnViewportOffsetByKey[viewportKey] ?? 0)) " +
+            "visible=\(debugMainColumnVisibleCardSummary(viewportKey: viewportKey, cards: cards, viewportHeight: viewportHeight, offsetY: mainColumnViewportOffsetByKey[viewportKey] ?? 0))"
+        )
+        scheduleMainColumnActiveCardFocus(
+            viewportKey: viewportKey,
+            expectedActiveID: newActiveID,
+            cards: cards,
+            level: level,
+            parent: parent,
+            proxy: proxy,
+            viewportHeight: viewportHeight,
+            animated: shouldAnimate
         )
     }
 
@@ -1045,13 +1086,23 @@ extension ScenarioWriterView {
         return nil
     }
 
+    func observedMainColumnTargetFrame(
+        viewportKey: String,
+        targetID: UUID
+    ) -> CGRect? {
+        mainColumnObservedCardFramesByKey[viewportKey]?[targetID]
+    }
+
     func resolvedMainColumnTargetFrame(
         viewportKey: String,
         cards: [SceneCard],
         targetID: UUID,
         viewportHeight: CGFloat
     ) -> CGRect? {
-        if let observedFrame = mainColumnObservedCardFramesByKey[viewportKey]?[targetID] {
+        if let observedFrame = observedMainColumnTargetFrame(
+            viewportKey: viewportKey,
+            targetID: targetID
+        ) {
             return observedFrame
         }
         guard let layout = resolvedMainColumnTargetLayout(
@@ -1132,16 +1183,22 @@ extension ScenarioWriterView {
         let defaultAnchor = UnitPoint(x: 0.5, y: 0.4)
         let focusAnchor = prefersTopAnchor ? UnitPoint(x: 0.5, y: 0.0) : defaultAnchor
         let focusAnchorY = prefersTopAnchor ? CGFloat(0) : CGFloat(defaultAnchor.y)
-
-        if performMainColumnNativeFocusScroll(
+        let hasObservedTargetFrame = observedMainColumnTargetFrame(
             viewportKey: viewportKey,
-            cards: cards,
-            targetID: targetID,
-            viewportHeight: viewportHeight,
-            anchorY: focusAnchorY,
-            animated: animated
-        ) {
-            return
+            targetID: targetID
+        ) != nil
+
+        if hasObservedTargetFrame {
+            if performMainColumnNativeFocusScroll(
+                viewportKey: viewportKey,
+                cards: cards,
+                targetID: targetID,
+                viewportHeight: viewportHeight,
+                anchorY: focusAnchorY,
+                animated: animated
+            ) {
+                return
+            }
         }
 
         suspendMainColumnViewportCapture(for: animated ? 0.32 : 0.12)
@@ -1150,7 +1207,9 @@ extension ScenarioWriterView {
                 proxy.scrollTo(targetID, anchor: focusAnchor)
             }
         } else {
-            proxy.scrollTo(targetID, anchor: focusAnchor)
+            performWithoutAnimation {
+                proxy.scrollTo(targetID, anchor: focusAnchor)
+            }
         }
     }
 
@@ -1186,6 +1245,10 @@ extension ScenarioWriterView {
             guard !showFocusMode else { return }
             guard acceptsKeyboardInput else { return }
             guard resolvedMainColumnFocusTargetID(in: cards) == targetID else { return }
+            let hasObservedTargetFrame = observedMainColumnTargetFrame(
+                viewportKey: viewportKey,
+                targetID: targetID
+            ) != nil
             let targetIsVisible = isMainColumnFocusTargetVisible(
                 viewportKey: viewportKey,
                 cards: cards,
@@ -1193,23 +1256,26 @@ extension ScenarioWriterView {
                 viewportHeight: viewportHeight,
                 prefersTopAnchor: prefersTopAnchor
             )
-            guard !targetIsVisible || !isMainColumnFocusTargetAligned(
+            let targetIsAligned = hasObservedTargetFrame && isMainColumnFocusTargetAligned(
                 viewportKey: viewportKey,
                 cards: cards,
                 targetID: targetID,
                 viewportHeight: viewportHeight,
                 prefersTopAnchor: prefersTopAnchor
-            ) else {
+            )
+            if hasObservedTargetFrame && targetIsVisible && targetIsAligned {
                 return
             }
 
             bounceDebugLog(
                 "verifyMainColumnFocus retry level=\(level) viewportKey=\(viewportKey) " +
                 "attempt=\(attempt) target=\(debugCardIDString(targetID)) " +
+                "observed=\(hasObservedTargetFrame) " +
                 "offset=\(debugCGFloat(resolvedMainColumnCurrentOffsetY(viewportKey: viewportKey))) " +
                 "\(debugMainColumnObservedTargetSummary(viewportKey: viewportKey, targetID: targetID, offsetY: resolvedMainColumnCurrentOffsetY(viewportKey: viewportKey)))"
             )
             mainColumnLastFocusRequestByKey.removeValue(forKey: requestKey)
+            let retryAnimated = animated && hasObservedTargetFrame
             applyMainColumnFocusAlignment(
                 viewportKey: viewportKey,
                 cards: cards,
@@ -1217,9 +1283,9 @@ extension ScenarioWriterView {
                 proxy: proxy,
                 viewportHeight: viewportHeight,
                 prefersTopAnchor: prefersTopAnchor,
-                animated: false
+                animated: retryAnimated
             )
-            guard attempt < 2 else { return }
+            guard attempt < (hasObservedTargetFrame ? 2 : 4) else { return }
             scheduleMainColumnFocusVerification(
                 viewportKey: viewportKey,
                 cards: cards,
@@ -1229,7 +1295,7 @@ extension ScenarioWriterView {
                 proxy: proxy,
                 viewportHeight: viewportHeight,
                 prefersTopAnchor: prefersTopAnchor,
-                animated: false,
+                animated: animated,
                 attempt: attempt + 1
             )
         }
@@ -1907,7 +1973,9 @@ extension ScenarioWriterView {
                     proxy.scrollTo(level, anchor: hAnchor)
                 }
             } else {
-                proxy.scrollTo(level, anchor: hAnchor)
+                performWithoutAnimation {
+                    proxy.scrollTo(level, anchor: hAnchor)
+                }
             }
         }
         switch scrollMode {
