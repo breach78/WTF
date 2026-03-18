@@ -1569,9 +1569,11 @@ extension ScenarioWriterView {
 
     // --- Navigation Key Code Handler ---
     func handleNavigationKeyCode(_ keyCode: UInt16, isRepeat: Bool = false, isShiftPressed: Bool = false) -> Bool {
+        let previousActiveID = activeCardID
+        let handled: Bool
         switch keyCode {
         case 126: // up
-            return performMainArrowNavigation(
+            handled = performMainArrowNavigation(
                 .up,
                 isRepeat: isRepeat,
                 isShiftPressed: isShiftPressed,
@@ -1579,7 +1581,7 @@ extension ScenarioWriterView {
                 seedRangeAnchorWhenNoActive: true
             )
         case 125: // down
-            return performMainArrowNavigation(
+            handled = performMainArrowNavigation(
                 .down,
                 isRepeat: isRepeat,
                 isShiftPressed: isShiftPressed,
@@ -1587,7 +1589,7 @@ extension ScenarioWriterView {
                 seedRangeAnchorWhenNoActive: true
             )
         case 124: // right
-            return performMainArrowNavigation(
+            handled = performMainArrowNavigation(
                 .right,
                 isRepeat: isRepeat,
                 isShiftPressed: isShiftPressed,
@@ -1595,7 +1597,7 @@ extension ScenarioWriterView {
                 seedRangeAnchorWhenNoActive: true
             )
         case 123: // left
-            return performMainArrowNavigation(
+            handled = performMainArrowNavigation(
                 .left,
                 isRepeat: isRepeat,
                 isShiftPressed: isShiftPressed,
@@ -1604,9 +1606,16 @@ extension ScenarioWriterView {
             )
         default:
             clearMainNoChildRightArm()
-            break
+            handled = false
         }
-        return false
+        if handled {
+            registerHandledMainArrowNavigation(
+                direction: directionForNavigationKeyCode(keyCode),
+                previousActiveID: previousActiveID,
+                isRepeat: isRepeat
+            )
+        }
+        return handled
     }
 
     // --- Navigation Press Handler ---
@@ -1619,6 +1628,7 @@ extension ScenarioWriterView {
         if isRepeat {
             mainArrowRepeatAnimationSuppressedUntil = Date().addingTimeInterval(0.16)
         }
+        let previousActiveID = activeCardID
         let handled: Bool
         bounceDebugLog(
             "handleNavigation key=\(String(describing: press.key)) phase=\(String(describing: press.phase)) " +
@@ -1659,10 +1669,63 @@ extension ScenarioWriterView {
             )
         default: return .ignored
         }
+        if handled {
+            registerHandledMainArrowNavigation(
+                direction: directionForNavigationKeyPress(press.key),
+                previousActiveID: previousActiveID,
+                isRepeat: isRepeat
+            )
+        }
         if !handled, let keyCode = boundaryFeedbackKeyCode(for: press.key) {
             playMainBoundaryFeedbackIfNeeded(for: keyCode, activeID: activeCardID)
         }
         return .handled
+    }
+
+    func directionForNavigationKeyCode(_ keyCode: UInt16) -> MainArrowDirection? {
+        switch keyCode {
+        case 126: return .up
+        case 125: return .down
+        case 124: return .right
+        case 123: return .left
+        default: return nil
+        }
+    }
+
+    func directionForNavigationKeyPress(_ key: KeyEquivalent) -> MainArrowDirection? {
+        switch key {
+        case .upArrow: return .up
+        case .downArrow: return .down
+        case .rightArrow: return .right
+        case .leftArrow: return .left
+        default: return nil
+        }
+    }
+
+    func registerHandledMainArrowNavigation(
+        direction: MainArrowDirection?,
+        previousActiveID: UUID?,
+        isRepeat: Bool
+    ) {
+        guard let direction else { return }
+
+        switch direction {
+        case .left, .right:
+            if activeCardID != previousActiveID {
+                pendingMainHorizontalScrollAnimation = !isRepeat
+            } else {
+                pendingMainHorizontalScrollAnimation = nil
+            }
+            if isRepeat {
+                scheduleMainArrowNavigationSettle()
+            } else {
+                cancelMainArrowNavigationSettle()
+            }
+
+        case .up, .down:
+            pendingMainHorizontalScrollAnimation = nil
+            scheduleMainArrowNavigationSettle()
+        }
     }
 
     // --- Card Hierarchy Move Logic (Keyboard) ---

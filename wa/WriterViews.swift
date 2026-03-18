@@ -92,6 +92,7 @@ struct ScenarioWriterView: View {
     @AppStorage("focusModeLineSpacingValueTemp") var focusModeLineSpacingValue: Double = 4.5
     @AppStorage("mainCardLineSpacingValueV2") var mainCardLineSpacingValue: Double = 5.0
     @AppStorage("mainCardVerticalGap") var mainCardVerticalGap: Double = 0.0
+    @AppStorage("mainCanvasHorizontalScrollMode") var mainCanvasHorizontalScrollModeRawValue: Int = MainCanvasHorizontalScrollMode.twoStep.rawValue
     @AppStorage("mainWorkspaceZoomScale") var mainWorkspaceZoomScale: Double = 1.0
     @AppStorage("geminiModelID") var geminiModelID: String = "gemini-3.1-pro-preview"
     @AppStorage("focusModeWindowBackgroundActive") var focusModeWindowBackgroundActive: Bool = false
@@ -335,6 +336,11 @@ struct ScenarioWriterView: View {
         nonmutating set { interactionRuntime.lastScrolledLevel = newValue }
     }
 
+    var pendingMainHorizontalScrollAnimation: Bool? {
+        get { interactionRuntime.pendingMainHorizontalScrollAnimation }
+        nonmutating set { interactionRuntime.pendingMainHorizontalScrollAnimation = newValue }
+    }
+
     var pendingMainCanvasRestoreCardID: UUID? {
         get { mainCanvasViewState.pendingRestoreCardID }
         nonmutating set { mainCanvasViewState.pendingRestoreCardID = newValue }
@@ -350,9 +356,19 @@ struct ScenarioWriterView: View {
         nonmutating set { mainCanvasViewState.suppressHorizontalAutoScroll = newValue }
     }
 
+    var mainNavigationSettleTick: Int {
+        get { mainCanvasViewState.navigationSettleTick }
+        nonmutating set { mainCanvasViewState.navigationSettleTick = newValue }
+    }
+
     var maxLevelCount: Int {
         get { mainCanvasViewState.maxLevelCount }
         nonmutating set { mainCanvasViewState.maxLevelCount = newValue }
+    }
+
+    var mainCanvasHorizontalScrollMode: MainCanvasHorizontalScrollMode {
+        get { MainCanvasHorizontalScrollMode(rawValue: mainCanvasHorizontalScrollModeRawValue) ?? .twoStep }
+        nonmutating set { mainCanvasHorizontalScrollModeRawValue = newValue.rawValue }
     }
 
     var scenarioCardsVersion: Int {
@@ -417,6 +433,11 @@ struct ScenarioWriterView: View {
         nonmutating set { interactionRuntime.mainColumnLayoutSnapshotByKey = newValue }
     }
 
+    var mainColumnPendingFocusVerificationWorkItemByKey: [String: DispatchWorkItem] {
+        get { interactionRuntime.mainColumnPendingFocusVerificationWorkItemByKey }
+        nonmutating set { interactionRuntime.mainColumnPendingFocusVerificationWorkItemByKey = newValue }
+    }
+
     var mainColumnViewportCaptureSuspendedUntil: Date {
         get { interactionRuntime.mainColumnViewportCaptureSuspendedUntil }
         nonmutating set { interactionRuntime.mainColumnViewportCaptureSuspendedUntil = newValue }
@@ -425,6 +446,11 @@ struct ScenarioWriterView: View {
     var mainColumnViewportRestoreUntil: Date {
         get { interactionRuntime.mainColumnViewportRestoreUntil }
         nonmutating set { interactionRuntime.mainColumnViewportRestoreUntil = newValue }
+    }
+
+    var mainArrowNavigationSettleWorkItem: DispatchWorkItem? {
+        get { interactionRuntime.mainArrowNavigationSettleWorkItem }
+        nonmutating set { interactionRuntime.mainArrowNavigationSettleWorkItem = newValue }
     }
 
     var mainCaretLocationByCardID: [UUID: Int] {
@@ -753,6 +779,7 @@ struct ScenarioWriterView: View {
         let onBackgroundTap: () -> Void
         let onHistoryIndexChange: (ScrollViewProxy) -> Void
         let onActiveCardChange: (UUID?, ScrollViewProxy, CGFloat) -> Void
+        let onNavigationSettle: (ScrollViewProxy, CGFloat) -> Void
         let onRestoreRequest: (ScrollViewProxy, CGFloat) -> Void
         let onAppear: (ScrollViewProxy, CGFloat) -> Void
         let scrollableContent: () -> AnyView
@@ -781,6 +808,9 @@ struct ScenarioWriterView: View {
                     }
                     .onChange(of: renderState.activeCardID) { _, newID in
                         onActiveCardChange(newID, proxy, renderState.availableWidth)
+                    }
+                    .onChange(of: viewState.navigationSettleTick) { _, _ in
+                        onNavigationSettle(proxy, renderState.availableWidth)
                     }
                     .onChange(of: viewState.pendingRestoreCardID) { _, _ in
                         onRestoreRequest(proxy, renderState.availableWidth)
@@ -943,6 +973,16 @@ struct ScenarioWriterView: View {
     }
 
     func workspaceLifecycleBoundRoot<Content: View>(_ root: Content) -> some View {
+        workspaceEditorBoundRoot(
+            workspacePreferenceBoundRoot(
+                workspaceScenarioBoundRoot(
+                    workspacePrimaryLifecycleRoot(root)
+                )
+            )
+        )
+    }
+
+    func workspacePrimaryLifecycleRoot<Content: View>(_ root: Content) -> some View {
         root
             .simultaneousGesture(TapGesture().onEnded {
                 activateSplitPaneIfNeeded()
@@ -968,6 +1008,13 @@ struct ScenarioWriterView: View {
             .onChange(of: scenario.id) { _, _ in
                 syncScenarioObservedState()
             }
+            .onDisappear {
+                handleWorkspaceDisappear()
+            }
+    }
+
+    func workspaceScenarioBoundRoot<Content: View>(_ root: Content) -> some View {
+        root
             .onChange(of: scenarioCardsVersion) { _, _ in
                 handleScenarioCardsVersionChange()
             }
@@ -977,9 +1024,10 @@ struct ScenarioWriterView: View {
             .onChange(of: scenarioLinkedCardsVersion) { _, _ in
                 handleScenarioLinkedCardsVersionChange()
             }
-            .onDisappear {
-                handleWorkspaceDisappear()
-            }
+    }
+
+    func workspacePreferenceBoundRoot<Content: View>(_ root: Content) -> some View {
+        root
             .onChange(of: showFocusMode) { _, isOn in
                 handleShowFocusModeChange(isOn)
             }
@@ -987,9 +1035,17 @@ struct ScenarioWriterView: View {
                 guard abs(newValue - oldValue) > 0.0001 else { return }
                 requestMainCanvasRestoreForZoomChange()
             }
+            .onChange(of: mainCanvasHorizontalScrollModeRawValue) { oldValue, newValue in
+                guard oldValue != newValue else { return }
+                handleMainCanvasHorizontalScrollModeChange()
+            }
             .onChange(of: focusTypewriterEnabled) { _, isOn in
                 handleFocusTypewriterEnabledChange(isOn)
             }
+    }
+
+    func workspaceEditorBoundRoot<Content: View>(_ root: Content) -> some View {
+        root
             .onChange(of: editingCardID) { oldID, newID in
                 handleEditingCardIDChange(oldID: oldID, newID: newID)
             }
@@ -1247,6 +1303,11 @@ struct ScenarioWriterView: View {
         linkedCardAnchorID = nil
     }
 
+    func handleMainCanvasHorizontalScrollModeChange() {
+        guard !showFocusMode else { return }
+        requestMainCanvasRestoreForHorizontalScrollModeChange()
+    }
+
     func syncScenarioObservedState() {
         scenarioObservedState.bind(to: scenario)
     }
@@ -1262,6 +1323,8 @@ struct ScenarioWriterView: View {
         pendingEditEndAutoBackupWorkItem?.cancel()
         pendingEditEndAutoBackupWorkItem = nil
         hasPendingEditEndAutoBackupRequest = false
+        mainArrowNavigationSettleWorkItem?.cancel()
+        mainArrowNavigationSettleWorkItem = nil
         focusModeWindowBackgroundActive = false
         stopHistoryKeyMonitor()
         stopFocusModeKeyMonitor()
@@ -2096,6 +2159,10 @@ struct ScenarioWriterView: View {
                 guard !showFocusMode else { return }
                 handleMainCanvasActiveCardChange(newID, hProxy: proxy, availableWidth: width)
             },
+            onNavigationSettle: { proxy, width in
+                guard !showFocusMode else { return }
+                handleMainCanvasNavigationSettle(hProxy: proxy, availableWidth: width)
+            },
             onRestoreRequest: { proxy, width in
                 guard !showFocusMode else { return }
                 handleMainCanvasRestoreRequest(hProxy: proxy, availableWidth: width)
@@ -2416,11 +2483,13 @@ struct ScenarioWriterView: View {
             return
         }
         if !isPreviewingHistory {
+            let animated = pendingMainHorizontalScrollAnimation ?? !shouldSuppressMainArrowRepeatAnimation()
+            pendingMainHorizontalScrollAnimation = nil
             scrollToColumnIfNeeded(
                 targetCardID: id,
                 proxy: hProxy,
                 availableWidth: availableWidth,
-                animated: !shouldSuppressMainArrowRepeatAnimation()
+                animated: animated
             )
         }
     }
@@ -2429,6 +2498,20 @@ struct ScenarioWriterView: View {
         guard !showFocusMode else { return }
         guard acceptsKeyboardInput else { return }
         restoreMainCanvasPositionIfNeeded(proxy: hProxy, availableWidth: availableWidth)
+    }
+
+    func handleMainCanvasNavigationSettle(hProxy: ScrollViewProxy, availableWidth: CGFloat) {
+        guard !showFocusMode else { return }
+        guard acceptsKeyboardInput else { return }
+        guard !isPreviewingHistory else { return }
+        guard let targetID = activeCardID, findCard(by: targetID) != nil else { return }
+        scrollToColumnIfNeeded(
+            targetCardID: targetID,
+            proxy: hProxy,
+            availableWidth: availableWidth,
+            force: true,
+            animated: false
+        )
     }
 
     func handleMainCanvasAppear(hProxy: ScrollViewProxy, availableWidth: CGFloat) {

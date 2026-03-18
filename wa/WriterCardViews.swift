@@ -458,17 +458,6 @@ struct CardItem: View {
         return isActive ? 1 : 0
     }
 
-    private var focusFadeAnimationKey: Int {
-        var hasher = Hasher()
-        hasher.combine(isActive)
-        hasher.combine(isAncestor)
-        hasher.combine(isDescendant)
-        hasher.combine(isArchived)
-        hasher.combine(isMultiSelected)
-        hasher.combine(isCandidateVisualCard)
-        return hasher.finalize()
-    }
-
     private var cardBorderColor: Color {
         if usesDarkPalette {
             return Color.white.opacity(0.12)
@@ -879,7 +868,6 @@ struct CardItem: View {
         }
         .onTapGesture { onSelect() }
         .simultaneousGesture(TapGesture(count: 2).onEnded { onDoubleClick() })
-        .animation(.easeInOut(duration: 0.14), value: focusFadeAnimationKey)
         .onChange(of: isEditing) { _, newValue in
             if newValue {
                 scheduleMainEditingMeasuredBodyHeightRefresh(immediate: true)

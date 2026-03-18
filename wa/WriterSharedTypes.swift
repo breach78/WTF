@@ -74,6 +74,22 @@ enum MainCanvasLayoutMetrics {
     }
 }
 
+enum MainCanvasHorizontalScrollMode: Int, CaseIterable, Identifiable {
+    case oneStep = 1
+    case twoStep = 2
+
+    var id: Int { rawValue }
+
+    var title: String {
+        switch self {
+        case .oneStep:
+            return "1단계"
+        case .twoStep:
+            return "2단계"
+        }
+    }
+}
+
 // Imperative editor caches that do not need SwiftUI-driven invalidation.
 final class WriterInteractionRuntime {
     var activeAncestorIDs: Set<UUID> = []
@@ -84,6 +100,7 @@ final class WriterInteractionRuntime {
     var activeRelationFingerprint: Int = 0
     var lastActiveCardID: UUID? = nil
     var lastScrolledLevel: Int = 0
+    var pendingMainHorizontalScrollAnimation: Bool? = nil
     var pendingActiveCardID: UUID? = nil
     var resolvedLevelsWithParentsVersion: Int = -1
     var resolvedLevelsWithParentsCache: [ScenarioWriterView.LevelData] = []
@@ -94,8 +111,10 @@ final class WriterInteractionRuntime {
     var mainColumnViewportOffsetByKey: [String: CGFloat] = [:]
     var mainColumnObservedCardFramesByKey: [String: [UUID: CGRect]] = [:]
     var mainColumnLayoutSnapshotByKey: [ScenarioWriterView.MainColumnLayoutCacheKey: ScenarioWriterView.MainColumnLayoutSnapshot] = [:]
+    var mainColumnPendingFocusVerificationWorkItemByKey: [String: DispatchWorkItem] = [:]
     var mainColumnViewportCaptureSuspendedUntil: Date = .distantPast
     var mainColumnViewportRestoreUntil: Date = .distantPast
+    var mainArrowNavigationSettleWorkItem: DispatchWorkItem? = nil
     var mainCaretLocationByCardID: [UUID: Int] = [:]
     var mainLineSpacingAppliedCardID: UUID? = nil
     var mainLineSpacingAppliedValue: CGFloat = -1
@@ -212,6 +231,7 @@ final class MainCanvasViewState: ObservableObject {
     @Published var pendingRestoreCardID: UUID? = nil
     @Published var suppressAutoScrollOnce: Bool = false
     @Published var suppressHorizontalAutoScroll: Bool = false
+    @Published var navigationSettleTick: Int = 0
     @Published var maxLevelCount: Int = 0
 }
 
