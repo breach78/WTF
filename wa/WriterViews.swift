@@ -175,6 +175,7 @@ struct ScenarioWriterView: View {
     @State var suppressFocusModeScrollOnce: Bool = false
     @State var focusPendingProgrammaticBeginEditCardID: UUID? = nil
     @State var focusModeCaretRequestID: Int = 0
+    @State var focusModeCaretRequestStartedAt: Date = .distantPast
     @State var focusModeEntryScrollTick: Int = 0
     @State var focusModeBoundaryTransitionPendingReveal: Bool = false
     @State var focusModePendingFallbackRevealCardID: UUID? = nil
@@ -708,6 +709,16 @@ struct ScenarioWriterView: View {
     var focusOffsetNormalizationLastAt: Date {
         get { interactionRuntime.focusOffsetNormalizationLastAt }
         nonmutating set { interactionRuntime.focusOffsetNormalizationLastAt = newValue }
+    }
+
+    var focusVerticalScrollAuthoritySequence: Int {
+        get { interactionRuntime.focusVerticalScrollAuthoritySequence }
+        nonmutating set { interactionRuntime.focusVerticalScrollAuthoritySequence = newValue }
+    }
+
+    var focusVerticalScrollAuthority: FocusModeVerticalScrollAuthority? {
+        get { interactionRuntime.focusVerticalScrollAuthority }
+        nonmutating set { interactionRuntime.focusVerticalScrollAuthority = newValue }
     }
 
     var historySaveRequestWorkItem: DispatchWorkItem? {
@@ -1568,6 +1579,9 @@ struct ScenarioWriterView: View {
     func handleShowFocusModeChange(_ isOn: Bool) {
         mainColumnLastFocusRequestByKey = [:]
         focusModeLayoutCoordinator.reset()
+        focusVerticalScrollAuthoritySequence = 0
+        focusVerticalScrollAuthority = nil
+        focusModeCaretRequestStartedAt = .distantPast
         focusModeWindowBackgroundActive = isOn
         FocusMonitorRecorder.shared.record("focus.toggle", reason: "showFocusMode-onChange") {
             [

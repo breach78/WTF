@@ -153,6 +153,12 @@ final class FocusModeLayoutCoordinator: ObservableObject {
         liveEditorPendingGenerationByCardID[cardID] = max(currentCommittedGeneration, currentPendingGeneration) + 1
     }
 
+    func awaitFreshLiveEditorLayoutCommit(for cardID: UUID) {
+        let currentCommittedGeneration = liveEditorLayoutByCardID[cardID]?.committedGeneration ?? 0
+        let currentPendingGeneration = liveEditorPendingGenerationByCardID[cardID] ?? currentCommittedGeneration
+        liveEditorPendingGenerationByCardID[cardID] = max(currentCommittedGeneration, currentPendingGeneration) + 1
+    }
+
     func reportLiveEditorLayout(
         for cardID: UUID,
         rawText: String,
@@ -186,6 +192,14 @@ final class FocusModeLayoutCoordinator: ObservableObject {
         let pendingGeneration = liveEditorPendingGenerationByCardID[cardID] ?? 0
         let committedGeneration = liveEditorLayoutByCardID[cardID]?.committedGeneration ?? 0
         return pendingGeneration > committedGeneration
+    }
+
+    func hasCommittedLiveEditorLayout(for cardID: UUID) -> Bool {
+        liveEditorLayoutByCardID[cardID] != nil
+    }
+
+    func isLiveEditorLayoutReady(for cardID: UUID) -> Bool {
+        hasCommittedLiveEditorLayout(for: cardID) && !hasPendingLiveEditorLayoutCommit(for: cardID)
     }
 
     private func resolvedCardHeightKey(

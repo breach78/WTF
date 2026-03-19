@@ -116,6 +116,19 @@ struct MainVerticalScrollAuthority: Equatable {
     let targetCardID: UUID?
 }
 
+enum FocusModeVerticalScrollAuthorityKind: String {
+    case canvasNavigation
+    case boundaryTransition
+    case caretEnsure
+    case fallbackReveal
+}
+
+struct FocusModeVerticalScrollAuthority: Equatable {
+    let id: Int
+    let kind: FocusModeVerticalScrollAuthorityKind
+    let targetCardID: UUID?
+}
+
 // Imperative editor caches that do not need SwiftUI-driven invalidation.
 final class WriterInteractionRuntime {
     var activeAncestorIDs: Set<UUID> = []
@@ -182,6 +195,8 @@ final class WriterInteractionRuntime {
     var focusProgrammaticCaretExpectedLocation: Int = -1
     var focusProgrammaticCaretSelectionIgnoreUntil: Date = .distantPast
     var focusOffsetNormalizationLastAt: Date = .distantPast
+    var focusVerticalScrollAuthoritySequence: Int = 0
+    var focusVerticalScrollAuthority: FocusModeVerticalScrollAuthority? = nil
     var historySaveRequestWorkItem: DispatchWorkItem? = nil
     var historySaveRequestNextAllowedAt: Date = .distantPast
 }
