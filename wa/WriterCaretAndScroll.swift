@@ -40,6 +40,7 @@ extension ScenarioWriterView {
 
     private func handleMainSelectionDidChange(_ notification: Notification) {
         guard let context = resolveMainSelectionChangeContext(from: notification) else { return }
+        guard !shouldIgnoreMainProgrammaticSelection(context) else { return }
 
         updateMainSelectionActiveEdge(using: context)
         guard !isDuplicateMainSelection(context) else { return }
@@ -52,6 +53,43 @@ extension ScenarioWriterView {
 
         guard !context.textView.hasMarkedText() else { return }
         requestCoalescedMainCaretEnsure(minInterval: mainCaretSelectionEnsureMinInterval, delay: 0.0)
+    }
+
+    private func shouldIgnoreMainProgrammaticSelection(_ context: MainSelectionChangeContext) -> Bool {
+        guard let expectedCardID = mainProgrammaticCaretExpectedCardID,
+              expectedCardID == context.editingID else {
+            return false
+        }
+
+        let expectedLocation = max(0, mainProgrammaticCaretExpectedLocation)
+        let matchesExpected =
+            context.selected.length == 0 &&
+            context.selectedStart == expectedLocation &&
+            context.selectedEnd == expectedLocation
+
+        if matchesExpected {
+            if mainProgrammaticCaretSuppressEnsureCardID == expectedCardID {
+                mainProgrammaticCaretSuppressEnsureCardID = nil
+                mainProgrammaticCaretExpectedCardID = nil
+                mainProgrammaticCaretExpectedLocation = -1
+                mainProgrammaticCaretSelectionIgnoreUntil = .distantPast
+                return true
+            }
+            mainProgrammaticCaretExpectedCardID = nil
+            mainProgrammaticCaretExpectedLocation = -1
+            mainProgrammaticCaretSelectionIgnoreUntil = .distantPast
+            return false
+        }
+
+        if Date() < mainProgrammaticCaretSelectionIgnoreUntil {
+            return true
+        }
+
+        mainProgrammaticCaretExpectedCardID = nil
+        mainProgrammaticCaretExpectedLocation = -1
+        mainProgrammaticCaretSelectionIgnoreUntil = .distantPast
+        mainProgrammaticCaretSuppressEnsureCardID = nil
+        return false
     }
 
     private func resolveMainSelectionChangeContext(from notification: Notification) -> MainSelectionChangeContext? {
@@ -166,6 +204,10 @@ extension ScenarioWriterView {
         mainSelectionLastResponderID = nil
         mainSelectionActiveEdge = .end
         mainCaretEnsureLastScheduledAt = .distantPast
+        mainProgrammaticCaretSuppressEnsureCardID = nil
+        mainProgrammaticCaretExpectedCardID = nil
+        mainProgrammaticCaretExpectedLocation = -1
+        mainProgrammaticCaretSelectionIgnoreUntil = .distantPast
         mainLineSpacingAppliedResponderID = nil
         if let observer = mainSelectionObserver {
             NotificationCenter.default.removeObserver(observer)
@@ -173,14 +215,25 @@ extension ScenarioWriterView {
         }
     }
 
-    func scheduleMainEditorLineSpacingApplyBurst(for cardID: UUID) {
+    func scheduleMainEditorLineSpacingApplyBurst(
+        for cardID: UUID,
+        skipDelayedInnerScrollNormalization: Bool = false,
+        immediateOnly: Bool = false
+    ) {
         let delays: [Double] = [0.0, 0.03, 0.09]
         for (index, delay) in delays.enumerated() {
+            if immediateOnly && index > 0 {
+                continue
+            }
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
                 guard !showFocusMode else { return }
                 guard editingCardID == cardID else { return }
                 let shouldForceFullApply = index == 0
-                applyMainEditorLineSpacingIfNeeded(forceApplyToFullText: shouldForceFullApply)
+                let shouldNormalizeInnerScroll = !skipDelayedInnerScrollNormalization || index == 0
+                applyMainEditorLineSpacingIfNeeded(
+                    forceApplyToFullText: shouldForceFullApply,
+                    normalizeInnerScroll: shouldNormalizeInnerScroll
+                )
             }
         }
     }
@@ -210,13 +263,19 @@ extension ScenarioWriterView {
         return nil
     }
 
-    func applyMainEditorLineSpacingIfNeeded(forceApplyToFullText: Bool = false) {
+    func applyMainEditorLineSpacingIfNeeded(
+        forceApplyToFullText: Bool = false,
+        normalizeInnerScroll: Bool = true
+    ) {
         guard !showFocusMode else { return }
         guard let editingID = editingCardID, let card = findCard(by: editingID) else { return }
         guard let textView = resolveMainEditorTextView(for: card) else { return }
         guard textView.string == card.content else { return }
 
-        prepareMainEditorTextViewForLineSpacing(textView)
+        prepareMainEditorTextViewForLineSpacing(
+            textView,
+            normalizeInnerScrollView: normalizeInnerScroll
+        )
         configureMainEditorTextContainerWidth(textView)
 
         let context = resolveMainEditorLineSpacingContext(
@@ -236,7 +295,10 @@ extension ScenarioWriterView {
         let shouldUpdateTypingAttributes: Bool
     }
 
-    private func prepareMainEditorTextViewForLineSpacing(_ textView: NSTextView) {
+    private func prepareMainEditorTextViewForLineSpacing(
+        _ textView: NSTextView,
+        normalizeInnerScrollView: Bool = true
+    ) {
         if textView.isHorizontallyResizable {
             textView.isHorizontallyResizable = false
         }
@@ -245,7 +307,7 @@ extension ScenarioWriterView {
         }
         textView.minSize = NSSize(width: 0, height: 0)
         textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
-        if let innerScrollView = textView.enclosingScrollView {
+        if normalizeInnerScrollView, let innerScrollView = textView.enclosingScrollView {
             normalizeMainEditorInnerScrollView(innerScrollView)
         }
         if textView.textContainerInset != .zero {
@@ -413,7 +475,15 @@ extension ScenarioWriterView {
     }
 
     func ensureMainCaretVisible() {
+        guard let editingID = editingCardID else { return }
         guard let context = resolveMainCaretEnsureContext() else { return }
+        if let viewportKey = resolvedMainColumnViewportKey(forCardID: editingID) {
+            _ = beginMainVerticalScrollAuthority(
+                viewportKey: viewportKey,
+                kind: .caretEnsure,
+                targetCardID: editingID
+            )
+        }
         normalizeMainEditorTextViewOffsetIfNeeded(context.textView, reason: "ensure-visible")
         context.layoutManager.ensureLayout(for: context.textContainer)
 
@@ -636,19 +706,56 @@ extension ScenarioWriterView {
         mainCaretLocationByCardID[cardID] = safeLocation
     }
 
-    func requestMainCaretRestore(for cardID: UUID) {
+    func requestMainCaretRestore(for cardID: UUID, suppressInitialEnsure: Bool = false) {
         guard !showFocusMode else { return }
         guard focusModeEditorCardID == nil else { return }
         guard let location = mainCaretLocationByCardID[cardID] else { return }
         mainCaretRestoreRequestID += 1
         let requestID = mainCaretRestoreRequestID
-        applyMainCaretWithRetry(expectedCardID: cardID, location: location, retries: 12, requestID: requestID)
+        applyMainCaretWithRetry(
+            expectedCardID: cardID,
+            location: location,
+            retries: 12,
+            requestID: requestID,
+            suppressInitialEnsure: suppressInitialEnsure
+        )
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
-            applyMainCaretWithRetry(expectedCardID: cardID, location: location, retries: 6, requestID: requestID)
+            applyMainCaretWithRetry(
+                expectedCardID: cardID,
+                location: location,
+                retries: 6,
+                requestID: requestID,
+                suppressInitialEnsure: suppressInitialEnsure
+            )
         }
     }
 
-    func applyMainCaretWithRetry(expectedCardID: UUID, location: Int, retries: Int, requestID: Int) {
+    func restoreMainEditingCaret(
+        for cardID: UUID,
+        location: Int? = nil,
+        suppressInitialEnsure: Bool = false,
+        ensureMinInterval: TimeInterval? = nil,
+        ensureDelay: Double = 0.0
+    ) {
+        if let location {
+            mainCaretLocationByCardID[cardID] = location
+        }
+        requestMainCaretRestore(for: cardID, suppressInitialEnsure: suppressInitialEnsure)
+        if !suppressInitialEnsure {
+            requestCoalescedMainCaretEnsure(
+                minInterval: ensureMinInterval ?? mainCaretSelectionEnsureMinInterval,
+                delay: ensureDelay
+            )
+        }
+    }
+
+    func applyMainCaretWithRetry(
+        expectedCardID: UUID,
+        location: Int,
+        retries: Int,
+        requestID: Int,
+        suppressInitialEnsure: Bool
+    ) {
         guard !showFocusMode else { return }
         guard focusModeEditorCardID == nil else { return }
         guard editingCardID == expectedCardID else { return }
@@ -659,7 +766,8 @@ extension ScenarioWriterView {
                 expectedCardID: expectedCardID,
                 location: location,
                 retries: retries,
-                requestID: requestID
+                requestID: requestID,
+                suppressInitialEnsure: suppressInitialEnsure
             )
             return
         }
@@ -668,26 +776,48 @@ extension ScenarioWriterView {
                 expectedCardID: expectedCardID,
                 location: location,
                 retries: retries,
-                requestID: requestID
+                requestID: requestID,
+                suppressInitialEnsure: suppressInitialEnsure
             )
             return
         }
         let length = (textView.string as NSString).length
         let safeLocation = min(max(0, location), length)
         let current = textView.selectedRange()
-        guard current.location != safeLocation || current.length != 0 else { return }
+        guard current.location != safeLocation || current.length != 0 else {
+            if mainProgrammaticCaretExpectedCardID == expectedCardID &&
+                mainProgrammaticCaretExpectedLocation == safeLocation {
+                mainProgrammaticCaretExpectedCardID = nil
+                mainProgrammaticCaretExpectedLocation = -1
+                mainProgrammaticCaretSelectionIgnoreUntil = .distantPast
+            }
+            if !suppressInitialEnsure {
+                requestCoalescedMainCaretEnsure(minInterval: 0, delay: 0.0)
+            }
+            return
+        }
         textView.setSelectedRange(NSRange(location: safeLocation, length: 0))
-        textView.scrollRangeToVisible(NSRange(location: safeLocation, length: 0))
+        normalizeMainEditorTextViewOffsetIfNeeded(textView, reason: "caret-restore")
+        if !suppressInitialEnsure {
+            requestCoalescedMainCaretEnsure(minInterval: 0, delay: 0.0)
+        }
     }
 
-    private func scheduleMainCaretRestoreRetry(expectedCardID: UUID, location: Int, retries: Int, requestID: Int) {
+    private func scheduleMainCaretRestoreRetry(
+        expectedCardID: UUID,
+        location: Int,
+        retries: Int,
+        requestID: Int,
+        suppressInitialEnsure: Bool
+    ) {
         guard retries > 0 else { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.016) {
             applyMainCaretWithRetry(
                 expectedCardID: expectedCardID,
                 location: location,
                 retries: retries - 1,
-                requestID: requestID
+                requestID: requestID,
+                suppressInitialEnsure: suppressInitialEnsure
             )
         }
     }

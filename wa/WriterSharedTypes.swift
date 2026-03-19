@@ -98,6 +98,24 @@ enum MainCanvasHorizontalScrollMode: Int, CaseIterable, Identifiable {
     }
 }
 
+enum MainEditingViewportRevealEdge: Equatable {
+    case top
+    case bottom
+}
+
+enum MainVerticalScrollAuthorityKind: String {
+    case columnNavigation
+    case editingTransition
+    case caretEnsure
+    case viewportRestore
+}
+
+struct MainVerticalScrollAuthority: Equatable {
+    let id: Int
+    let kind: MainVerticalScrollAuthorityKind
+    let targetCardID: UUID?
+}
+
 // Imperative editor caches that do not need SwiftUI-driven invalidation.
 final class WriterInteractionRuntime {
     var activeAncestorIDs: Set<UUID> = []
@@ -109,7 +127,15 @@ final class WriterInteractionRuntime {
     var lastActiveCardID: UUID? = nil
     var lastScrolledLevel: Int = 0
     var pendingMainHorizontalScrollAnimation: Bool? = nil
+    var pendingMainClickFocusTargetID: UUID? = nil
+    var pendingMainClickHorizontalFocusTargetID: UUID? = nil
+    var pendingMainEditingViewportKeepVisibleCardID: UUID? = nil
+    var pendingMainEditingViewportRevealEdge: MainEditingViewportRevealEdge? = nil
+    var pendingMainEditingSiblingNavigationTargetID: UUID? = nil
+    var pendingMainEditingBoundaryNavigationTargetID: UUID? = nil
     var pendingActiveCardID: UUID? = nil
+    var mainVerticalScrollAuthoritySequence: Int = 0
+    var mainVerticalScrollAuthorityByViewportKey: [String: MainVerticalScrollAuthority] = [:]
     var resolvedLevelsWithParentsVersion: Int = -1
     var resolvedLevelsWithParentsCache: [ScenarioWriterView.LevelData] = []
     var displayedMainLevelsCacheKey: ScenarioWriterView.DisplayedMainLevelsCacheKey? = nil
@@ -119,6 +145,7 @@ final class WriterInteractionRuntime {
     var mainColumnViewportOffsetByKey: [String: CGFloat] = [:]
     var mainColumnObservedCardFramesByKey: [String: [UUID: CGRect]] = [:]
     var mainColumnLayoutSnapshotByKey: [ScenarioWriterView.MainColumnLayoutCacheKey: ScenarioWriterView.MainColumnLayoutSnapshot] = [:]
+    var mainCardHeightRecordByKey: [ScenarioWriterView.MainCardHeightCacheKey: ScenarioWriterView.MainCardHeightRecord] = [:]
     var mainColumnPendingFocusVerificationWorkItemByKey: [String: DispatchWorkItem] = [:]
     var mainColumnViewportCaptureSuspendedUntil: Date = .distantPast
     var mainColumnViewportRestoreUntil: Date = .distantPast
@@ -135,8 +162,16 @@ final class WriterInteractionRuntime {
     var mainSelectionLastResponderID: ObjectIdentifier? = nil
     var mainSelectionActiveEdge: ScenarioWriterView.MainSelectionActiveEdge = .end
     var mainCaretEnsureLastScheduledAt: Date = .distantPast
+    var mainProgrammaticCaretSuppressEnsureCardID: UUID? = nil
+    var mainProgrammaticCaretExpectedCardID: UUID? = nil
+    var mainProgrammaticCaretExpectedLocation: Int = -1
+    var mainProgrammaticCaretSelectionIgnoreUntil: Date = .distantPast
     var pendingFocusModeEntryCaretHint: (cardID: UUID, location: Int)? = nil
     var focusResponderCardByObjectID: [ObjectIdentifier: UUID] = [:]
+    var focusLineSpacingAppliedCardID: UUID? = nil
+    var focusLineSpacingAppliedValue: CGFloat = -1
+    var focusLineSpacingAppliedFontSize: CGFloat = -1
+    var focusLineSpacingAppliedResponderID: ObjectIdentifier? = nil
     var focusSelectionLastCardID: UUID? = nil
     var focusSelectionLastLocation: Int = -1
     var focusSelectionLastLength: Int = -1
@@ -236,11 +271,45 @@ final class MainCardDragSessionTracker {
 }
 
 final class MainCanvasViewState: ObservableObject {
-    @Published var pendingRestoreCardID: UUID? = nil
+    struct RestoreRequest: Equatable {
+        enum Reason: String {
+            case generic
+            case focusExit
+        }
+
+        let id: Int
+        let targetCardID: UUID
+        let visibleLevel: Int?
+        let forceSemantic: Bool
+        let reason: Reason
+    }
+
+    @Published var pendingRestoreRequest: RestoreRequest? = nil
     @Published var suppressAutoScrollOnce: Bool = false
     @Published var suppressHorizontalAutoScroll: Bool = false
+    @Published var interactionFingerprint: Int = 0
+    @Published var focusNavigationTargetID: UUID? = nil
+    @Published var focusNavigationTick: Int = 0
     @Published var navigationSettleTick: Int = 0
     @Published var maxLevelCount: Int = 0
+
+    private var restoreRequestSequence: Int = 0
+
+    func scheduleRestoreRequest(
+        targetCardID: UUID,
+        visibleLevel: Int? = nil,
+        forceSemantic: Bool = false,
+        reason: RestoreRequest.Reason = .generic
+    ) {
+        restoreRequestSequence &+= 1
+        pendingRestoreRequest = RestoreRequest(
+            id: restoreRequestSequence,
+            targetCardID: targetCardID,
+            visibleLevel: visibleLevel,
+            forceSemantic: forceSemantic,
+            reason: reason
+        )
+    }
 }
 
 @MainActor
@@ -406,6 +475,25 @@ func normalizeGeminiModelIDValue(_ raw: String) -> String {
 
 private let sharedTextHeightMeasurementCache = SharedTextHeightMeasurementCache()
 
+func normalizedSharedMeasurementText(_ text: String) -> String {
+    if text.isEmpty {
+        return " "
+    }
+    if text.hasSuffix("\n") {
+        return text + " "
+    }
+    return text
+}
+
+func sharedStableTextFingerprint(_ text: String) -> UInt64 {
+    var hash: UInt64 = 1469598103934665603
+    for byte in text.utf8 {
+        hash ^= UInt64(byte)
+        hash &*= 1099511628211
+    }
+    return hash
+}
+
 final class SharedTextHeightMeasurementCache: @unchecked Sendable {
     private let cache = NSCache<NSString, NSNumber>()
 
@@ -421,7 +509,7 @@ final class SharedTextHeightMeasurementCache: @unchecked Sendable {
         lineFragmentPadding: CGFloat,
         safetyInset: CGFloat
     ) -> CGFloat {
-        let measuringText = normalizedMeasurementText(text)
+        let measuringText = normalizedSharedMeasurementText(text)
         let constrainedWidth = max(1, width)
         let cacheKey = measurementCacheKey(
             text: measuringText,
@@ -469,16 +557,6 @@ final class SharedTextHeightMeasurementCache: @unchecked Sendable {
         return measured
     }
 
-    private func normalizedMeasurementText(_ text: String) -> String {
-        if text.isEmpty {
-            return " "
-        }
-        if text.hasSuffix("\n") {
-            return text + " "
-        }
-        return text
-    }
-
     private func measurementCacheKey(
         text: String,
         fontSize: CGFloat,
@@ -487,7 +565,7 @@ final class SharedTextHeightMeasurementCache: @unchecked Sendable {
         lineFragmentPadding: CGFloat,
         safetyInset: CGFloat
     ) -> NSString {
-        let fingerprint = stableTextFingerprint(text)
+        let fingerprint = sharedStableTextFingerprint(text)
         let fontBits = Double(fontSize).bitPattern
         let spacingBits = Double(lineSpacing).bitPattern
         let widthBits = Double(width).bitPattern
@@ -495,15 +573,6 @@ final class SharedTextHeightMeasurementCache: @unchecked Sendable {
         let insetBits = Double(safetyInset).bitPattern
         let key = "\(fontBits)|\(spacingBits)|\(widthBits)|\(paddingBits)|\(insetBits)|\(text.utf16.count)|\(fingerprint)"
         return key as NSString
-    }
-
-    private func stableTextFingerprint(_ text: String) -> UInt64 {
-        var hash: UInt64 = 1469598103934665603
-        for byte in text.utf8 {
-            hash ^= UInt64(byte)
-            hash &*= 1099511628211
-        }
-        return hash
     }
 }
 
@@ -523,6 +592,73 @@ func sharedMeasuredTextBodyHeight(
         lineFragmentPadding: lineFragmentPadding,
         safetyInset: safetyInset
     )
+}
+
+func sharedResolvedClickCaretLocation(
+    text: String,
+    localPoint: CGPoint,
+    textWidth: CGFloat,
+    fontSize: CGFloat,
+    lineSpacing: CGFloat,
+    horizontalInset: CGFloat,
+    verticalInset: CGFloat,
+    lineFragmentPadding: CGFloat,
+    safetyInset: CGFloat = 0
+) -> Int {
+    let originalText = text
+    let textLength = (originalText as NSString).length
+    guard textLength > 0 else { return 0 }
+
+    let paragraphStyle = NSMutableParagraphStyle()
+    paragraphStyle.lineSpacing = lineSpacing
+    paragraphStyle.lineBreakMode = .byWordWrapping
+
+    let font = NSFont(name: "SansMonoCJKFinalDraft", size: fontSize)
+        ?? NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
+
+    let storage = NSTextStorage(
+        string: normalizedSharedMeasurementText(originalText),
+        attributes: [
+            .font: font,
+            .paragraphStyle: paragraphStyle
+        ]
+    )
+    let layoutManager = NSLayoutManager()
+    let textContainer = NSTextContainer(
+        size: CGSize(width: max(1, textWidth), height: .greatestFiniteMagnitude)
+    )
+    textContainer.lineFragmentPadding = lineFragmentPadding
+    textContainer.lineBreakMode = .byWordWrapping
+    textContainer.maximumNumberOfLines = 0
+    textContainer.widthTracksTextView = false
+    textContainer.heightTracksTextView = false
+    layoutManager.addTextContainer(textContainer)
+    storage.addLayoutManager(layoutManager)
+    layoutManager.ensureLayout(for: textContainer)
+
+    let usedRect = layoutManager.usedRect(for: textContainer)
+    let containerPoint = CGPoint(
+        x: localPoint.x - horizontalInset,
+        y: localPoint.y - verticalInset
+    )
+    if containerPoint.y <= 0 {
+        return 0
+    }
+    if containerPoint.y >= usedRect.maxY + safetyInset {
+        return textLength
+    }
+
+    let clampedPoint = CGPoint(
+        x: max(0, min(containerPoint.x, textContainer.size.width)),
+        y: max(0, containerPoint.y)
+    )
+    var fraction: CGFloat = 0
+    let rawIndex = layoutManager.characterIndex(
+        for: clampedPoint,
+        in: textContainer,
+        fractionOfDistanceBetweenInsertionPoints: &fraction
+    )
+    return min(max(0, rawIndex), textLength)
 }
 
 func sharedLiveTextViewBodyHeight(
@@ -1044,51 +1180,215 @@ enum CaretScrollCoordinator {
 
         return resolvedDuration
     }
+
+    static func resolvedHorizontalTargetX(
+        visibleRect: CGRect,
+        targetX: CGFloat,
+        minX: CGFloat,
+        maxX: CGFloat,
+        snapToPixel: Bool = false
+    ) -> CGFloat {
+        let clampedX = min(max(minX, targetX), maxX)
+        return snapToPixel ? round(clampedX) : clampedX
+    }
+
+    static func resolvedHorizontalAnimationDuration(
+        currentX: CGFloat,
+        targetX: CGFloat,
+        viewportWidth: CGFloat
+    ) -> TimeInterval {
+        let distance = abs(targetX - currentX)
+        let reference = max(1, viewportWidth)
+        let normalized = min(1.8, distance / reference)
+        return 0.18 + (0.10 * Double(normalized))
+    }
+
+    @discardableResult
+    static func applyHorizontalScrollIfNeeded(
+        scrollView: NSScrollView,
+        visibleRect: CGRect,
+        targetX: CGFloat,
+        minX: CGFloat,
+        maxX: CGFloat,
+        deadZone: CGFloat = 1.0,
+        snapToPixel: Bool = false
+    ) -> Bool {
+        let resolvedTargetX = resolvedHorizontalTargetX(
+            visibleRect: visibleRect,
+            targetX: targetX,
+            minX: minX,
+            maxX: maxX,
+            snapToPixel: snapToPixel
+        )
+        guard abs(resolvedTargetX - visibleRect.origin.x) > deadZone else { return false }
+
+        scrollView.contentView.setBoundsOrigin(NSPoint(x: resolvedTargetX, y: visibleRect.origin.y))
+        scrollView.reflectScrolledClipView(scrollView.contentView)
+        return true
+    }
+
+    @discardableResult
+    static func applyAnimatedHorizontalScrollIfNeeded(
+        scrollView: NSScrollView,
+        visibleRect: CGRect,
+        targetX: CGFloat,
+        minX: CGFloat,
+        maxX: CGFloat,
+        deadZone: CGFloat = 1.0,
+        snapToPixel: Bool = false,
+        duration: TimeInterval? = nil
+    ) -> TimeInterval? {
+        let resolvedTargetX = resolvedHorizontalTargetX(
+            visibleRect: visibleRect,
+            targetX: targetX,
+            minX: minX,
+            maxX: maxX,
+            snapToPixel: snapToPixel
+        )
+        guard abs(resolvedTargetX - visibleRect.origin.x) > deadZone else { return nil }
+
+        let resolvedDuration = duration ?? resolvedHorizontalAnimationDuration(
+            currentX: visibleRect.origin.x,
+            targetX: resolvedTargetX,
+            viewportWidth: visibleRect.width
+        )
+
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = resolvedDuration
+            context.timingFunction = CAMediaTimingFunction(controlPoints: 0.22, 0.86, 0.24, 1.0)
+            scrollView.contentView.animator().setBoundsOrigin(
+                NSPoint(x: resolvedTargetX, y: visibleRect.origin.y)
+            )
+            scrollView.reflectScrolledClipView(scrollView.contentView)
+        } completionHandler: {
+            scrollView.reflectScrolledClipView(scrollView.contentView)
+        }
+
+        return resolvedDuration
+    }
 }
 
-@MainActor
-final class MainColumnScrollRegistry {
-    static let shared = MainColumnScrollRegistry()
+struct MainCanvasHorizontalScrollViewAccessor: NSViewRepresentable {
+    let scrollCoordinator: MainCanvasScrollCoordinator
 
-    private final class Entry {
-        weak var scrollView: NSScrollView?
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
 
-        init(scrollView: NSScrollView) {
-            self.scrollView = scrollView
+    func makeNSView(context: Context) -> NSView {
+        NSView(frame: .zero)
+    }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        context.coordinator.attach(to: view, scrollCoordinator: scrollCoordinator)
+    }
+
+    final class Coordinator {
+        private var scrollCoordinator: MainCanvasScrollCoordinator?
+        private weak var scrollView: NSScrollView?
+        private weak var observedDocumentView: NSView?
+        private var contentBoundsObserver: NSObjectProtocol?
+        private var documentFrameObserver: NSObjectProtocol?
+        private var documentBoundsObserver: NSObjectProtocol?
+
+        deinit {
+            detach()
         }
-    }
 
-    private var entriesByKey: [String: Entry] = [:]
+        func attach(to view: NSView, scrollCoordinator: MainCanvasScrollCoordinator) {
+            self.scrollCoordinator = scrollCoordinator
+            guard let resolvedScrollView = resolveScrollView(from: view) else {
+                DispatchQueue.main.async { [weak self, weak view] in
+                    guard let self, let view else { return }
+                    self.attach(to: view, scrollCoordinator: scrollCoordinator)
+                }
+                return
+            }
 
-    private init() {}
-
-    func register(scrollView: NSScrollView, for key: String) {
-        entriesByKey[key] = Entry(scrollView: scrollView)
-        pruneReleasedEntries()
-    }
-
-    func unregister(key: String, matching scrollView: NSScrollView? = nil) {
-        guard let entry = entriesByKey[key] else { return }
-        if let scrollView {
-            guard entry.scrollView === scrollView else { return }
+            let documentViewChanged = observedDocumentView !== resolvedScrollView.documentView
+            guard scrollView !== resolvedScrollView || documentViewChanged else { return }
+            detach()
+            scrollView = resolvedScrollView
+            installObservers(for: resolvedScrollView)
+            scrollCoordinator.registerMainCanvasHorizontalScrollView(resolvedScrollView)
         }
-        entriesByKey.removeValue(forKey: key)
-    }
 
-    func scrollView(for key: String) -> NSScrollView? {
-        if let scrollView = entriesByKey[key]?.scrollView {
-            return scrollView
+        private func detach() {
+            if let contentBoundsObserver {
+                NotificationCenter.default.removeObserver(contentBoundsObserver)
+            }
+            if let documentFrameObserver {
+                NotificationCenter.default.removeObserver(documentFrameObserver)
+            }
+            if let documentBoundsObserver {
+                NotificationCenter.default.removeObserver(documentBoundsObserver)
+            }
+            contentBoundsObserver = nil
+            documentFrameObserver = nil
+            documentBoundsObserver = nil
+            observedDocumentView = nil
+            if let scrollView {
+                scrollCoordinator?.unregisterMainCanvasHorizontalScrollView(matching: scrollView)
+            }
+            scrollView = nil
+            scrollCoordinator = nil
         }
-        entriesByKey.removeValue(forKey: key)
-        return nil
-    }
 
-    private func pruneReleasedEntries() {
-        entriesByKey = entriesByKey.filter { $0.value.scrollView != nil }
+        private func installObservers(for scrollView: NSScrollView) {
+            scrollView.contentView.postsBoundsChangedNotifications = true
+            contentBoundsObserver = NotificationCenter.default.addObserver(
+                forName: NSView.boundsDidChangeNotification,
+                object: scrollView.contentView,
+                queue: .main
+            ) { [weak self, weak scrollView] _ in
+                Task { @MainActor [weak self, weak scrollView] in
+                    guard let self, let scrollView else { return }
+                    self.scrollCoordinator?.refreshMainCanvasHorizontalScrollViewState(scrollView)
+                }
+            }
+
+            if let documentView = scrollView.documentView {
+                observedDocumentView = documentView
+                documentView.postsFrameChangedNotifications = true
+                documentView.postsBoundsChangedNotifications = true
+                documentFrameObserver = NotificationCenter.default.addObserver(
+                    forName: NSView.frameDidChangeNotification,
+                    object: documentView,
+                    queue: .main
+                ) { [weak self, weak scrollView] _ in
+                    Task { @MainActor [weak self, weak scrollView] in
+                        guard let self, let scrollView else { return }
+                        self.scrollCoordinator?.refreshMainCanvasHorizontalScrollViewState(scrollView)
+                    }
+                }
+                documentBoundsObserver = NotificationCenter.default.addObserver(
+                    forName: NSView.boundsDidChangeNotification,
+                    object: documentView,
+                    queue: .main
+                ) { [weak self, weak scrollView] _ in
+                    Task { @MainActor [weak self, weak scrollView] in
+                        guard let self, let scrollView else { return }
+                        self.scrollCoordinator?.refreshMainCanvasHorizontalScrollViewState(scrollView)
+                    }
+                }
+            }
+        }
+
+        private func resolveScrollView(from view: NSView) -> NSScrollView? {
+            var current: NSView? = view
+            while let candidate = current {
+                if let scrollView = candidate.enclosingScrollView {
+                    return scrollView
+                }
+                current = candidate.superview
+            }
+            return nil
+        }
     }
 }
 
 struct MainColumnScrollViewAccessor: NSViewRepresentable {
+    let scrollCoordinator: MainCanvasScrollCoordinator
     let columnKey: String
     let storedOffsetY: CGFloat?
     let onOffsetChange: (CGFloat) -> Void
@@ -1104,6 +1404,7 @@ struct MainColumnScrollViewAccessor: NSViewRepresentable {
     func updateNSView(_ view: NSView, context: Context) {
         context.coordinator.attach(
             to: view,
+            scrollCoordinator: scrollCoordinator,
             columnKey: columnKey,
             storedOffsetY: storedOffsetY,
             onOffsetChange: onOffsetChange
@@ -1111,6 +1412,7 @@ struct MainColumnScrollViewAccessor: NSViewRepresentable {
     }
 
     final class Coordinator {
+        private var scrollCoordinator: MainCanvasScrollCoordinator?
         private weak var scrollView: NSScrollView?
         private var observer: NSObjectProtocol?
         private var attachedColumnKey: String?
@@ -1123,14 +1425,22 @@ struct MainColumnScrollViewAccessor: NSViewRepresentable {
 
         func attach(
             to view: NSView,
+            scrollCoordinator: MainCanvasScrollCoordinator,
             columnKey: String,
             storedOffsetY: CGFloat?,
             onOffsetChange: @escaping (CGFloat) -> Void
         ) {
+            self.scrollCoordinator = scrollCoordinator
             guard let resolvedScrollView = resolveScrollView(from: view) else {
                 DispatchQueue.main.async { [weak self, weak view] in
                     guard let self, let view else { return }
-                    self.attach(to: view, columnKey: columnKey, storedOffsetY: storedOffsetY, onOffsetChange: onOffsetChange)
+                    self.attach(
+                        to: view,
+                        scrollCoordinator: scrollCoordinator,
+                        columnKey: columnKey,
+                        storedOffsetY: storedOffsetY,
+                        onOffsetChange: onOffsetChange
+                    )
                 }
                 return
             }
@@ -1143,10 +1453,10 @@ struct MainColumnScrollViewAccessor: NSViewRepresentable {
 
             let keyChanged = attachedColumnKey != columnKey
             if keyChanged, let previousKey = attachedColumnKey {
-                MainColumnScrollRegistry.shared.unregister(key: previousKey, matching: resolvedScrollView)
+                scrollCoordinator.unregister(viewportKey: previousKey, matching: resolvedScrollView)
             }
             attachedColumnKey = columnKey
-            MainColumnScrollRegistry.shared.register(scrollView: resolvedScrollView, for: columnKey)
+            scrollCoordinator.register(scrollView: resolvedScrollView, for: columnKey)
             offsetChangeHandler = onOffsetChange
             if keyChanged {
                 lastReportedOffsetY = .nan
@@ -1160,7 +1470,7 @@ struct MainColumnScrollViewAccessor: NSViewRepresentable {
 
         private func detach() {
             if let attachedColumnKey, let scrollView {
-                MainColumnScrollRegistry.shared.unregister(key: attachedColumnKey, matching: scrollView)
+                scrollCoordinator?.unregister(viewportKey: attachedColumnKey, matching: scrollView)
             }
             if let observer {
                 NotificationCenter.default.removeObserver(observer)
@@ -1170,6 +1480,7 @@ struct MainColumnScrollViewAccessor: NSViewRepresentable {
             attachedColumnKey = nil
             lastReportedOffsetY = .nan
             offsetChangeHandler = nil
+            scrollCoordinator = nil
         }
 
         private func installObserver(for scrollView: NSScrollView) {

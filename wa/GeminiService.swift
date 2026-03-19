@@ -434,6 +434,12 @@ struct GeminiService {
            message.localizedCaseInsensitiveContains("unsupported") {
             return true
         }
+        if statusCode == 400 {
+            if message.localizedCaseInsensitiveContains("responseMimeType") { return true }
+            if message.localizedCaseInsensitiveContains("responseSchema") { return true }
+            if message.localizedCaseInsensitiveContains("Cannot find field") { return true }
+            if message.localizedCaseInsensitiveContains("Unknown name") { return true }
+        }
         if message.localizedCaseInsensitiveContains("api version") {
             return true
         }

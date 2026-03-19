@@ -298,9 +298,21 @@ extension ScenarioWriterView {
         mainCaretLocationByCardID[id] = targetLocation
         mainCaretRestoreRequestID += 1
         let requestID = mainCaretRestoreRequestID
-        applyMainCaretWithRetry(expectedCardID: id, location: targetLocation, retries: 12, requestID: requestID)
+        applyMainCaretWithRetry(
+            expectedCardID: id,
+            location: targetLocation,
+            retries: 12,
+            requestID: requestID,
+            suppressInitialEnsure: false
+        )
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
-            applyMainCaretWithRetry(expectedCardID: id, location: targetLocation, retries: 6, requestID: requestID)
+            applyMainCaretWithRetry(
+                expectedCardID: id,
+                location: targetLocation,
+                retries: 6,
+                requestID: requestID,
+                suppressInitialEnsure: false
+            )
         }
         requestCoalescedMainCaretEnsure(minInterval: mainCaretSelectionEnsureMinInterval, delay: 0.0)
     }

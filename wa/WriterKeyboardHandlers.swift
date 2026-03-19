@@ -743,7 +743,8 @@ extension ScenarioWriterView {
         switchMainEditingTarget(
             to: target,
             caretLocation: targetLength,
-            shouldDiscardEmptyNewCardOnBoundaryMove: shouldDiscardEmptyNewCardOnBoundaryMove
+            shouldDiscardEmptyNewCardOnBoundaryMove: shouldDiscardEmptyNewCardOnBoundaryMove,
+            suppressSiblingNavigationScrolls: true
         )
         return true
     }
@@ -805,7 +806,8 @@ extension ScenarioWriterView {
         switchMainEditingTarget(
             to: target,
             caretLocation: 0,
-            shouldDiscardEmptyNewCardOnBoundaryMove: shouldDiscardEmptyNewCardOnBoundaryMove
+            shouldDiscardEmptyNewCardOnBoundaryMove: shouldDiscardEmptyNewCardOnBoundaryMove,
+            suppressSiblingNavigationScrolls: true
         )
         return true
     }
@@ -929,10 +931,22 @@ extension ScenarioWriterView {
     func switchMainEditingTarget(
         to target: SceneCard,
         caretLocation: Int,
-        shouldDiscardEmptyNewCardOnBoundaryMove: Bool
+        shouldDiscardEmptyNewCardOnBoundaryMove: Bool,
+        suppressSiblingNavigationScrolls: Bool = false
     ) {
         if shouldDiscardEmptyNewCardOnBoundaryMove {
             finishEditing()
+        }
+        cancelMainArrowNavigationSettle()
+        cancelAllPendingMainColumnFocusWork()
+        pendingMainEditingSiblingNavigationTargetID = suppressSiblingNavigationScrolls ? target.id : nil
+        pendingMainEditingBoundaryNavigationTargetID = target.id
+        if suppressSiblingNavigationScrolls {
+            pendingMainEditingViewportKeepVisibleCardID = nil
+            pendingMainEditingViewportRevealEdge = nil
+        } else {
+            pendingMainEditingViewportKeepVisibleCardID = target.id
+            pendingMainEditingViewportRevealEdge = caretLocation <= 0 ? .top : .bottom
         }
         changeActiveCard(to: target, shouldFocusMain: false, deferToMainAsync: false)
         selectedCardIDs = [target.id]
@@ -940,9 +954,9 @@ extension ScenarioWriterView {
         editingStartContent = target.content
         editingStartState = captureScenarioState()
         editingIsNewCard = false
-        mainCaretLocationByCardID[target.id] = caretLocation
-        requestMainCaretRestore(for: target.id)
-        requestCoalescedMainCaretEnsure(minInterval: mainCaretSelectionEnsureMinInterval, delay: 0.0)
+        let textLength = (target.content as NSString).length
+        let safeCaretLocation = min(max(0, caretLocation), textLength)
+        mainCaretLocationByCardID[target.id] = safeCaretLocation
     }
 
     // --- Main Nav Key Monitor ---
@@ -1708,6 +1722,14 @@ extension ScenarioWriterView {
         isRepeat: Bool
     ) {
         guard let direction else { return }
+
+        MainCanvasNavigationDiagnostics.shared.beginFocusIntent(
+            ownerKey: mainCanvasDiagnosticsOwnerKey,
+            direction: direction,
+            isRepeat: isRepeat,
+            sourceCardID: previousActiveID,
+            intendedCardID: activeCardID
+        )
 
         switch direction {
         case .left, .right:
