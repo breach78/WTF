@@ -418,3 +418,15 @@ Whenever main-workspace vertical scroll logic changes:
 
 Do not treat this file as architecture prose.
 Treat it as the operational map for debugging and modifying main-workspace vertical scrolling.
+
+## 18. Retained Focus-Mode Shell Guard
+
+After the retained focus-mode shell change:
+
+- hidden main-workspace vertical scroll views remain mounted underneath focus mode
+- but `mainColumnScrollObserver(...)` must not keep mutating `mainColumnViewportOffsetByKey` while `showFocusMode == true`
+
+Current rule:
+
+- runtime vertical offset capture for main-workspace columns is allowed only when `!showFocusMode`
+- otherwise the hidden shell can overwrite the visible work-mode alignment context and make post-focus-mode card alignment look corrupted

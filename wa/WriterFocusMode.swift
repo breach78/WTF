@@ -9,6 +9,21 @@ fileprivate var _focusSelectionActiveEdge: FocusSelectionActiveEdge = .end
 
 extension ScenarioWriterView {
 
+    private var isFocusModeExitTeardownActive: Bool {
+        Date() < focusModeExitTeardownUntil
+    }
+
+    private func beginFocusModeExitTeardownWindow() {
+        focusModeExitTeardownUntil = Date().addingTimeInterval(0.35)
+        focusCaretEnsureWorkItem?.cancel()
+        focusCaretEnsureWorkItem = nil
+        focusModeCaretRequestID += 1
+        focusModeBoundaryTransitionPendingReveal = false
+        focusModePendingFallbackRevealCardID = nil
+        focusModeFallbackRevealIssuedCardID = nil
+        clearFocusModeExcludedResponder()
+    }
+
     private var focusTypewriterEnabledLive: Bool {
         if let stored = UserDefaults.standard.object(forKey: "focusTypewriterEnabled") as? Bool {
             return stored
@@ -47,8 +62,8 @@ extension ScenarioWriterView {
                 .onChange(of: activeCardID) { _, newID in
                     handleFocusModeCanvasActiveCardChange(newID, proxy: proxy)
                 }
-                .onChange(of: focusModeEntryScrollTick) { _, _ in
-                    handleFocusModeEntryScrollTickChange(proxy: proxy)
+                .onAppear {
+                    handleFocusModeCanvasAppear(proxy: proxy)
                 }
                 .onChange(of: focusModeFallbackRevealTick) { _, _ in
                     handleFocusModeFallbackRevealTickChange(proxy: proxy)
@@ -344,8 +359,9 @@ extension ScenarioWriterView {
         }
     }
 
-    private func handleFocusModeEntryScrollTickChange(proxy: ScrollViewProxy) {
+    private func handleFocusModeCanvasAppear(proxy: ScrollViewProxy) {
         guard showFocusMode else { return }
+        guard focusModePresentationPhase == .entering || focusModePresentationPhase == .active else { return }
         guard let id = focusModeEditorCardID ?? editingCardID ?? activeCardID else { return }
         let authority = beginFocusModeVerticalScrollAuthority(kind: .canvasNavigation, targetCardID: id)
         DispatchQueue.main.async {
@@ -1837,12 +1853,13 @@ extension ScenarioWriterView {
                 handleFocusModeSelectionNotification(notification)
             }
         }
-        DispatchQueue.main.async {
-            requestFocusModeCaretEnsure(typewriter: false, reason: "caret-monitor-start")
-        }
+        // Do not issue an eager ensure on monitor start.
+        // Wait until the live editable text view has actually attached and selection
+        // change/programmatic caret application provides the first real caret context.
     }
 
     func handleFocusModeSelectionNotification(_ notification: Notification) {
+        guard !isFocusModeExitTeardownActive else { return }
         guard let textView = focusModeSelectionTextView(from: notification) else { return }
         DispatchQueue.main.async {
             processFocusModeSelectionNotification(textView: textView)
@@ -1850,6 +1867,7 @@ extension ScenarioWriterView {
     }
 
     private func processFocusModeSelectionNotification(textView: NSTextView) {
+        guard !isFocusModeExitTeardownActive else { return }
         guard showFocusMode else { return }
         guard !isApplyingUndo else { return }
         guard !isReferenceWindowFocused else { return }
@@ -2195,6 +2213,7 @@ extension ScenarioWriterView {
     }
 
     func requestFocusModeCaretEnsure(typewriter: Bool, delay: Double = 0.016, force: Bool = false, reason: String = "unspecified") {
+        if isFocusModeExitTeardownActive { return }
         if focusUndoSelectionEnsureSuppressed && !force { return }
         if typewriter {
             focusCaretPendingTypewriter = true
@@ -2254,6 +2273,10 @@ extension ScenarioWriterView {
     }
 
     private func executeFocusModeCaretEnsureWork(force: Bool) {
+        guard !isFocusModeExitTeardownActive else {
+            resetFocusModeCaretPendingState(clearDeferredTypewriter: true)
+            return
+        }
         if focusUndoSelectionEnsureSuppressed && !force {
             resetFocusModeCaretPendingState(clearDeferredTypewriter: false)
             return
@@ -2307,6 +2330,7 @@ extension ScenarioWriterView {
         typewriter: Bool = false,
         authority: FocusModeVerticalScrollAuthority? = nil
     ) {
+        guard !isFocusModeExitTeardownActive else { return }
         guard let context = resolveFocusModeCaretEnsureContext() else { return }
         if let authority, !isFocusModeVerticalScrollAuthorityCurrent(authority) {
             return
@@ -3022,6 +3046,7 @@ extension ScenarioWriterView {
     }
 
     func applyFocusModeCaretWithRetry(expectedCardID: UUID, location: Int, retries: Int, requestID: Int) {
+        guard !isFocusModeExitTeardownActive else { return }
         guard let expectedCard = resolveFocusModeCaretRetryExpectedCard(
             expectedCardID: expectedCardID,
             requestID: requestID
@@ -3196,6 +3221,7 @@ extension ScenarioWriterView {
     }
 
     private func requestFocusModeBoundaryFallbackRevealIfNeeded(expectedCardID: UUID) {
+        guard !isFocusModeExitTeardownActive else { return }
         guard focusModeBoundaryTransitionPendingReveal else { return }
         guard focusModePendingFallbackRevealCardID == expectedCardID else { return }
         guard focusModeFallbackRevealIssuedCardID != expectedCardID else { return }
@@ -3365,6 +3391,7 @@ extension ScenarioWriterView {
 
     func toggleFocusMode() {
         let entering = !showFocusMode
+        beginFocusModePresentationTransition(entering: entering)
         if entering {
             guard let target = resolveFocusModeEntryTargetCard() else { return }
             enterFocusMode(with: target)
@@ -3384,7 +3411,7 @@ extension ScenarioWriterView {
     }
 
     private func enterFocusMode(with target: SceneCard) {
-        captureMainCanvasHorizontalViewportForFocusEntry()
+        captureFocusModeEntryWorkspaceSnapshot()
         if let location = resolvedMainCaretLocation(for: target) {
             pendingFocusModeEntryCaretHint = (target.id, location)
         } else {
@@ -3397,6 +3424,7 @@ extension ScenarioWriterView {
     }
 
     private func exitFocusMode() {
+        beginFocusModeExitTeardownWindow()
         pendingFocusModeEntryCaretHint = nil
         focusPendingProgrammaticBeginEditCardID = nil
         finishEditing()
@@ -3426,6 +3454,29 @@ extension ScenarioWriterView {
             } else {
                 isMainViewFocused = true
             }
+        }
+    }
+
+    private func beginFocusModePresentationTransition(entering: Bool) {
+        focusModePresentationPhase = entering ? .entering : .exiting
+    }
+
+    func completeFocusModePresentationTransitionIfNeeded(entering: Bool) {
+        if entering {
+            guard showFocusMode else { return }
+            guard focusModePresentationPhase == .entering else { return }
+            focusModePresentationPhase = .active
+        } else {
+            guard !showFocusMode else { return }
+            guard focusModePresentationPhase == .exiting else { return }
+            focusModePresentationPhase = .inactive
+        }
+    }
+
+    func scheduleFocusModePresentationPhaseResetAfterExit() {
+        let delay = max(0.0, focusModeExitTeardownUntil.timeIntervalSinceNow)
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+            completeFocusModePresentationTransitionIfNeeded(entering: false)
         }
     }
 

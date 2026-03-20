@@ -44,6 +44,10 @@ Current refactor note:
   - switching to a different focus-mode card marks that card as awaiting a fresh live editor layout commit
   - programmatic caret retry does not spend retry budget while that live layout commit is still pending
   - boundary fallback reveal also waits for the same live layout window before firing
+- Entry / exit lifecycle cleanup is also in place:
+  - initial focus-mode canvas alignment is now owned by `focusModeCanvas(...)` `onAppear`
+  - `focusModeEntryScrollTick` has been retired
+  - retained main-workspace shell persistence now reads live horizontal offset instead of an entry-snapshot fallback
 
 ## 1. Low-Level Scroll Executors
 
@@ -52,7 +56,7 @@ These functions directly move either the outer focus-mode scroll view or an inne
 - `wa/WriterFocusMode.swift`
   - `performFocusModeCanvasActiveCardScroll(...)`
     - uses `ScrollViewProxy.scrollTo(...)`
-  - `handleFocusModeEntryScrollTickChange(...)`
+  - `handleFocusModeCanvasAppear(...)`
     - uses `proxy.scrollTo(...)`
   - `handleFocusModeFallbackRevealTickChange(...)`
     - uses `proxy.scrollTo(...)`
@@ -85,8 +89,8 @@ Important hooks on this surface:
 
 - `onChange(of: activeCardID)`
   - `handleFocusModeCanvasActiveCardChange(...)`
-- `onChange(of: focusModeEntryScrollTick)`
-  - `handleFocusModeEntryScrollTickChange(...)`
+- `onAppear`
+  - `handleFocusModeCanvasAppear(...)`
 - `onChange(of: focusModeFallbackRevealTick)`
   - `handleFocusModeFallbackRevealTickChange(...)`
 - `onChange(of: size.width)`
@@ -317,7 +321,7 @@ Entry behavior:
 - start focus-mode key monitor
 - start focus-mode scroll monitor
 - start focus-mode caret monitor
-- increment `focusModeEntryScrollTick`
+- initial focus-mode canvas alignment occurs on `focusModeCanvas(...)` appear
 - call `beginFocusModeEditing(...)`
 - immediately schedule offset normalization and burst normalization
 
@@ -360,7 +364,6 @@ SwiftUI state:
   - `suppressFocusModeScrollOnce`
   - `focusPendingProgrammaticBeginEditCardID`
   - `focusModeCaretRequestID`
-  - `focusModeEntryScrollTick`
   - `focusModeBoundaryTransitionPendingReveal`
   - `focusModePendingFallbackRevealCardID`
   - `focusModeFallbackRevealIssuedCardID`

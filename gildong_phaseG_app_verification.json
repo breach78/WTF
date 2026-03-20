@@ -1,0 +1,32 @@
+{
+  "ok": true,
+  "source": {
+    "rawVerificationPath": "/Users/three/app_build/wa/gildong_phaseF_raw_verification.json",
+    "totalScenes": 116,
+    "allExactMatchesFromPhaseF": true
+  },
+  "archivedVisibleDescendants": 169,
+  "createdCounts": {
+    "actsReused": 4,
+    "outlines": 11,
+    "synopses": 22,
+    "sequences": 48,
+    "treatments": 116,
+    "rawScenes": 116
+  },
+  "visibleActChildren": {
+    "시작": 3,
+    "중간1": 2,
+    "중간2": 3,
+    "끝": 3
+  },
+  "sampleBranch": {
+    "outlineNumber": "01",
+    "outlineCardID": "95CC0394-C0FE-4ADE-8327-1C6EF594341A",
+    "synopses": 2,
+    "sequences": 5,
+    "treatments": 13,
+    "rawScenes": 13
+  },
+  "rawMismatches": []
+}

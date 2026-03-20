@@ -1,0 +1,30 @@
+{
+  "/Users/three/app_build/wa/wa/WriterAI+ThreadStore.swift" : {
+    "const-values" : "/Users/three/app_build/wa/.codex_derived/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterAI+ThreadStore.swiftconstvalues",
+    "dependencies" : "/Users/three/app_build/wa/.codex_derived/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterAI+ThreadStore.d",
+    "diagnostics" : "/Users/three/app_build/wa/.codex_derived/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterAI+ThreadStore.dia",
+    "object" : "/Users/three/app_build/wa/.codex_derived/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterAI+ThreadStore.o",
+    "swift-dependencies" : "/Users/three/app_build/wa/.codex_derived/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterAI+ThreadStore.swiftdeps"
+  },
+  "/Users/three/app_build/wa/wa/WriterCardManagement.swift" : {
+    "const-values" : "/Users/three/app_build/wa/.codex_derived/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterCardManagement.swiftconstvalues",
+    "dependencies" : "/Users/three/app_build/wa/.codex_derived/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterCardManagement.d",
+    "diagnostics" : "/Users/three/app_build/wa/.codex_derived/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterCardManagement.dia",
+    "object" : "/Users/three/app_build/wa/.codex_derived/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterCardManagement.o",
+    "swift-dependencies" : "/Users/three/app_build/wa/.codex_derived/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterCardManagement.swiftdeps"
+  },
+  "/Users/three/app_build/wa/wa/WriterCardViews.swift" : {
+    "const-values" : "/Users/three/app_build/wa/.codex_derived/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterCardViews.swiftconstvalues",
+    "dependencies" : "/Users/three/app_build/wa/.codex_derived/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterCardViews.d",
+    "diagnostics" : "/Users/three/app_build/wa/.codex_derived/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterCardViews.dia",
+    "object" : "/Users/three/app_build/wa/.codex_derived/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterCardViews.o",
+    "swift-dependencies" : "/Users/three/app_build/wa/.codex_derived/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterCardViews.swiftdeps"
+  },
+  "/Users/three/app_build/wa/wa/WriterCaretAndScroll.swift" : {
+    "const-values" : "/Users/three/app_build/wa/.codex_derived/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterCaretAndScroll.swiftconstvalues",
+    "dependencies" : "/Users/three/app_build/wa/.codex_derived/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterCaretAndScroll.d",
+    "diagnostics" : "/Users/three/app_build/wa/.codex_derived/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterCaretAndScroll.dia",
+    "object" : "/Users/three/app_build/wa/.codex_derived/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterCaretAndScroll.o",
+    "swift-dependencies" : "/Users/three/app_build/wa/.codex_derived/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterCaretAndScroll.swiftdeps"
+  }
+}

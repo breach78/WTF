@@ -1,0 +1,44 @@
+{
+  "source": {
+    "lines": 3834,
+    "bytes": 151177,
+    "hash": "c1a3bea5a3b46a437e141472d4dbc78baecf7c550f75b731c9648f40417f6189",
+    "scenes": 116
+  },
+  "counts": {
+    "acts": 4,
+    "outlines": 10,
+    "synopses": 11,
+    "sequences": 11,
+    "treatments": 21,
+    "rawScenes": 116,
+    "expectedVisibleDescendants": 173
+  },
+  "archived": {
+    "branches": 16,
+    "oldOutlines": 12,
+    "oldSynopses": 8
+  },
+  "rawIntegrity": {
+    "validated": 116,
+    "mismatches": [],
+    "firstScene": {
+      "id": "207DBBBA-0AA0-4017-BC63-6E2C0ADB338F",
+      "number": 1,
+      "heading": "EXT. 문경 중앙 시장 / 도자전 - 낮",
+      "hash": "33be417204451c397051bd0f7bedf66e75e92ab60d138e2bb51e604fa7fa1924",
+      "bytes": 3287,
+      "treatment": 1
+    },
+    "lastScene": {
+      "id": "480BED48-012D-4BDE-A2EA-3926C0338E11",
+      "number": 116,
+      "heading": "EXT. 남대문 앞 - 아침",
+      "hash": "1acac3967039199567651967e86e378b7937932363d44979be2baafb20758903",
+      "bytes": 1733,
+      "treatment": 21
+    }
+  },
+  "issues": [],
+  "ok": true
+}

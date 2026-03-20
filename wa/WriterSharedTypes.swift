@@ -129,6 +129,126 @@ struct FocusModeVerticalScrollAuthority: Equatable {
     let targetCardID: UUID?
 }
 
+struct FocusModeWorkspaceSnapshot: Equatable {
+    let activeCardID: UUID?
+    let editingCardID: UUID?
+    let selectedCardIDs: Set<UUID>
+    let visibleMainCanvasLevel: Int?
+    let mainCanvasHorizontalOffset: CGFloat?
+    let mainColumnViewportOffsets: [String: CGFloat]
+    let capturedAt: Date
+}
+
+enum FocusModePresentationPhase: String, Equatable {
+    case inactive
+    case entering
+    case active
+    case exiting
+}
+
+enum MainSelectionActiveEdge {
+    case start
+    case end
+}
+
+struct AICandidateTrackingState {
+    var parentID: UUID? = nil
+    var cardIDs: [UUID] = []
+    var action: AICardAction? = nil
+}
+
+struct LevelData {
+    let cards: [SceneCard]
+    let parent: SceneCard?
+}
+
+struct DisplayedMainLevelsCacheKey: Equatable {
+    let cardsVersion: Int
+    let activeCategory: String?
+    let isActiveCardRoot: Bool
+}
+
+struct MainColumnFocusRequest: Equatable {
+    let targetID: UUID
+    let prefersTopAnchor: Bool
+    let keepVisibleOnly: Bool
+    let editingRevealEdge: MainEditingViewportRevealEdge?
+    let cardsCount: Int
+    let firstCardID: UUID?
+    let lastCardID: UUID?
+    let viewportHeightBucket: Int
+}
+
+struct MainColumnLayoutFrame: Equatable {
+    let minY: CGFloat
+    let maxY: CGFloat
+
+    var height: CGFloat { maxY - minY }
+}
+
+enum MainCardHeightMode: Int, Hashable {
+    case display
+    case editingFallback
+}
+
+struct MainCardHeightCacheKey: Hashable {
+    let cardID: UUID
+    let contentFingerprint: UInt64
+    let textLength: Int
+    let widthBucket: Int
+    let fontSizeBucket: Int
+    let lineSpacingBucket: Int
+    let mode: MainCardHeightMode
+}
+
+struct MainCardHeightRecord {
+    let key: MainCardHeightCacheKey
+    let height: CGFloat
+}
+
+struct MainColumnLayoutCacheKey: Hashable {
+    let recordsVersion: Int
+    let contentVersion: Int
+    let viewportHeightBucket: Int
+    let fontSizeBucket: Int
+    let lineSpacingBucket: Int
+    let editingCardID: UUID?
+    let editingHeightBucket: Int
+    let cardIDs: [UUID]
+}
+
+struct MainColumnLayoutSnapshot {
+    let key: MainColumnLayoutCacheKey
+    let framesByCardID: [UUID: MainColumnLayoutFrame]
+    let orderedCardIDs: [UUID]
+    let contentBottomY: CGFloat
+}
+
+@MainActor
+final class AppWindowState: ObservableObject {
+    @Published var focusModeWindowBackgroundActive: Bool = false
+}
+
+struct MainCardRenderSettings: Equatable {
+    let fontSize: CGFloat
+    let appearance: String
+    let lineSpacing: CGFloat
+    let cardBaseColorHex: String
+    let cardActiveColorHex: String
+    let cardRelatedColorHex: String
+    let darkCardBaseColorHex: String
+    let darkCardActiveColorHex: String
+    let darkCardRelatedColorHex: String
+}
+
+struct ReferenceCardRenderSettings: Equatable {
+    let fontSize: CGFloat
+    let appearance: String
+    let lineSpacing: CGFloat
+    let cardActiveColorHex: String
+    let darkCardActiveColorHex: String
+}
+
 // Imperative editor caches that do not need SwiftUI-driven invalidation.
 final class WriterInteractionRuntime {
     var activeAncestorIDs: Set<UUID> = []
@@ -150,15 +270,15 @@ final class WriterInteractionRuntime {
     var mainVerticalScrollAuthoritySequence: Int = 0
     var mainVerticalScrollAuthorityByViewportKey: [String: MainVerticalScrollAuthority] = [:]
     var resolvedLevelsWithParentsVersion: Int = -1
-    var resolvedLevelsWithParentsCache: [ScenarioWriterView.LevelData] = []
-    var displayedMainLevelsCacheKey: ScenarioWriterView.DisplayedMainLevelsCacheKey? = nil
-    var displayedMainLevelsCache: [ScenarioWriterView.LevelData] = []
+    var resolvedLevelsWithParentsCache: [LevelData] = []
+    var displayedMainLevelsCacheKey: DisplayedMainLevelsCacheKey? = nil
+    var displayedMainLevelsCache: [LevelData] = []
     var displayedMainCardLocationByIDCache: [UUID: (level: Int, index: Int)] = [:]
-    var mainColumnLastFocusRequestByKey: [String: ScenarioWriterView.MainColumnFocusRequest] = [:]
+    var mainColumnLastFocusRequestByKey: [String: MainColumnFocusRequest] = [:]
     var mainColumnViewportOffsetByKey: [String: CGFloat] = [:]
     var mainColumnObservedCardFramesByKey: [String: [UUID: CGRect]] = [:]
-    var mainColumnLayoutSnapshotByKey: [ScenarioWriterView.MainColumnLayoutCacheKey: ScenarioWriterView.MainColumnLayoutSnapshot] = [:]
-    var mainCardHeightRecordByKey: [ScenarioWriterView.MainCardHeightCacheKey: ScenarioWriterView.MainCardHeightRecord] = [:]
+    var mainColumnLayoutSnapshotByKey: [MainColumnLayoutCacheKey: MainColumnLayoutSnapshot] = [:]
+    var mainCardHeightRecordByKey: [MainCardHeightCacheKey: MainCardHeightRecord] = [:]
     var mainColumnPendingFocusVerificationWorkItemByKey: [String: DispatchWorkItem] = [:]
     var mainColumnViewportCaptureSuspendedUntil: Date = .distantPast
     var mainColumnViewportRestoreUntil: Date = .distantPast
@@ -173,7 +293,7 @@ final class WriterInteractionRuntime {
     var mainSelectionLastLength: Int = -1
     var mainSelectionLastTextLength: Int = -1
     var mainSelectionLastResponderID: ObjectIdentifier? = nil
-    var mainSelectionActiveEdge: ScenarioWriterView.MainSelectionActiveEdge = .end
+    var mainSelectionActiveEdge: MainSelectionActiveEdge = .end
     var mainCaretEnsureLastScheduledAt: Date = .distantPast
     var mainProgrammaticCaretSuppressEnsureCardID: UUID? = nil
     var mainProgrammaticCaretExpectedCardID: UUID? = nil
@@ -340,7 +460,7 @@ final class WriterAIFeatureState: ObservableObject {
     @Published var isGenerating: Bool = false
     @Published var statusMessage: String? = nil
     @Published var statusIsError: Bool = false
-    @Published var candidateState = ScenarioWriterView.AICandidateTrackingState()
+    @Published var candidateState = AICandidateTrackingState()
     @Published var childSummaryLoadingCardIDs: Set<UUID> = []
 
     var cardDigestCache: [UUID: AICardDigest] = [:]

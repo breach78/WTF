@@ -563,7 +563,6 @@ struct waApp: App {
     @AppStorage("appearance") private var appearance: String = "dark"
     @AppStorage("backgroundColorHex") private var backgroundColorHex: String = "F4F2EE"
     @AppStorage("darkBackgroundColorHex") private var darkBackgroundColorHex: String = "111418"
-    @AppStorage("focusModeWindowBackgroundActive") private var focusModeWindowBackgroundActive: Bool = false
     @AppStorage("forceWorkspaceReset") private var forceWorkspaceReset: Bool = false
     @AppStorage("didResetForV2") private var didResetForV2: Bool = false
     @AppStorage("autoBackupEnabledOnQuit") private var autoBackupEnabledOnQuit: Bool = true
@@ -574,6 +573,7 @@ struct waApp: App {
     
     // 현재 활성화된 파일 스토어를 관리
     @State private var store: FileStore?
+    @StateObject private var appWindowState = AppWindowState()
     @StateObject private var referenceCardStore = ReferenceCardStore()
     @State private var didHideReferenceWindowOnLaunch: Bool = false
     @State private var storeSetupRequestID: Int = 0
@@ -585,13 +585,14 @@ struct waApp: App {
     var body: some Scene {
         WindowGroup {
             ZStack {
-                Color(nsColor: focusModeWindowBackgroundActive ? .black : resolvedWindowBackgroundColor)
+                Color(nsColor: appWindowState.focusModeWindowBackgroundActive ? .black : resolvedWindowBackgroundColor)
                     .ignoresSafeArea()
                 Group {
                     if let store = store {
                         // 스토어가 준비되면 메인 뷰 표시
                         MainContainerView()
                             .environmentObject(store)
+                            .environmentObject(appWindowState)
                             .environmentObject(referenceCardStore)
                     } else {
                         // 컨테이너가 없으면(최초 실행 시) 설정 화면 표시
@@ -618,7 +619,7 @@ struct waApp: App {
                 initializeAutoBackupSettingsIfNeeded()
                 setupStore()
                 preloadSoftBoundaryFeedbackSound()
-                focusModeWindowBackgroundActive = false
+                appWindowState.focusModeWindowBackgroundActive = false
                 hideReferenceWindowOnLaunchOnce()
             }
             .onChange(of: appearance) { _, _ in

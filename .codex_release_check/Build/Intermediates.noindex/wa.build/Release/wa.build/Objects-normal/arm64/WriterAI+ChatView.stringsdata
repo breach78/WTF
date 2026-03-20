@@ -1,0 +1,176 @@
+{
+  "source": "/Users/three/app_build/wa/wa/WriterAI+ChatView.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "AI 시나리오 상담",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 113
+        }
+      },
+      {
+        "comment": "",
+        "key": "새 상담 스레드",
+        "location": {
+          "startingColumn": 27,
+          "startingLine": 125
+        }
+      },
+      {
+        "comment": "",
+        "key": "현재 상담 스레드 삭제",
+        "location": {
+          "startingColumn": 27,
+          "startingLine": 136
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld",
+        "location": {
+          "startingColumn": 42,
+          "startingLine": 161
+        }
+      },
+      {
+        "comment": "",
+        "key": "AI에게 현재 시나리오에 대해 물어보세요.",
+        "location": {
+          "startingColumn": 38,
+          "startingLine": 226
+        }
+      },
+      {
+        "comment": "",
+        "key": "스레드 범위: %@",
+        "location": {
+          "startingColumn": 42,
+          "startingLine": 230
+        }
+      },
+      {
+        "comment": "",
+        "key": "예: 이 이야기의 결말을 어떻게 내면 좋을까?",
+        "location": {
+          "startingColumn": 38,
+          "startingLine": 234
+        }
+      },
+      {
+        "comment": "",
+        "key": "AI",
+        "location": {
+          "startingColumn": 50,
+          "startingLine": 253
+        }
+      },
+      {
+        "comment": "",
+        "key": "AI",
+        "location": {
+          "startingColumn": 46,
+          "startingLine": 273
+        }
+      },
+      {
+        "comment": "",
+        "key": "누적 토큰(현재 스레드): 입력 %lld / 출력 %lld / 총 %lld",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 326
+        }
+      },
+      {
+        "comment": "",
+        "key": "이번 요청 컨텍스트",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 333
+        }
+      },
+      {
+        "comment": "",
+        "key": "범위: %@",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 336
+        }
+      },
+      {
+        "comment": "",
+        "key": "선택 맥락: %@",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 339
+        }
+      },
+      {
+        "comment": "",
+        "key": "RAG 연관: %@",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 343
+        }
+      },
+      {
+        "comment": "",
+        "key": "롤링 요약: %@",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 347
+        }
+      },
+      {
+        "comment": "",
+        "key": "선택 카드에 반영",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 360
+        }
+      },
+      {
+        "comment": "",
+        "key": "자식 카드로 추가",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 367
+        }
+      },
+      {
+        "comment": "",
+        "key": "대안 3개 요청",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 374
+        }
+      },
+      {
+        "comment": "",
+        "key": "AI에게 질문하기...",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 385
+        }
+      },
+      {
+        "comment": "",
+        "key": "AI에게 질문하기...",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 400
+        }
+      },
+      {
+        "comment": "",
+        "key": "현재 AI 요청 중단",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 425
+        }
+      }
+    ]
+  },
+  "version": 1
+}

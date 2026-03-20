@@ -73,11 +73,9 @@ extension ScenarioWriterView {
         )
     }
 
-    func requestMainCanvasRestoreForFocusExit() {
+    func requestMainCanvasRestoreForFocusExit(using snapshot: FocusModeWorkspaceSnapshot?) {
         let targetID = activeCardID ?? editingCardID ?? lastActiveCardID ?? scenario.rootCards.first?.id
-        let visibleLevel = focusModeEntryMainCanvasVisibleLevel
-        focusModeEntryMainCanvasVisibleLevel = nil
-        focusModeEntryMainCanvasHorizontalOffset = nil
+        let visibleLevel = snapshot?.visibleMainCanvasLevel
         enqueueMainCanvasRestoreRequest(
             targetID: targetID,
             visibleLevel: visibleLevel,
@@ -86,9 +84,9 @@ extension ScenarioWriterView {
         )
     }
 
-    func requestMainCanvasViewportRestoreForFocusExit() {
+    func requestMainCanvasViewportRestoreForFocusExit(using snapshot: FocusModeWorkspaceSnapshot?) {
         guard !showFocusMode else { return }
-        let storedOffsets = mainColumnViewportOffsetByKey
+        let storedOffsets = snapshot?.mainColumnViewportOffsets ?? mainColumnViewportOffsetByKey
         guard !storedOffsets.isEmpty else { return }
         scheduleMainCanvasRestoreRetries {
             guard !showFocusMode else { return }
@@ -96,31 +94,63 @@ extension ScenarioWriterView {
         }
     }
 
-    func captureMainCanvasHorizontalViewportForFocusEntry() {
+    func captureFocusModeEntryWorkspaceSnapshot() {
         guard !showFocusMode else { return }
+        let visibleLevel: Int?
         if let visibleLevel = resolvedVisibleMainCanvasLevelFromCurrentScrollPosition() {
-            focusModeEntryMainCanvasVisibleLevel = visibleLevel
             lastScrolledLevel = visibleLevel
+            focusModeEntryWorkspaceSnapshot = FocusModeWorkspaceSnapshot(
+                activeCardID: activeCardID,
+                editingCardID: editingCardID,
+                selectedCardIDs: selectedCardIDs,
+                visibleMainCanvasLevel: visibleLevel,
+                mainCanvasHorizontalOffset: mainCanvasScrollCoordinator.resolvedMainCanvasHorizontalOffset().map { max(0, $0) },
+                mainColumnViewportOffsets: mainColumnViewportOffsetByKey,
+                capturedAt: Date()
+            )
+            return
         } else if let activeID = activeCardID, let activeLevel = displayedMainCardLocationByID(activeID)?.level {
             switch mainCanvasHorizontalScrollMode {
             case .oneStep:
-                focusModeEntryMainCanvasVisibleLevel = activeLevel
+                visibleLevel = activeLevel
             case .twoStep:
-                focusModeEntryMainCanvasVisibleLevel = max(0, activeLevel - 1)
-            }
-            if let visibleLevel = focusModeEntryMainCanvasVisibleLevel {
-                lastScrolledLevel = visibleLevel
+                visibleLevel = max(0, activeLevel - 1)
             }
         } else if lastScrolledLevel >= 0 {
-            focusModeEntryMainCanvasVisibleLevel = lastScrolledLevel
+            visibleLevel = lastScrolledLevel
         } else {
-            focusModeEntryMainCanvasVisibleLevel = nil
+            visibleLevel = nil
         }
-        guard let offsetX = mainCanvasScrollCoordinator.resolvedMainCanvasHorizontalOffset() else {
-            focusModeEntryMainCanvasHorizontalOffset = nil
-            return
+        if let visibleLevel {
+            lastScrolledLevel = visibleLevel
         }
-        focusModeEntryMainCanvasHorizontalOffset = max(0, offsetX)
+        focusModeEntryWorkspaceSnapshot = FocusModeWorkspaceSnapshot(
+            activeCardID: activeCardID,
+            editingCardID: editingCardID,
+            selectedCardIDs: selectedCardIDs,
+            visibleMainCanvasLevel: visibleLevel,
+            mainCanvasHorizontalOffset: mainCanvasScrollCoordinator.resolvedMainCanvasHorizontalOffset().map { max(0, $0) },
+            mainColumnViewportOffsets: mainColumnViewportOffsetByKey,
+            capturedAt: Date()
+        )
+    }
+
+    func canReuseRetainedMainCanvasShellForFocusExit(using snapshot: FocusModeWorkspaceSnapshot?) -> Bool {
+        guard !showFocusMode else { return false }
+        guard mainCanvasScrollCoordinator.resolvedMainCanvasHorizontalScrollView() != nil else { return false }
+        guard let snapshot else { return true }
+        let requiredViewportKeys = snapshot.mainColumnViewportOffsets.compactMap { entry in
+            entry.value > 1 ? entry.key : nil
+        }
+        for viewportKey in requiredViewportKeys {
+            guard mainCanvasScrollCoordinator.scrollView(for: viewportKey) != nil else { return false }
+        }
+        return true
+    }
+
+    func finalizeRetainedMainCanvasShellForFocusExitReuse() {
+        pendingMainCanvasRestoreRequest = nil
+        cancelAllPendingMainColumnFocusWork()
     }
 
     // MARK: - Main Vertical Scroll Authority
@@ -190,10 +220,7 @@ extension ScenarioWriterView {
         return bestLevel
     }
 
-    func restoreMainCanvasHorizontalViewport(
-        to storedOffsetX: CGFloat,
-        clearFocusEntrySnapshotAfterRestore: Bool
-    ) {
+    func restoreMainCanvasHorizontalViewport(to storedOffsetX: CGFloat) {
         guard !showFocusMode else { return }
         suppressHorizontalAutoScroll = true
         mainCanvasScrollCoordinator.scheduleMainCanvasHorizontalRestore(offsetX: storedOffsetX)
@@ -216,9 +243,6 @@ extension ScenarioWriterView {
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.24) {
             suppressHorizontalAutoScroll = false
-            if clearFocusEntrySnapshotAfterRestore {
-                focusModeEntryMainCanvasHorizontalOffset = nil
-            }
         }
     }
 
@@ -598,6 +622,7 @@ extension ScenarioWriterView {
         let clonePeerDestinations = isCloneLinked ? clonePeerMenuDestinations(for: card) : []
         CardItem(
             card: card,
+            renderSettings: mainCardRenderSettings,
             isActive: activeCardID == card.id,
             isSelected: selectedCardIDs.contains(card.id),
             isMultiSelected: selectedCardIDs.count > 1 && selectedCardIDs.contains(card.id),
@@ -1681,6 +1706,7 @@ extension ScenarioWriterView {
             columnKey: viewportKey,
             storedOffsetY: mainColumnViewportOffsetByKey[viewportKey]
         ) { originY in
+            guard !showFocusMode else { return }
             let previous = mainColumnViewportOffsetByKey[viewportKey] ?? 0
             let suspended = Date() < mainColumnViewportCaptureSuspendedUntil
             let visibleSummary = debugMainColumnVisibleCardSummary(
@@ -2465,6 +2491,7 @@ extension ScenarioWriterView {
         let clonePeerDestinations = isCloneLinked ? clonePeerMenuDestinations(for: card) : []
         CardItem(
             card: card,
+            renderSettings: mainCardRenderSettings,
             isActive: activeCardID == card.id,
             isSelected: selectedCardIDs.contains(card.id),
             isMultiSelected: selectedCardIDs.count > 1 && selectedCardIDs.contains(card.id),

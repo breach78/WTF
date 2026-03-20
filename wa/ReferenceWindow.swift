@@ -291,6 +291,8 @@ struct ReferenceWindowView: View {
     @AppStorage("fontSize") private var fontSize: Double = 14.0
     @AppStorage("mainCardLineSpacingValueV2") private var mainCardLineSpacingValue: Double = 5.0
     @AppStorage("appearance") private var appearance: String = "dark"
+    @AppStorage("cardActiveColorHex") private var cardActiveColorHex: String = "BFD7FF"
+    @AppStorage("darkCardActiveColorHex") private var darkCardActiveColorHex: String = "2A3A4E"
     @FocusState private var focusedEntryID: String?
     private let referenceCardWidth: CGFloat = ReferenceWindowConstants.cardWidth
 
@@ -300,6 +302,16 @@ struct ReferenceWindowView: View {
 
     private var referenceLineSpacing: CGFloat {
         CGFloat(mainCardLineSpacingValue)
+    }
+
+    private var renderSettings: ReferenceCardRenderSettings {
+        ReferenceCardRenderSettings(
+            fontSize: referenceFontSize,
+            appearance: appearance,
+            lineSpacing: referenceLineSpacing,
+            cardActiveColorHex: cardActiveColorHex,
+            darkCardActiveColorHex: darkCardActiveColorHex
+        )
     }
 
     private struct ResolvedEntry: Identifiable {
@@ -340,10 +352,8 @@ struct ReferenceWindowView: View {
                                 cardID: resolved.entry.cardID,
                                 entryID: resolved.entry.id,
                                 card: resolved.card,
-                                appearance: appearance,
+                                renderSettings: renderSettings,
                                 cardWidth: referenceCardWidth,
-                                fontSize: referenceFontSize,
-                                lineSpacing: referenceLineSpacing,
                                 focusedEntryID: $focusedEntryID,
                                 onContentChange: { scenarioID, cardID, oldValue, newValue in
                                     referenceCardStore.handleContentChange(
@@ -385,12 +395,8 @@ private struct ReferenceCardEditorRow: View {
     let cardID: UUID
     let entryID: String
     @ObservedObject var card: SceneCard
-    let appearance: String
+    let renderSettings: ReferenceCardRenderSettings
     let cardWidth: CGFloat
-    let fontSize: CGFloat
-    let lineSpacing: CGFloat
-    @AppStorage("cardActiveColorHex") private var cardActiveColorHex: String = "BFD7FF"
-    @AppStorage("darkCardActiveColorHex") private var darkCardActiveColorHex: String = "2A3A4E"
     @FocusState.Binding var focusedEntryID: String?
     let onContentChange: (UUID, UUID, String, String) -> Void
     let onRemove: () -> Void
@@ -401,6 +407,11 @@ private struct ReferenceCardEditorRow: View {
 
     private let outerPadding: CGFloat = 10
     private let editorVerticalPadding: CGFloat = 16
+    private var appearance: String { renderSettings.appearance }
+    private var fontSize: CGFloat { renderSettings.fontSize }
+    private var lineSpacing: CGFloat { renderSettings.lineSpacing }
+    private var cardActiveColorHex: String { renderSettings.cardActiveColorHex }
+    private var darkCardActiveColorHex: String { renderSettings.darkCardActiveColorHex }
 
     private var isReferenceWindowFocused: Bool {
         NSApp.keyWindow?.identifier?.rawValue == ReferenceWindowConstants.windowID

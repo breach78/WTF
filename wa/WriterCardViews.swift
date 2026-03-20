@@ -591,6 +591,7 @@ struct CardItem: View {
     }
 
     @ObservedObject var card: SceneCard
+    let renderSettings: MainCardRenderSettings
     let isActive, isSelected, isMultiSelected, isArchived, isAncestor, isDescendant, isEditing: Bool
     let preferredTextMeasureWidth: CGFloat
     let forceNamedSnapshotNoteStyle: Bool
@@ -640,16 +641,15 @@ struct CardItem: View {
     @State private var isTrailingInsertZoneDropTargeted: Bool = false
     @State private var isBodyDropTargeted: Bool = false
     @FocusState private var editorFocus: Bool
-    @AppStorage("fontSize") private var fontSize: Double = 14.0
-    @AppStorage("appearance") private var appearance: String = "dark"
-    @AppStorage("cardBaseColorHex") private var cardBaseColorHex: String = "FFFFFF"
-    @AppStorage("cardActiveColorHex") private var cardActiveColorHex: String = "BFD7FF"
-    @AppStorage("cardRelatedColorHex") private var cardRelatedColorHex: String = "DDE9FF"
-    @AppStorage("darkCardBaseColorHex") private var darkCardBaseColorHex: String = "1A2029"
-    @AppStorage("darkCardActiveColorHex") private var darkCardActiveColorHex: String = "2A3A4E"
-    @AppStorage("darkCardRelatedColorHex") private var darkCardRelatedColorHex: String = "242F3F"
-    @AppStorage("mainCardLineSpacingValueV2") private var mainCardLineSpacingValue: Double = 5.0
-    private var mainCardLineSpacing: CGFloat { CGFloat(mainCardLineSpacingValue) }
+    private var fontSize: CGFloat { renderSettings.fontSize }
+    private var appearance: String { renderSettings.appearance }
+    private var cardBaseColorHex: String { renderSettings.cardBaseColorHex }
+    private var cardActiveColorHex: String { renderSettings.cardActiveColorHex }
+    private var cardRelatedColorHex: String { renderSettings.cardRelatedColorHex }
+    private var darkCardBaseColorHex: String { renderSettings.darkCardBaseColorHex }
+    private var darkCardActiveColorHex: String { renderSettings.darkCardActiveColorHex }
+    private var darkCardRelatedColorHex: String { renderSettings.darkCardRelatedColorHex }
+    private var mainCardLineSpacing: CGFloat { renderSettings.lineSpacing }
     private let mainCardContentPadding: CGFloat = MainEditorLayoutMetrics.mainCardContentPadding
     private let mainEditorVerticalPadding: CGFloat = 24
     private let mainEditorLineFragmentPadding: CGFloat = MainEditorLayoutMetrics.mainEditorLineFragmentPadding

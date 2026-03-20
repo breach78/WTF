@@ -1,0 +1,70 @@
+{
+  "source": {
+    "lines": 3834,
+    "bytes": 151177,
+    "hash": "c1a3bea5a3b46a437e141472d4dbc78baecf7c550f75b731c9648f40417f6189",
+    "scenes": 116
+  },
+  "counts": {
+    "acts": 4,
+    "branches": 16,
+    "outlines": 12,
+    "synopses": 8,
+    "sequences": 11,
+    "treatments": 21,
+    "rawScenes": 116,
+    "expectedVisibleDescendants": 188,
+    "actualVisibleDescendants": 188,
+    "archivedDescendantsUnderAI": 10
+  },
+  "continuity": {
+    "acts": true,
+    "outlines": true,
+    "synopses": true,
+    "sequences": true,
+    "treatments": true,
+    "rawScenes": true
+  },
+  "appTree": {
+    "aiVisibleChildren": [
+      "9230DEF1-BCB7-45A7-B6BD-AF3C0015EE43",
+      "AA128D80-52C1-418F-B99F-6440847BD6D4",
+      "A354876C-F368-4DCC-B5B3-A201EAFA127D",
+      "4AD9A38C-630A-47F8-BFF8-345B1B04A892"
+    ],
+    "expectedActIDs": [
+      "9230DEF1-BCB7-45A7-B6BD-AF3C0015EE43",
+      "AA128D80-52C1-418F-B99F-6440847BD6D4",
+      "A354876C-F368-4DCC-B5B3-A201EAFA127D",
+      "4AD9A38C-630A-47F8-BFF8-345B1B04A892"
+    ],
+    "branchTitles": [
+      "개요",
+      "시놉시스",
+      "시퀀스",
+      "트리트먼트"
+    ]
+  },
+  "rawIntegrity": {
+    "validated": 116,
+    "mismatches": [],
+    "firstScene": {
+      "number": 1,
+      "id": "207DBBBA-0AA0-4017-BC63-6E2C0ADB338F",
+      "heading": "EXT. 문경 중앙 시장 / 도자전 - 낮",
+      "bytes": 3287,
+      "hash": "33be417204451c397051bd0f7bedf66e75e92ab60d138e2bb51e604fa7fa1924",
+      "matchesSource": true
+    },
+    "lastScene": {
+      "number": 116,
+      "id": "480BED48-012D-4BDE-A2EA-3926C0338E11",
+      "heading": "EXT. 남대문 앞 - 아침",
+      "bytes": 1733,
+      "hash": "1acac3967039199567651967e86e378b7937932363d44979be2baafb20758903",
+      "matchesSource": true
+    }
+  },
+  "issues": [],
+  "ok": true
+}

@@ -9,16 +9,6 @@ final class WeakTextViewBox {
 
 struct ScenarioWriterView: View {
     @Environment(\.openWindow) var openWindow
-    enum MainSelectionActiveEdge {
-        case start
-        case end
-    }
-
-    struct AICandidateTrackingState {
-        var parentID: UUID? = nil
-        var cardIDs: [UUID] = []
-        var action: AICardAction? = nil
-    }
 
     struct InactivePaneSnapshotState {
         var levelsData: [LevelData] = []
@@ -31,17 +21,6 @@ struct ScenarioWriterView: View {
         let range: NSRange
     }
 
-    struct MainColumnFocusRequest: Equatable {
-        let targetID: UUID
-        let prefersTopAnchor: Bool
-        let keepVisibleOnly: Bool
-        let editingRevealEdge: MainEditingViewportRevealEdge?
-        let cardsCount: Int
-        let firstCardID: UUID?
-        let lastCardID: UUID?
-        let viewportHeightBucket: Int
-    }
-
     struct UpperCardCreationRequest: Identifiable {
         let id = UUID()
         let contextCardID: UUID
@@ -50,6 +29,7 @@ struct ScenarioWriterView: View {
 
     @EnvironmentObject var store: FileStore
     @EnvironmentObject var referenceCardStore: ReferenceCardStore
+    @EnvironmentObject var appWindowState: AppWindowState
     let scenario: Scenario
     let showWorkspaceTopToolbar: Bool
     let splitModeEnabled: Bool
@@ -81,8 +61,12 @@ struct ScenarioWriterView: View {
     @AppStorage("appearance") var appearance: String = "dark"
     @AppStorage("backgroundColorHex") var backgroundColorHex: String = "F4F2EE"
     @AppStorage("darkBackgroundColorHex") var darkBackgroundColorHex: String = "111418"
+    @AppStorage("cardBaseColorHex") var cardBaseColorHex: String = "FFFFFF"
     @AppStorage("cardActiveColorHex") var cardActiveColorHex: String = "BFD7FF"
+    @AppStorage("cardRelatedColorHex") var cardRelatedColorHex: String = "DDE9FF"
+    @AppStorage("darkCardBaseColorHex") var darkCardBaseColorHex: String = "1A2029"
     @AppStorage("darkCardActiveColorHex") var darkCardActiveColorHex: String = "2A3A4E"
+    @AppStorage("darkCardRelatedColorHex") var darkCardRelatedColorHex: String = "242F3F"
     @AppStorage("exportCenteredFontSize") var exportCenteredFontSize: Double = 12.0
     @AppStorage("exportCenteredCharacterBold") var exportCenteredCharacterBold: Bool = true
     @AppStorage("exportCenteredSceneHeadingBold") var exportCenteredSceneHeadingBold: Bool = true
@@ -100,7 +84,6 @@ struct ScenarioWriterView: View {
     @AppStorage("mainCanvasHorizontalScrollMode") var mainCanvasHorizontalScrollModeRawValue: Int = MainCanvasHorizontalScrollMode.twoStep.rawValue
     @AppStorage("mainWorkspaceZoomScale") var mainWorkspaceZoomScale: Double = 1.0
     @AppStorage("geminiModelID") var geminiModelID: String = "gemini-3.1-pro-preview"
-    @AppStorage("focusModeWindowBackgroundActive") var focusModeWindowBackgroundActive: Bool = false
     @AppStorage("autoBackupEnabledOnQuit") var autoBackupEnabledOnQuit: Bool = true
     @AppStorage("autoBackupDirectoryPath") var autoBackupDirectoryPath: String = ""
     @AppStorage("lastEditedScenarioID") var lastEditedScenarioID: String = ""
@@ -162,6 +145,7 @@ struct ScenarioWriterView: View {
     @State var editingStartState: ScenarioState? = nil
     @State var pendingNewCardPrevState: ScenarioState? = nil
     @State var showFocusMode: Bool = false
+    @State var focusModePresentationPhase: FocusModePresentationPhase = .inactive
     @State var showFocusModeSearchPopup: Bool = false
     @State var focusModeSearchText: String = ""
     @State var focusModeSearchMatches: [FocusModeSearchMatch] = []
@@ -171,12 +155,12 @@ struct ScenarioWriterView: View {
     @State var focusModeSearchHighlightTextViewBox = WeakTextViewBox()
     @State var focusModeNextCardScrollAnchor: UnitPoint? = nil
     @State var focusModeNextCardScrollAnimated: Bool = true
-    @State var focusModeEntryMainCanvasHorizontalOffset: CGFloat? = nil
+    @State var focusModeEntryWorkspaceSnapshot: FocusModeWorkspaceSnapshot? = nil
     @State var suppressFocusModeScrollOnce: Bool = false
     @State var focusPendingProgrammaticBeginEditCardID: UUID? = nil
     @State var focusModeCaretRequestID: Int = 0
     @State var focusModeCaretRequestStartedAt: Date = .distantPast
-    @State var focusModeEntryScrollTick: Int = 0
+    @State var focusModeExitTeardownUntil: Date = .distantPast
     @State var focusModeBoundaryTransitionPendingReveal: Bool = false
     @State var focusModePendingFallbackRevealCardID: UUID? = nil
     @State var focusModeFallbackRevealIssuedCardID: UUID? = nil
@@ -261,7 +245,6 @@ struct ScenarioWriterView: View {
     @State var editingSessionHadTextMutation: Bool = false
     @State var didRestoreStartupFocusState: Bool = false
     @State var didRestoreStartupViewportState: Bool = false
-    @State var focusModeEntryMainCanvasVisibleLevel: Int? = nil
     @FocusState var isNamedSnapshotNoteEditorFocused: Bool
     let focusTypingIdleInterval: TimeInterval = 1.5
     let focusOffsetNormalizationMinInterval: TimeInterval = 0.08
@@ -312,6 +295,25 @@ struct ScenarioWriterView: View {
             return best == .darkAqua
         }
         return true
+    }
+
+    var focusModeWindowBackgroundActive: Bool {
+        get { appWindowState.focusModeWindowBackgroundActive }
+        nonmutating set { appWindowState.focusModeWindowBackgroundActive = newValue }
+    }
+
+    var mainCardRenderSettings: MainCardRenderSettings {
+        MainCardRenderSettings(
+            fontSize: CGFloat(fontSize),
+            appearance: appearance,
+            lineSpacing: CGFloat(mainCardLineSpacingValue),
+            cardBaseColorHex: cardBaseColorHex,
+            cardActiveColorHex: cardActiveColorHex,
+            cardRelatedColorHex: cardRelatedColorHex,
+            darkCardBaseColorHex: darkCardBaseColorHex,
+            darkCardActiveColorHex: darkCardActiveColorHex,
+            darkCardRelatedColorHex: darkCardRelatedColorHex
+        )
     }
 
     var acceptsKeyboardInput: Bool {
@@ -874,62 +876,6 @@ struct ScenarioWriterView: View {
     }
 
     @FocusState var isMainViewFocused: Bool
-
-    struct LevelData {
-        let cards: [SceneCard]
-        let parent: SceneCard?
-    }
-
-    struct DisplayedMainLevelsCacheKey: Equatable {
-        let cardsVersion: Int
-        let activeCategory: String?
-        let isActiveCardRoot: Bool
-    }
-
-    struct MainColumnLayoutFrame: Equatable {
-        let minY: CGFloat
-        let maxY: CGFloat
-
-        var height: CGFloat { maxY - minY }
-    }
-
-    enum MainCardHeightMode: Int, Hashable {
-        case display
-        case editingFallback
-    }
-
-    struct MainCardHeightCacheKey: Hashable {
-        let cardID: UUID
-        let contentFingerprint: UInt64
-        let textLength: Int
-        let widthBucket: Int
-        let fontSizeBucket: Int
-        let lineSpacingBucket: Int
-        let mode: MainCardHeightMode
-    }
-
-    struct MainCardHeightRecord {
-        let key: MainCardHeightCacheKey
-        let height: CGFloat
-    }
-
-    struct MainColumnLayoutCacheKey: Hashable {
-        let recordsVersion: Int
-        let contentVersion: Int
-        let viewportHeightBucket: Int
-        let fontSizeBucket: Int
-        let lineSpacingBucket: Int
-        let editingCardID: UUID?
-        let editingHeightBucket: Int
-        let cardIDs: [UUID]
-    }
-
-    struct MainColumnLayoutSnapshot {
-        let key: MainColumnLayoutCacheKey
-        let framesByCardID: [UUID: MainColumnLayoutFrame]
-        let orderedCardIDs: [UUID]
-        let contentBottomY: CGFloat
-    }
 
     struct MainCanvasRenderState: Equatable {
         let size: CGSize
@@ -1582,10 +1528,14 @@ struct ScenarioWriterView: View {
         focusVerticalScrollAuthoritySequence = 0
         focusVerticalScrollAuthority = nil
         focusModeCaretRequestStartedAt = .distantPast
+        if isOn {
+            focusModeExitTeardownUntil = .distantPast
+        }
         focusModeWindowBackgroundActive = isOn
         FocusMonitorRecorder.shared.record("focus.toggle", reason: "showFocusMode-onChange") {
             [
                 "entering": isOn ? "true" : "false",
+                "presentationPhase": focusModePresentationPhase.rawValue,
                 "activeCardID": activeCardID?.uuidString ?? "nil",
                 "editingCardID": editingCardID?.uuidString ?? "nil",
                 "focusModeEditorCardID": focusModeEditorCardID?.uuidString ?? "nil"
@@ -1603,20 +1553,21 @@ struct ScenarioWriterView: View {
             startFocusModeCaretMonitor()
             guard let targetID = focusModeEditorCardID ?? editingCardID ?? activeCardID else { return }
             DispatchQueue.main.async {
-                focusModeEntryScrollTick += 1
-            }
-            DispatchQueue.main.async {
                 guard showFocusMode else { return }
-                let currentTargetID = focusModeEditorCardID ?? editingCardID ?? activeCardID
-                guard currentTargetID == targetID else { return }
+                // Entry target preparation is already owned by enterFocusMode(with:).
+                // Avoid a second beginFocusModeEditing(...) pass here.
                 if focusModeEditorCardID == targetID {
                     return
                 }
-                if let card = findCard(by: targetID) {
-                    beginFocusModeEditing(card, cursorToEnd: false)
-                } else {
+                let currentTargetID = editingCardID ?? activeCardID
+                guard currentTargetID == targetID else { return }
+                if editingCardID == targetID {
                     focusModeEditorCardID = targetID
                 }
+            }
+            DispatchQueue.main.async {
+                guard showFocusMode else { return }
+                completeFocusModePresentationTransitionIfNeeded(entering: true)
             }
         } else {
             finalizeFocusTypingCoalescing(reason: "focus-exit")
@@ -1627,11 +1578,18 @@ struct ScenarioWriterView: View {
             stopFocusModeCaretMonitor()
             startMainNavKeyMonitor()
             startMainCaretMonitor()
-            requestMainCanvasRestoreForFocusExit()
-            requestMainCanvasViewportRestoreForFocusExit()
+            let entryWorkspaceSnapshot = focusModeEntryWorkspaceSnapshot
+            if canReuseRetainedMainCanvasShellForFocusExit(using: entryWorkspaceSnapshot) {
+                finalizeRetainedMainCanvasShellForFocusExitReuse()
+            } else {
+                requestMainCanvasRestoreForFocusExit(using: entryWorkspaceSnapshot)
+                requestMainCanvasViewportRestoreForFocusExit(using: entryWorkspaceSnapshot)
+            }
+            focusModeEntryWorkspaceSnapshot = nil
             if let activeID = activeCardID {
                 persistLastFocusSnapshot(cardID: activeID, isEditing: false, inFocusMode: false)
             }
+            scheduleFocusModePresentationPhaseResetAfterExit()
         }
     }
 
@@ -1903,16 +1861,22 @@ struct ScenarioWriterView: View {
     func primaryWorkspaceColumn(size: CGSize, availableWidth: CGFloat) -> some View {
         VStack(spacing: 0) {
             ZStack {
+                mainCanvasWithOptionalZoom(size: size, availableWidth: availableWidth)
+                    .opacity(showFocusMode ? 0 : 1)
+                    .allowsHitTesting(!showFocusMode)
+                    .accessibilityHidden(showFocusMode)
+                    .zIndex(0)
+
+                if showWorkspaceTopToolbar && !showFocusMode {
+                    workspaceTopToolbarHost
+                        .zIndex(5)
+                }
+
                 if showFocusMode {
                     focusModeCanvas(size: size)
                         .ignoresSafeArea(.container, edges: .top)
                         .transition(.opacity)
                         .zIndex(10)
-                } else {
-                    mainCanvasWithOptionalZoom(size: size, availableWidth: availableWidth)
-                    if showWorkspaceTopToolbar {
-                        workspaceTopToolbarHost
-                    }
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -3094,10 +3058,7 @@ struct ScenarioWriterView: View {
     private func restoreStartupMainCanvasHorizontalViewportIfNeeded() -> Bool {
         let persistenceKey = mainCanvasHorizontalViewportPersistenceKey()
         guard let storedOffsetX = restoredMainCanvasHorizontalViewportOffsets()[persistenceKey] else { return false }
-        restoreMainCanvasHorizontalViewport(
-            to: storedOffsetX,
-            clearFocusEntrySnapshotAfterRestore: false
-        )
+        restoreMainCanvasHorizontalViewport(to: storedOffsetX)
         return true
     }
 
@@ -3228,15 +3189,7 @@ struct ScenarioWriterView: View {
 
         var horizontalOffsets = restoredMainCanvasHorizontalViewportOffsets()
         let persistenceKey = mainCanvasHorizontalViewportPersistenceKey()
-        let resolvedHorizontalOffset: CGFloat? = {
-            if let liveOffset = mainCanvasScrollCoordinator.resolvedMainCanvasHorizontalOffset() {
-                return liveOffset
-            }
-            if showFocusMode {
-                return focusModeEntryMainCanvasHorizontalOffset
-            }
-            return nil
-        }()
+        let resolvedHorizontalOffset = mainCanvasScrollCoordinator.resolvedMainCanvasHorizontalOffset()
 
         if let resolvedHorizontalOffset {
             horizontalOffsets[persistenceKey] = resolvedHorizontalOffset
