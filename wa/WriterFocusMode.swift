@@ -1221,6 +1221,48 @@ extension ScenarioWriterView {
         return changed
     }
 
+    private func shouldApplyFocusModeTextViewGeometryForCaretEnsure(_ textView: NSTextView) -> Bool {
+        guard showFocusMode else { return false }
+
+        let editingID = focusModeEditorCardID ?? editingCardID ?? activeCardID
+        let responderID = ObjectIdentifier(textView)
+        let targetSpacing = CGFloat(focusModeLineSpacingValue)
+        let targetFontSize = CGFloat(fontSize * 1.2)
+
+        if focusLineSpacingAppliedCardID != editingID { return true }
+        if abs(focusLineSpacingAppliedValue - targetSpacing) > 0.01 { return true }
+        if abs(focusLineSpacingAppliedFontSize - targetFontSize) > 0.01 { return true }
+        if focusLineSpacingAppliedResponderID != responderID { return true }
+        if textView.textContainerInset != .zero { return true }
+
+        if let scrollView = textView.enclosingScrollView,
+           isFocusModeInternalTextEditorScrollView(scrollView) {
+            let insets = scrollView.contentInsets
+            if abs(insets.top) > 0.01 || abs(insets.left) > 0.01 || abs(insets.bottom) > 0.01 || abs(insets.right) > 0.01 {
+                return true
+            }
+            if scrollView.hasVerticalScroller || scrollView.hasHorizontalScroller || !scrollView.autohidesScrollers {
+                return true
+            }
+            if !scrollView.contentView.postsBoundsChangedNotifications {
+                return true
+            }
+        }
+
+        guard let textContainer = textView.textContainer else { return true }
+        if textContainer.lineBreakMode != .byWordWrapping { return true }
+        if textContainer.maximumNumberOfLines != 0 { return true }
+        if abs(textContainer.lineFragmentPadding - FocusModeLayoutMetrics.focusModeLineFragmentPadding) > 0.01 {
+            return true
+        }
+        if textContainer.widthTracksTextView || textContainer.heightTracksTextView { return true }
+        if abs(textContainer.containerSize.width - focusModeTargetContainerWidth(for: textView)) > 0.5 {
+            return true
+        }
+
+        return false
+    }
+
     private func applyFocusModeTextViewSizingIfNeeded(_ textView: NSTextView) -> Bool {
         var changed = false
         if textView.isHorizontallyResizable {
@@ -1861,7 +1903,10 @@ extension ScenarioWriterView {
     func handleFocusModeSelectionNotification(_ notification: Notification) {
         guard !isFocusModeExitTeardownActive else { return }
         guard let textView = focusModeSelectionTextView(from: notification) else { return }
+        guard !focusSelectionProcessingPending else { return }
+        focusSelectionProcessingPending = true
         DispatchQueue.main.async {
+            focusSelectionProcessingPending = false
             processFocusModeSelectionNotification(textView: textView)
         }
     }
@@ -2106,12 +2151,6 @@ extension ScenarioWriterView {
         guard let trackedCardID else { return }
         let caretLocation = resolvedFocusCaretPersistenceLocation(selected: selected, textLength: textLength)
         mainCaretLocationByCardID[trackedCardID] = caretLocation
-        persistLastFocusSnapshot(
-            cardID: trackedCardID,
-            caretLocation: caretLocation,
-            isEditing: true,
-            inFocusMode: true
-        )
     }
 
     private func resolvedFocusCaretPersistenceLocation(selected: NSRange, textLength: Int) -> Int {
@@ -2124,17 +2163,15 @@ extension ScenarioWriterView {
     }
 
     func scheduleFocusCaretEnsureForSelectionChange() {
+        if !focusModeSelectionNeedsVerticalEnsure() {
+            return
+        }
+        if focusCaretEnsureWorkItem != nil {
+            return
+        }
         let now = Date()
         let elapsed = now.timeIntervalSince(focusCaretEnsureLastScheduledAt)
         let recentlyMutatedText = now.timeIntervalSince(focusTypingLastEditAt) < 0.08
-        let shouldRunImmediate = shouldForceImmediateFocusCaretEnsureForSelectionChange()
-        if shouldRunImmediate {
-            focusCaretEnsureWorkItem?.cancel()
-            focusCaretEnsureWorkItem = nil
-            focusCaretEnsureLastScheduledAt = now
-            executeFocusModeCaretEnsureWork(force: false)
-            return
-        }
         let targetMinInterval = recentlyMutatedText
             ? max(focusCaretSelectionEnsureMinInterval, 0.045)
             : focusCaretSelectionEnsureMinInterval
@@ -2143,10 +2180,10 @@ extension ScenarioWriterView {
         requestFocusModeCaretEnsure(typewriter: false, delay: delay, reason: "selection-change")
     }
 
-    private func shouldForceImmediateFocusCaretEnsureForSelectionChange() -> Bool {
+    private func focusModeSelectionNeedsVerticalEnsure() -> Bool {
         guard let context = resolveFocusModeCaretEnsureContext() else { return false }
         let selection = context.textView.selectedRange()
-        guard selection.length == 0 else { return false }
+        guard selection.length == 0 else { return true }
 
         let selectionRects = resolveFocusModeSelectionRects(
             textView: context.textView,
@@ -2172,6 +2209,7 @@ extension ScenarioWriterView {
     func stopFocusModeCaretMonitor() {
         focusCaretEnsureWorkItem?.cancel()
         focusCaretEnsureWorkItem = nil
+        focusSelectionProcessingPending = false
         focusCaretPendingTypewriter = false
         focusTypewriterDeferredUntilCompositionEnd = false
         focusModeCaretRequestStartedAt = .distantPast
@@ -2303,7 +2341,9 @@ extension ScenarioWriterView {
         )
         let runTypewriter = resolvedFocusModeCaretEnsureTypewriterMode(textView: textView)
         if !textView.hasMarkedText() {
-            _ = applyFocusModeTextViewGeometryIfNeeded(textView, reason: "caret-ensure")
+            if shouldApplyFocusModeTextViewGeometryForCaretEnsure(textView) {
+                _ = applyFocusModeTextViewGeometryIfNeeded(textView, reason: "caret-ensure")
+            }
             normalizeSingleTextEditorOffsetIfNeeded(textView, reason: "caret-ensure")
         }
         ensureFocusModeCaretVisible(typewriter: runTypewriter, authority: authority)
@@ -3390,6 +3430,9 @@ extension ScenarioWriterView {
     }
 
     func toggleFocusMode() {
+        if !showFocusMode && isIndexBoardActive {
+            return
+        }
         let entering = !showFocusMode
         beginFocusModePresentationTransition(entering: entering)
         if entering {

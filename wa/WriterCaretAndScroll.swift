@@ -179,12 +179,6 @@ extension ScenarioWriterView {
 
         let caretLocation = resolvedMainCaretPersistenceLocation(using: context)
         mainCaretLocationByCardID[context.editingID] = caretLocation
-        persistLastFocusSnapshot(
-            cardID: context.editingID,
-            caretLocation: caretLocation,
-            isEditing: true,
-            inFocusMode: false
-        )
     }
 
     private func resolvedMainCaretPersistenceLocation(using context: MainSelectionChangeContext) -> Int {

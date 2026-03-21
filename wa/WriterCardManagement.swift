@@ -11,6 +11,10 @@ extension ScenarioWriterView {
         [0.0, 0.05, 0.18]
     }
 
+    private var mainColumnDescendantFocusCoalescingDelay: TimeInterval {
+        0.10
+    }
+
     private func enqueueMainCanvasRestoreRequest(
         targetID: UUID?,
         visibleLevel: Int? = nil,
@@ -710,6 +714,8 @@ extension ScenarioWriterView {
     func column(for cards: [SceneCard], level: Int, parent: SceneCard?, screenHeight: CGFloat) -> some View {
         let childListSignature = scenario.childListSignature(parentID: parent?.id)
         let viewportKey = mainColumnViewportStorageKey(level: level)
+        let containsActiveCard = cards.contains { $0.id == activeCardID }
+        let containsActiveAncestor = cards.contains { activeAncestorIDs.contains($0.id) }
         let observedCardIDs = mainColumnGeometryObservationCardIDs(
             in: cards,
             viewportKey: viewportKey,
@@ -744,7 +750,13 @@ extension ScenarioWriterView {
 
                             ForEach(Array(cards.enumerated()), id: \.element.id) { index, card in
                                 VStack(spacing: 0) {
-                                    cardRow(card, proxy: proxy)
+                                    cardRow(
+                                        card,
+                                        proxy: proxy,
+                                        level: level,
+                                        parent: parent,
+                                        columnCards: cards
+                                    )
                                         .background(
                                             Group {
                                                 if observedCardIDs.contains(card.id) {
@@ -890,7 +902,11 @@ extension ScenarioWriterView {
                     )
                 }
             }
-            .contentShape(Rectangle()).onTapGesture { finishEditing(); isMainViewFocused = true }
+            .contentShape(Rectangle())
+            .contextMenu {
+                indexBoardColumnContextMenu(level: level, parent: parent, cards: cards)
+            }
+            .onTapGesture { finishEditing(); isMainViewFocused = true }
         }
         .frame(width: columnWidth)
     }
@@ -1263,7 +1279,11 @@ extension ScenarioWriterView {
 
         let containsActiveCard = cards.contains { $0.id == newActiveID }
         let containsActiveAncestor = cards.contains { activeAncestorIDs.contains($0.id) }
-        guard containsActiveCard || containsActiveAncestor else { return }
+        let containsPreferredDescendantTarget =
+            !containsActiveCard &&
+            !containsActiveAncestor &&
+            resolvedMainColumnFocusTargetID(in: cards) != nil
+        guard containsActiveCard || containsActiveAncestor || containsPreferredDescendantTarget else { return }
 
         let activeCardNeedsTopReveal = containsActiveCard && {
             guard let newActiveID, let targetCard = findCard(by: newActiveID) else { return false }
@@ -1275,10 +1295,15 @@ extension ScenarioWriterView {
             pendingMainEditingViewportKeepVisibleCardID = nil
             pendingMainEditingViewportRevealEdge = nil
         }
-        let shouldAnimate = animatedOverride ?? (
-            focusNavigationAnimationEnabled &&
-            !shouldSuppressMainArrowRepeatAnimation()
-        )
+        let focusDelayOverride = containsPreferredDescendantTarget
+            ? mainColumnDescendantFocusCoalescingDelay
+            : nil
+        let shouldAnimate = containsPreferredDescendantTarget
+            ? false
+            : (animatedOverride ?? (
+                focusNavigationAnimationEnabled &&
+                !shouldSuppressMainArrowRepeatAnimation()
+            ))
         let authority = beginMainVerticalScrollAuthority(
             viewportKey: viewportKey,
             kind: editDrivenKeepVisible ? .editingTransition : .columnNavigation,
@@ -1288,7 +1313,7 @@ extension ScenarioWriterView {
         bounceDebugLog(
             "\(trigger) level=\(level) viewportKey=\(viewportKey) " +
             "newID=\(newActiveID?.uuidString ?? "nil") activeColumn=\(containsActiveCard) " +
-            "ancestorColumn=\(containsActiveAncestor) topReveal=\(activeCardNeedsTopReveal) " +
+            "ancestorColumn=\(containsActiveAncestor) descendantColumn=\(containsPreferredDescendantTarget) topReveal=\(activeCardNeedsTopReveal) " +
             "editKeepVisible=\(editDrivenKeepVisible) forceClick=\(forceClickAlignment) animate=\(shouldAnimate) " +
             "offset=\(debugCGFloat(mainColumnViewportOffsetByKey[viewportKey] ?? 0)) " +
             "visible=\(debugMainColumnVisibleCardSummary(viewportKey: viewportKey, cards: cards, viewportHeight: viewportHeight, offsetY: mainColumnViewportOffsetByKey[viewportKey] ?? 0))"
@@ -1305,6 +1330,7 @@ extension ScenarioWriterView {
             editingRevealEdge: editingRevealEdge,
             forceAlignment: forceClickAlignment,
             animated: shouldAnimate,
+            focusDelayOverride: focusDelayOverride,
             intentID: intentID,
             authority: authority
         )
@@ -1596,7 +1622,10 @@ extension ScenarioWriterView {
         if cards.contains(where: { $0.id == activeID }) {
             return true
         }
-        return cards.contains(where: { activeAncestorIDs.contains($0.id) })
+        if cards.contains(where: { activeAncestorIDs.contains($0.id) }) {
+            return true
+        }
+        return resolvedMainColumnFocusTargetID(in: cards) != nil
     }
 
     func resolvedMainColumnLayoutSnapshot(
@@ -1810,13 +1839,34 @@ extension ScenarioWriterView {
         }
         if let activeID = activeCardID,
            let activeCard = findCard(by: activeID) {
-            let directChildren = cards.filter { $0.parent?.id == activeID }
-            if let rememberedID = activeCard.lastSelectedChildID,
-               directChildren.contains(where: { $0.id == rememberedID }) {
-                return rememberedID
-            }
-            return directChildren.first?.id
+            return resolvedMainColumnPreferredDescendantTargetID(in: cards, startingFrom: activeCard)
         }
+        return nil
+    }
+
+    private func resolvedMainColumnPreferredDescendantTargetID(
+        in cards: [SceneCard],
+        startingFrom root: SceneCard
+    ) -> UUID? {
+        let visibleCardIDs = Set(cards.map(\.id))
+        var current: SceneCard? = root
+        var visited: Set<UUID> = []
+
+        while let node = current, visited.insert(node.id).inserted {
+            let children = node.children
+            guard !children.isEmpty else { return nil }
+
+            let preferredChild =
+                children.first(where: { $0.id == node.lastSelectedChildID })
+                ?? children.first
+
+            guard let preferredChild else { return nil }
+            if visibleCardIDs.contains(preferredChild.id) {
+                return preferredChild.id
+            }
+            current = preferredChild
+        }
+
         return nil
     }
 
@@ -2288,6 +2338,7 @@ extension ScenarioWriterView {
         editingRevealEdge: MainEditingViewportRevealEdge?,
         forceAlignment: Bool,
         animated: Bool,
+        focusDelayOverride: TimeInterval? = nil,
         intentID: Int? = nil,
         authority: MainVerticalScrollAuthority? = nil
     ) {
@@ -2295,9 +2346,10 @@ extension ScenarioWriterView {
         bounceDebugLog(
             "scheduleMainColumnActiveCardFocus level=\(level) viewportKey=\(viewportKey) " +
             "expected=\(debugCardIDString(expectedActiveID)) parent=\(debugCardToken(parent)) " +
-            "cards=\(cards.count) force=\(forceAlignment) animated=\(animated) \(debugFocusStateSummary())"
+            "cards=\(cards.count) force=\(forceAlignment) animated=\(animated) " +
+            "delay=\(debugCGFloat(focusDelayOverride ?? (animated ? 0.01 : 0.0))) \(debugFocusStateSummary())"
         )
-        let focusDelay: TimeInterval = animated ? 0.01 : 0.0
+        let focusDelay: TimeInterval = focusDelayOverride ?? (animated ? 0.01 : 0.0)
         let workItem = DispatchWorkItem {
             defer { mainColumnPendingFocusWorkItemByKey[viewportKey] = nil }
             bounceDebugLog(
@@ -2480,7 +2532,13 @@ extension ScenarioWriterView {
     }
 
     @ViewBuilder
-    func cardRow(_ card: SceneCard, proxy: ScrollViewProxy) -> some View {
+    func cardRow(
+        _ card: SceneCard,
+        proxy: ScrollViewProxy,
+        level: Int,
+        parent: SceneCard?,
+        columnCards: [SceneCard]
+    ) -> some View {
         let isAICandidate = aiCandidateState.cardIDs.contains(card.id) || card.isAICandidate
         let isPlotLineCard = card.category == ScenarioCardCategory.plot
         let canCreateUpperCard = canCreateUpperCardFromSelection(contextCard: card)
@@ -2538,6 +2596,9 @@ extension ScenarioWriterView {
                 handleMainEditorContentChange(cardID: card.id, oldValue: oldValue, newValue: newValue)
             },
             onColorChange: { hex in setCardColor(card, hex: hex) },
+            onOpenIndexBoard: {
+                openIndexBoardForColumn(level: level, parent: parent, cards: columnCards)
+            },
             onReferenceCard: { addCardToReferenceWindow(card) },
             onCreateUpperCardFromSelection: canCreateUpperCard ? {
                 createUpperCardFromSelection(contextCard: card)
@@ -4985,6 +5046,10 @@ extension ScenarioWriterView {
     // MARK: - Delete Selection & Card Tap
 
     func handleTimelineCardSelect(_ card: SceneCard) {
+        if isIndexBoardActive {
+            handleIndexBoardTimelineNavigation(card, beginEditing: false)
+            return
+        }
         if linkedCardsFilterEnabled {
             beginTimelineLinkedCardEditing(card)
             return
@@ -4993,6 +5058,10 @@ extension ScenarioWriterView {
     }
 
     func handleTimelineCardDoubleClick(_ card: SceneCard) {
+        if isIndexBoardActive {
+            handleIndexBoardTimelineNavigation(card, beginEditing: true)
+            return
+        }
         if linkedCardsFilterEnabled {
             beginTimelineLinkedCardEditing(card)
             return

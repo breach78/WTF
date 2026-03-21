@@ -811,6 +811,7 @@ final class FileStore: ObservableObject {
     private let currentSchemaVersion = 3
     private let sharedCraftRootCardID = UUID(uuidString: "F2EE98E5-93B4-4F58-85A3-3D0C89B1C3E1")!
     @Published var scenarios: [Scenario] = []
+    @Published private(set) var indexBoardSummaryRecordsByScenarioID: [UUID: [UUID: IndexBoardCardSummaryRecord]] = [:]
     let folderURL: URL
 
     private let fileManager = FileManager.default
@@ -818,6 +819,7 @@ final class FileStore: ObservableObject {
     private let cardsFile = "cards_index.json"
     private let historyFile = "history.json"
     private let linkedCardsFile = "linked_cards.json"
+    private let cardSummariesFile = "card_summaries.json"
     private let aiThreadsFile = "ai_threads.json"
     private let aiEmbeddingIndexFile = "ai_embedding_index.json"
     private let aiVectorIndexFile = "ai_vector_index.sqlite"
@@ -831,6 +833,7 @@ final class FileStore: ObservableObject {
         let cardRecordsData: Data
         let historyRecordsData: Data
         let linkedCardsData: Data
+        let summaryRecordsData: Data
         let cardContentsByID: [UUID: String]
         let validCardIDs: Set<UUID>
     }
@@ -875,6 +878,7 @@ final class FileStore: ObservableObject {
     private nonisolated(unsafe) var lastSavedHistoryData: [UUID: Data] = [:]
     private nonisolated(unsafe) var lastSavedCardContent: [UUID: [UUID: String]] = [:]
     private nonisolated(unsafe) var lastSavedLinkedCardsData: [UUID: Data] = [:]
+    private nonisolated(unsafe) var lastSavedCardSummariesData: [UUID: Data] = [:]
     private nonisolated(unsafe) var lastSavedAIThreadsData: [UUID: Data] = [:]
     private nonisolated(unsafe) var lastSavedAIEmbeddingIndexData: [UUID: Data] = [:]
     private var scenarioPayloadCacheByID: [UUID: ScenarioPayloadCacheEntry] = [:]
@@ -893,6 +897,7 @@ final class FileStore: ObservableObject {
         let cardRecords: [CardRecord]
         let historyRecords: [HistorySnapshotRecord]
         let linkedCardRecords: [LinkedCardRecord]
+        let summaryRecords: [IndexBoardCardSummaryRecord]
         let cardContents: [UUID: String]
     }
 
@@ -1228,6 +1233,7 @@ final class FileStore: ObservableObject {
                     let scenarioCardsURL = scenarioFolder.appendingPathComponent(self.cardsFile)
                     let scenarioHistoryURL = scenarioFolder.appendingPathComponent(self.historyFile)
                     let scenarioLinkedCardsURL = scenarioFolder.appendingPathComponent(self.linkedCardsFile)
+                    let scenarioSummaryURL = scenarioFolder.appendingPathComponent(self.cardSummariesFile)
 
                     group.addTask {
                         let perDecoder = JSONDecoder()
@@ -1236,6 +1242,7 @@ final class FileStore: ObservableObject {
                         guard let cardRecords: [CardRecord] = (try? self.readJSONSync(url: scenarioCardsURL, decoder: perDecoder)) else { return nil }
                         let historyRecords: [HistorySnapshotRecord] = (try? self.readJSONSync(url: scenarioHistoryURL, decoder: perDecoder)) ?? []
                         let linkedCardRecords: [LinkedCardRecord] = (try? self.readJSONSync(url: scenarioLinkedCardsURL, decoder: perDecoder)) ?? []
+                        let summaryRecords: [IndexBoardCardSummaryRecord] = (try? self.readJSONSync(url: scenarioSummaryURL, decoder: perDecoder)) ?? []
 
                         var cardContents: [UUID: String] = Dictionary(minimumCapacity: cardRecords.count)
                         for r in cardRecords {
@@ -1248,6 +1255,7 @@ final class FileStore: ObservableObject {
                             cardRecords: cardRecords,
                             historyRecords: historyRecords,
                             linkedCardRecords: linkedCardRecords,
+                            summaryRecords: summaryRecords,
                             cardContents: cardContents
                         )
                     }
@@ -1314,6 +1322,14 @@ final class FileStore: ObservableObject {
                     }
                     scenario.snapshots = snapshots
                     scenario.setLinkedCardRecords(result.linkedCardRecords)
+
+                    let validCardIDs = Set(cardMap.keys)
+                    let summaryRecords = result.summaryRecords
+                        .compactMap(\.sanitizedForStorage)
+                        .filter { validCardIDs.contains($0.cardID) }
+                    indexBoardSummaryRecordsByScenarioID[s.id] = Dictionary(
+                        uniqueKeysWithValues: summaryRecords.map { ($0.cardID, $0) }
+                    )
                 }
             }
 
@@ -1451,6 +1467,13 @@ final class FileStore: ObservableObject {
                     return cachedPayload.linkedCardsData
                 }()
 
+                let summaryRecordsData = try encoder.encode(
+                    orderedIndexBoardSummaryRecords(
+                        for: scenario.id,
+                        validCardIDs: validCardIDs
+                    )
+                )
+
                 let cardContentsByID: [UUID: String] = {
                     guard let cachedPayload,
                           cachedPayload.cardContentVersion == scenario.cardContentSaveVersion,
@@ -1479,6 +1502,7 @@ final class FileStore: ObservableObject {
                         cardRecordsData: cardRecordsData,
                         historyRecordsData: historyRecordsData,
                         linkedCardsData: linkedCardsData,
+                        summaryRecordsData: summaryRecordsData,
                         cardContentsByID: cardContentsByID,
                         validCardIDs: validCardIDs
                     )
@@ -1515,9 +1539,11 @@ final class FileStore: ObservableObject {
         var cardsIndexWritten: Bool = false
         var historyIndexWritten: Bool = false
         var linkedCardsWritten: Bool = false
+        var summaryRecordsWritten: Bool = false
         var cardRecordsData: Data
         var historyRecordsData: Data
         var linkedCardsData: Data
+        var summaryRecordsData: Data
         var cardContentWriteCount: Int = 0
         var deletedCardFileCount: Int = 0
         var updatedContentCache: [UUID: String]
@@ -1543,6 +1569,7 @@ final class FileStore: ObservableObject {
                 let prevCardsData = lastSavedCardsIndexData[scenarioPayload.scenarioID]
                 let prevHistoryData = lastSavedHistoryData[scenarioPayload.scenarioID]
                 let prevLinkedCardsData = lastSavedLinkedCardsData[scenarioPayload.scenarioID]
+                let prevSummaryData = lastSavedCardSummariesData[scenarioPayload.scenarioID]
                 let prevContentCache = lastSavedCardContent[scenarioPayload.scenarioID] ?? [:]
 
                 group.enter()
@@ -1557,6 +1584,7 @@ final class FileStore: ObservableObject {
                         cardRecordsData: scenarioPayload.cardRecordsData,
                         historyRecordsData: scenarioPayload.historyRecordsData,
                         linkedCardsData: scenarioPayload.linkedCardsData,
+                        summaryRecordsData: scenarioPayload.summaryRecordsData,
                         updatedContentCache: prevContentCache
                     )
 
@@ -1576,6 +1604,12 @@ final class FileStore: ObservableObject {
                     if prevLinkedCardsData != scenarioPayload.linkedCardsData {
                         try? scenarioPayload.linkedCardsData.write(to: linkedCardsURL, options: .atomic)
                         result.linkedCardsWritten = true
+                    }
+
+                    let summaryURL = scenarioFolder.appendingPathComponent(self.cardSummariesFile)
+                    if prevSummaryData != scenarioPayload.summaryRecordsData {
+                        try? scenarioPayload.summaryRecordsData.write(to: summaryURL, options: .atomic)
+                        result.summaryRecordsWritten = true
                     }
 
                     for (cardID, content) in scenarioPayload.cardContentsByID {
@@ -1612,6 +1646,9 @@ final class FileStore: ObservableObject {
                 if r.linkedCardsWritten {
                     lastSavedLinkedCardsData[r.scenarioID] = r.linkedCardsData
                 }
+                if r.summaryRecordsWritten {
+                    lastSavedCardSummariesData[r.scenarioID] = r.summaryRecordsData
+                }
                 lastSavedCardContent[r.scenarioID] = r.updatedContentCache
             }
 
@@ -1619,6 +1656,7 @@ final class FileStore: ObservableObject {
             lastSavedHistoryData = lastSavedHistoryData.filter { activeScenarioIDs.contains($0.key) }
             lastSavedCardContent = lastSavedCardContent.filter { activeScenarioIDs.contains($0.key) }
             lastSavedLinkedCardsData = lastSavedLinkedCardsData.filter { activeScenarioIDs.contains($0.key) }
+            lastSavedCardSummariesData = lastSavedCardSummariesData.filter { activeScenarioIDs.contains($0.key) }
             lastSavedAIThreadsData = lastSavedAIThreadsData.filter { activeScenarioIDs.contains($0.key) }
             lastSavedAIEmbeddingIndexData = lastSavedAIEmbeddingIndexData.filter { activeScenarioIDs.contains($0.key) }
 
@@ -1633,6 +1671,7 @@ final class FileStore: ObservableObject {
             self.lastSavedCardsIndexData = Dictionary(uniqueKeysWithValues: payload.scenarioPayloads.map { ($0.scenarioID, $0.cardRecordsData) })
             self.lastSavedHistoryData = Dictionary(uniqueKeysWithValues: payload.scenarioPayloads.map { ($0.scenarioID, $0.historyRecordsData) })
             self.lastSavedLinkedCardsData = Dictionary(uniqueKeysWithValues: payload.scenarioPayloads.map { ($0.scenarioID, $0.linkedCardsData) })
+            self.lastSavedCardSummariesData = Dictionary(uniqueKeysWithValues: payload.scenarioPayloads.map { ($0.scenarioID, $0.summaryRecordsData) })
             self.lastSavedCardContent = Dictionary(uniqueKeysWithValues: payload.scenarioPayloads.map { ($0.scenarioID, $0.cardContentsByID) })
         }
     }
@@ -1676,8 +1715,10 @@ final class FileStore: ObservableObject {
             scenarioFolderByID.removeValue(forKey: scenario.id)
         }
         lastSavedLinkedCardsData.removeValue(forKey: scenario.id)
+        lastSavedCardSummariesData.removeValue(forKey: scenario.id)
         lastSavedAIThreadsData.removeValue(forKey: scenario.id)
         lastSavedAIEmbeddingIndexData.removeValue(forKey: scenario.id)
+        indexBoardSummaryRecordsByScenarioID.removeValue(forKey: scenario.id)
         saveAll(immediate: true)
     }
 
@@ -1774,6 +1815,19 @@ final class FileStore: ObservableObject {
         scenarioFolder.appendingPathComponent("card_\(id.uuidString).txt")
     }
 
+    private func orderedIndexBoardSummaryRecords(
+        for scenarioID: UUID,
+        validCardIDs: Set<UUID>
+    ) -> [IndexBoardCardSummaryRecord] {
+        let records = indexBoardSummaryRecordsByScenarioID[scenarioID] ?? [:]
+        return records.values
+            .compactMap(\.sanitizedForStorage)
+            .filter { validCardIDs.contains($0.cardID) }
+            .sorted { lhs, rhs in
+                lhs.cardID.uuidString < rhs.cardID.uuidString
+            }
+    }
+
     private func ensureScenarioFolder(for scenarioID: UUID) -> String {
         if let existing = scenarioFolderByID[scenarioID] { return existing }
         let folderName = "\(scenarioFolderPrefix)\(scenarioID.uuidString)"
@@ -1859,6 +1913,14 @@ final class FileStore: ObservableObject {
                 self.lastSavedAIEmbeddingIndexData.removeValue(forKey: scenarioID)
             }
         }
+    }
+
+    @MainActor
+    func replaceIndexBoardSummaryRecords(
+        _ records: [UUID: IndexBoardCardSummaryRecord],
+        for scenarioID: UUID
+    ) {
+        indexBoardSummaryRecordsByScenarioID[scenarioID] = records
     }
 
     private func readJSON<T: Decodable>(url: URL, decoder: JSONDecoder) async throws -> T? {

@@ -315,6 +315,7 @@ final class WriterInteractionRuntime {
     var focusProgrammaticCaretExpectedLocation: Int = -1
     var focusProgrammaticCaretSelectionIgnoreUntil: Date = .distantPast
     var focusOffsetNormalizationLastAt: Date = .distantPast
+    var focusSelectionProcessingPending: Bool = false
     var focusVerticalScrollAuthoritySequence: Int = 0
     var focusVerticalScrollAuthority: FocusModeVerticalScrollAuthority? = nil
     var historySaveRequestWorkItem: DispatchWorkItem? = nil
@@ -1425,6 +1426,7 @@ struct MainCanvasHorizontalScrollViewAccessor: NSViewRepresentable {
         private var contentBoundsObserver: NSObjectProtocol?
         private var documentFrameObserver: NSObjectProtocol?
         private var documentBoundsObserver: NSObjectProtocol?
+        private var attachRetryWorkItem: DispatchWorkItem?
 
         deinit {
             detach()
@@ -1433,13 +1435,12 @@ struct MainCanvasHorizontalScrollViewAccessor: NSViewRepresentable {
         func attach(to view: NSView, scrollCoordinator: MainCanvasScrollCoordinator) {
             self.scrollCoordinator = scrollCoordinator
             guard let resolvedScrollView = resolveScrollView(from: view) else {
-                DispatchQueue.main.async { [weak self, weak view] in
-                    guard let self, let view else { return }
-                    self.attach(to: view, scrollCoordinator: scrollCoordinator)
-                }
+                scheduleAttachRetry(to: view, scrollCoordinator: scrollCoordinator)
                 return
             }
 
+            attachRetryWorkItem?.cancel()
+            attachRetryWorkItem = nil
             let documentViewChanged = observedDocumentView !== resolvedScrollView.documentView
             guard scrollView !== resolvedScrollView || documentViewChanged else { return }
             detach()
@@ -1449,6 +1450,8 @@ struct MainCanvasHorizontalScrollViewAccessor: NSViewRepresentable {
         }
 
         private func detach() {
+            attachRetryWorkItem?.cancel()
+            attachRetryWorkItem = nil
             if let contentBoundsObserver {
                 NotificationCenter.default.removeObserver(contentBoundsObserver)
             }
@@ -1467,6 +1470,18 @@ struct MainCanvasHorizontalScrollViewAccessor: NSViewRepresentable {
             }
             scrollView = nil
             scrollCoordinator = nil
+        }
+
+        private func scheduleAttachRetry(to view: NSView, scrollCoordinator: MainCanvasScrollCoordinator) {
+            guard attachRetryWorkItem == nil else { return }
+            let workItem = DispatchWorkItem { [weak self, weak view] in
+                guard let self else { return }
+                self.attachRetryWorkItem = nil
+                guard let view else { return }
+                self.attach(to: view, scrollCoordinator: scrollCoordinator)
+            }
+            attachRetryWorkItem = workItem
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: workItem)
         }
 
         private func installObservers(for scrollView: NSScrollView) {
@@ -1553,6 +1568,7 @@ struct MainColumnScrollViewAccessor: NSViewRepresentable {
         private var attachedColumnKey: String?
         private var lastReportedOffsetY: CGFloat = .nan
         private var offsetChangeHandler: ((CGFloat) -> Void)?
+        private var attachRetryWorkItem: DispatchWorkItem?
 
         deinit {
             detach()
@@ -1567,19 +1583,18 @@ struct MainColumnScrollViewAccessor: NSViewRepresentable {
         ) {
             self.scrollCoordinator = scrollCoordinator
             guard let resolvedScrollView = resolveScrollView(from: view) else {
-                DispatchQueue.main.async { [weak self, weak view] in
-                    guard let self, let view else { return }
-                    self.attach(
-                        to: view,
-                        scrollCoordinator: scrollCoordinator,
-                        columnKey: columnKey,
-                        storedOffsetY: storedOffsetY,
-                        onOffsetChange: onOffsetChange
-                    )
-                }
+                scheduleAttachRetry(
+                    to: view,
+                    scrollCoordinator: scrollCoordinator,
+                    columnKey: columnKey,
+                    storedOffsetY: storedOffsetY,
+                    onOffsetChange: onOffsetChange
+                )
                 return
             }
 
+            attachRetryWorkItem?.cancel()
+            attachRetryWorkItem = nil
             if scrollView !== resolvedScrollView {
                 detach()
                 scrollView = resolvedScrollView
@@ -1604,6 +1619,8 @@ struct MainColumnScrollViewAccessor: NSViewRepresentable {
         }
 
         private func detach() {
+            attachRetryWorkItem?.cancel()
+            attachRetryWorkItem = nil
             if let attachedColumnKey, let scrollView {
                 scrollCoordinator?.unregister(viewportKey: attachedColumnKey, matching: scrollView)
             }
@@ -1616,6 +1633,30 @@ struct MainColumnScrollViewAccessor: NSViewRepresentable {
             lastReportedOffsetY = .nan
             offsetChangeHandler = nil
             scrollCoordinator = nil
+        }
+
+        private func scheduleAttachRetry(
+            to view: NSView,
+            scrollCoordinator: MainCanvasScrollCoordinator,
+            columnKey: String,
+            storedOffsetY: CGFloat?,
+            onOffsetChange: @escaping (CGFloat) -> Void
+        ) {
+            guard attachRetryWorkItem == nil else { return }
+            let workItem = DispatchWorkItem { [weak self, weak view] in
+                guard let self else { return }
+                self.attachRetryWorkItem = nil
+                guard let view else { return }
+                self.attach(
+                    to: view,
+                    scrollCoordinator: scrollCoordinator,
+                    columnKey: columnKey,
+                    storedOffsetY: storedOffsetY,
+                    onOffsetChange: onOffsetChange
+                )
+            }
+            attachRetryWorkItem = workItem
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: workItem)
         }
 
         private func installObserver(for scrollView: NSScrollView) {

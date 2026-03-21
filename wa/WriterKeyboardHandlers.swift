@@ -6,6 +6,7 @@ extension ScenarioWriterView {
     // --- Key Handling Logic ---
     func handleGlobalKeyPress(_ press: KeyPress) -> KeyPress.Result {
         if let handled = handleSplitPaneCycleShortcut(press) { return handled }
+        if let handled = handleIndexBoardKeyPress(press) { return handled }
         if !acceptsKeyboardInput { return .ignored }
 
         let isNoModifier =

@@ -606,6 +606,7 @@ struct CardItem: View {
     var onSelectAtLocation: ((CGPoint) -> Void)? = nil
     var onContentChange: ((String, String) -> Void)? = nil
     var onColorChange: ((String?) -> Void)? = nil
+    var onOpenIndexBoard: (() -> Void)? = nil
     var onReferenceCard: (() -> Void)? = nil
     var onCreateUpperCardFromSelection: (() -> Void)? = nil
     var onSummarizeChildren: (() -> Void)? = nil
@@ -695,12 +696,14 @@ struct CardItem: View {
             return base
         }
         let active = resolvedActiveRGB()
-        let related = resolvedRelatedRGB()
         if isActive {
             return active
         }
-        if isAncestor || isDescendant {
-            return related
+        if isDescendant {
+            return resolvedDescendantRGB()
+        }
+        if isAncestor {
+            return resolvedRelatedRGB()
         }
         return base
     }
@@ -747,6 +750,11 @@ struct CardItem: View {
         return Color(red: rgb.r, green: rgb.g, blue: rgb.b)
     }
 
+    private var descendantBackgroundColor: Color {
+        let rgb = resolvedDescendantRGB()
+        return Color(red: rgb.r, green: rgb.g, blue: rgb.b)
+    }
+
     private var activeBackgroundColor: Color {
         let rgb = resolvedActiveRGB()
         return Color(red: rgb.r, green: rgb.g, blue: rgb.b)
@@ -758,7 +766,12 @@ struct CardItem: View {
 
     private var relatedTintOpacity: Double {
         guard usesFocusFadeTint else { return 0 }
-        return (!isActive && (isAncestor || isDescendant)) ? 1 : 0
+        return (!isActive && isAncestor) ? 1 : 0
+    }
+
+    private var descendantTintOpacity: Double {
+        guard usesFocusFadeTint else { return 0 }
+        return (!isActive && isDescendant) ? 1 : 0
     }
 
     private var activeTintOpacity: Double {
@@ -894,6 +907,10 @@ struct CardItem: View {
             Divider()
         }
         if showsEmptyCardBulkDeleteMenuOnly {
+            if let onOpenIndexBoard {
+                Button("인덱스 카드 뷰로 보기") { onOpenIndexBoard() }
+                Divider()
+            }
             if hasAIMenuActions {
                 Menu("AI") {
                     Button("구체화") { onAIElaborate?() }
@@ -923,6 +940,10 @@ struct CardItem: View {
                 Button("내용 없음 카드 전체 삭제", role: .destructive) { onBulkDeleteEmptyCards() }
             }
         } else {
+            if let onOpenIndexBoard {
+                Button("인덱스 카드 뷰로 보기") { onOpenIndexBoard() }
+                Divider()
+            }
             if let onCloneCard {
                 Button("클론 카드") { onCloneCard() }
                 Divider()
@@ -996,6 +1017,9 @@ struct CardItem: View {
             if usesFocusFadeTint {
                 relatedBackgroundColor
                     .opacity(relatedTintOpacity)
+
+                descendantBackgroundColor
+                    .opacity(descendantTintOpacity)
 
                 activeBackgroundColor
                     .opacity(activeTintOpacity)
@@ -1372,6 +1396,10 @@ struct CardItem: View {
             return usesDarkPalette ? fallbackDark : fallbackLight
         }
         return rgb
+    }
+
+    private func resolvedDescendantRGB() -> (r: Double, g: Double, b: Double) {
+        mix(base: resolvedActiveRGB(), overlay: (0, 0, 0), amount: 0.10)
     }
 }
 

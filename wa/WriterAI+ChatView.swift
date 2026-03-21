@@ -55,6 +55,10 @@ extension ScenarioWriterView {
     }
 
     func addLatestAIReplyAsChildCard() {
+        guard !isIndexBoardActive else {
+            setAIStatusError("인덱스 보드에서는 AI 답변을 자식 카드로 추가할 수 없습니다. 작업창에서 진행해 주세요.")
+            return
+        }
         guard let reply = latestAIReplyText(for: activeAIChatThreadID) else {
             setAIStatusError("자식 카드로 만들 AI 답변이 없습니다.")
             return
@@ -107,6 +111,7 @@ extension ScenarioWriterView {
         let activeMessages = activeAIChatMessages()
         let hasLatestReply = latestAIReplyText(for: activeAIChatThreadID) != nil
         let activeThreadTokenUsage = tokenUsageForAIThread(activeAIChatThreadID)
+        let canCreateAIChildCard = activeCardID != nil && !isIndexBoardActive
         VStack(spacing: 0) {
             VStack(spacing: 10) {
                 HStack {
@@ -369,7 +374,12 @@ extension ScenarioWriterView {
                         }
                         .buttonStyle(.bordered)
                         .controlSize(.small)
-                        .disabled(activeCardID == nil)
+                        .disabled(!canCreateAIChildCard)
+                        .help(
+                            isIndexBoardActive
+                                ? "인덱스 보드에서는 AI 구조 변경 액션이 비활성화됩니다."
+                                : "AI 답변을 현재 활성 카드의 자식 카드로 추가합니다."
+                        )
 
                         Button("대안 3개 요청") {
                             prepareAlternativeRequest()

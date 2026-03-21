@@ -42,6 +42,7 @@ struct ScenarioWriterView: View {
     @StateObject private var aiFeatureState = WriterAIFeatureState()
     @StateObject private var editEndAutoBackupState = WriterEditEndAutoBackupState()
     @StateObject private var scenarioObservedState: ScenarioWriterObservedState
+    @ObservedObject var indexBoardRuntime = IndexBoardRuntime.shared
 
     init(
         scenario: Scenario,
@@ -100,6 +101,7 @@ struct ScenarioWriterView: View {
     @State var activeCardID: UUID? = nil
     @State var selectedCardIDs: Set<UUID> = []
     @State var editingCardID: UUID? = nil
+    @State var indexBoardEditorDraft: IndexBoardEditorDraft? = nil
     @State var showDeleteAlert: Bool = false
     @State var pendingUpperCardCreationRequest: UpperCardCreationRequest? = nil
     @State var mainArrowRepeatAnimationSuppressedUntil: Date = .distantPast
@@ -713,6 +715,11 @@ struct ScenarioWriterView: View {
         nonmutating set { interactionRuntime.focusOffsetNormalizationLastAt = newValue }
     }
 
+    var focusSelectionProcessingPending: Bool {
+        get { interactionRuntime.focusSelectionProcessingPending }
+        nonmutating set { interactionRuntime.focusSelectionProcessingPending = newValue }
+    }
+
     var focusVerticalScrollAuthoritySequence: Int {
         get { interactionRuntime.focusVerticalScrollAuthoritySequence }
         nonmutating set { interactionRuntime.focusVerticalScrollAuthoritySequence = newValue }
@@ -1166,6 +1173,9 @@ struct ScenarioWriterView: View {
             .onChange(of: showFocusMode) { _, isOn in
                 handleShowFocusModeChange(isOn)
             }
+            .onChange(of: isIndexBoardActive) { _, isOn in
+                handleIndexBoardVisibilityChange(isOn)
+            }
             .onChange(of: mainWorkspaceZoomScale) { oldValue, newValue in
                 guard abs(newValue - oldValue) > 0.0001 else { return }
                 requestMainCanvasRestoreForZoomChange()
@@ -1494,6 +1504,7 @@ struct ScenarioWriterView: View {
     }
 
     func handleWorkspaceDisappear() {
+        teardownIndexBoardIfNeeded(restoreEntryState: false)
         MainCanvasNavigationDiagnostics.shared.emitSummary(
             ownerKey: mainCanvasDiagnosticsOwnerKey,
             reason: "workspaceDisappear"
@@ -1811,6 +1822,7 @@ struct ScenarioWriterView: View {
     func handleToggleFocusModeRequestNotification() {
         guard acceptsKeyboardInput else { return }
         if isPreviewingHistory || showHistoryBar { return }
+        if isIndexBoardActive { return }
         toggleFocusMode()
     }
 
@@ -1826,7 +1838,39 @@ struct ScenarioWriterView: View {
             return
         }
         cancelInactivePaneSnapshotRefresh()
-        if activeCardID == nil, let first = scenario.rootCards.first {
+        let requestedCard = resolvedSplitPaneRequestedCard(from: notification)
+        let forceMainWorkspace = requestedSplitPaneForceMainWorkspace(from: notification)
+        let beginEditing = requestedSplitPaneBeginEditing(from: notification)
+
+        if forceMainWorkspace {
+            if isIndexBoardActive {
+                teardownIndexBoardIfNeeded(restoreEntryState: false)
+            }
+            if showFocusMode {
+                toggleFocusMode()
+            }
+        }
+
+        if let requestedCard {
+            if beginEditing {
+                beginCardEditing(requestedCard)
+            } else {
+                finishEditing()
+                selectedCardIDs = [requestedCard.id]
+                keyboardRangeSelectionAnchorCardID = requestedCard.id
+                changeActiveCard(
+                    to: requestedCard,
+                    shouldFocusMain: false,
+                    deferToMainAsync: false,
+                    force: true
+                )
+                scheduleMainCanvasRestoreRequest(
+                    targetCardID: requestedCard.id,
+                    forceSemantic: true
+                )
+                isMainViewFocused = true
+            }
+        } else if activeCardID == nil, let first = scenario.rootCards.first {
             changeActiveCard(to: first)
         }
         synchronizeActiveRelationState(for: activeCardID)
@@ -1838,10 +1882,10 @@ struct ScenarioWriterView: View {
 
     @ViewBuilder
     func workspaceLayout(for geometry: GeometryProxy) -> some View {
-        let timelinePanelVisible = (showTimeline || showAIChat) && !showHistoryBar && !showFocusMode
+        let timelinePanelVisible = (showTimeline || showAIChat) && !showHistoryBar && activeBasePaneMode != .focus
         let availableWidth = geometry.size.width - (timelinePanelVisible ? timelineWidth : 0)
 
-        if showHistoryBar && !showFocusMode {
+        if showHistoryBar && activeBasePaneMode != .focus {
             ZStack(alignment: .topTrailing) {
                 primaryWorkspaceColumn(size: geometry.size, availableWidth: geometry.size.width)
                 historyOverlayHost(containerHeight: geometry.size.height)
@@ -1850,7 +1894,7 @@ struct ScenarioWriterView: View {
         } else {
             HStack(spacing: 0) {
                 primaryWorkspaceColumn(size: geometry.size, availableWidth: availableWidth)
-                if !showFocusMode {
+                if activeBasePaneMode != .focus {
                     trailingWorkspacePanelHost
                 }
             }
@@ -1861,18 +1905,23 @@ struct ScenarioWriterView: View {
     func primaryWorkspaceColumn(size: CGSize, availableWidth: CGFloat) -> some View {
         VStack(spacing: 0) {
             ZStack {
-                mainCanvasWithOptionalZoom(size: size, availableWidth: availableWidth)
-                    .opacity(showFocusMode ? 0 : 1)
-                    .allowsHitTesting(!showFocusMode)
-                    .accessibilityHidden(showFocusMode)
-                    .zIndex(0)
+                if activeBasePaneMode == .indexBoard {
+                    indexBoardCanvas(size: size)
+                        .zIndex(0)
+                } else {
+                    mainCanvasWithOptionalZoom(size: size, availableWidth: availableWidth)
+                        .opacity(showFocusMode ? 0 : 1)
+                        .allowsHitTesting(!showFocusMode)
+                        .accessibilityHidden(showFocusMode)
+                        .zIndex(0)
+                }
 
-                if showWorkspaceTopToolbar && !showFocusMode {
+                if showWorkspaceTopToolbar && activeBasePaneMode == .main {
                     workspaceTopToolbarHost
                         .zIndex(5)
                 }
 
-                if showFocusMode {
+                if activeBasePaneMode == .focus {
                     focusModeCanvas(size: size)
                         .ignoresSafeArea(.container, edges: .top)
                         .transition(.opacity)
@@ -1881,7 +1930,7 @@ struct ScenarioWriterView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            if showHistoryBar && !showFocusMode {
+            if showHistoryBar && activeBasePaneMode != .focus {
                 bottomHistoryBarHost
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }

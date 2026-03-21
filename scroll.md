@@ -162,6 +162,15 @@ Important policy helpers:
   - `resolvedMainColumnCurrentOffsetY(...)`
   - `resolvedMainColumnVisibleRect(...)`
 
+Additional note:
+
+- `resolvedMainColumnFocusTargetID(...)` now resolves child-column targets recursively down the active subtree.
+- For each descendant column:
+  - prefer `lastSelectedChildID` if present
+  - otherwise use the first child
+  - then continue the same rule until the visible column's cards are reached
+- `shouldAutoAlignMainColumn(...)` and `handleMainColumnActiveFocusChange(...)` now treat those descendant-column targets as valid alignment columns, not only the active column and ancestor columns.
+
 Important constants embedded in logic:
 
 - default alignment anchor: `y = 0.4`

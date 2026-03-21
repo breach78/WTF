@@ -406,7 +406,10 @@ extension ScenarioWriterView {
         case .plotLine:
             resolved = visibleCards.filter { $0.category == ScenarioCardCategory.plot }
         case .noteLine:
-            resolved = visibleCards.filter { $0.category == ScenarioCardCategory.note }
+            resolved = visibleCards.filter {
+                $0.category == ScenarioCardCategory.note &&
+                !isIndexBoardTempDescendant(cardID: $0.id)
+            }
         }
 
         if resolved.isEmpty {
