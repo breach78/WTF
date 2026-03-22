@@ -22,6 +22,33 @@ private enum IndexBoardSurfacePhaseConstants {
     static let dragGhostOpacity: CGFloat = 0
 }
 
+private func indexBoardSurfaceItemSort(_ lhs: BoardSurfaceItem, _ rhs: BoardSurfaceItem) -> Bool {
+    switch (lhs.slotIndex, rhs.slotIndex) {
+    case let (.some(lhsSlotIndex), .some(rhsSlotIndex)):
+        if lhsSlotIndex != rhsSlotIndex {
+            return lhsSlotIndex < rhsSlotIndex
+        }
+    case (.some, nil):
+        return true
+    case (nil, .some):
+        return false
+    case (.none, .none):
+        let lhsPosition = lhs.detachedGridPosition ?? .init(column: 0, row: 0)
+        let rhsPosition = rhs.detachedGridPosition ?? .init(column: 0, row: 0)
+        if lhsPosition.row != rhsPosition.row {
+            return lhsPosition.row < rhsPosition.row
+        }
+        if lhsPosition.column != rhsPosition.column {
+            return lhsPosition.column < rhsPosition.column
+        }
+    }
+
+    if lhs.laneIndex != rhs.laneIndex {
+        return lhs.laneIndex < rhs.laneIndex
+    }
+    return lhs.cardID.uuidString < rhs.cardID.uuidString
+}
+
 private struct IndexBoardSurfaceCardFramePreferenceKey: PreferenceKey {
     static var defaultValue: [UUID: CGRect] = [:]
 
@@ -413,6 +440,7 @@ struct IndexBoardSurfacePhaseTwoView: View {
     @State private var cardFrameByID: [UUID: CGRect] = [:]
     @State private var pendingRevealCardID: UUID? = nil
     @State private var cardDragState: IndexBoardSurfaceCardDragState? = nil
+    @State private var presentationSurfaceProjection: BoardSurfaceProjection? = nil
     @State private var selectionDragState: IndexBoardSurfaceSelectionDragState? = nil
     @State private var lockedColumnCount: Int? = nil
     @State private var pendingScrollPersistenceWorkItem: DispatchWorkItem? = nil
@@ -420,33 +448,12 @@ struct IndexBoardSurfacePhaseTwoView: View {
 
     private let autoScrollTimer = Timer.publish(every: 1.0 / 60.0, on: .main, in: .common).autoconnect()
 
-    private var orderedItems: [BoardSurfaceItem] {
-        surfaceProjection.surfaceItems.sorted { lhs, rhs in
-            switch (lhs.slotIndex, rhs.slotIndex) {
-            case let (.some(lhsSlotIndex), .some(rhsSlotIndex)):
-                if lhsSlotIndex != rhsSlotIndex {
-                    return lhsSlotIndex < rhsSlotIndex
-                }
-            case (.some, nil):
-                return true
-            case (nil, .some):
-                return false
-            case (.none, .none):
-                let lhsPosition = lhs.detachedGridPosition ?? .init(column: 0, row: 0)
-                let rhsPosition = rhs.detachedGridPosition ?? .init(column: 0, row: 0)
-                if lhsPosition.row != rhsPosition.row {
-                    return lhsPosition.row < rhsPosition.row
-                }
-                if lhsPosition.column != rhsPosition.column {
-                    return lhsPosition.column < rhsPosition.column
-                }
-            }
+    private var effectiveSurfaceProjection: BoardSurfaceProjection {
+        presentationSurfaceProjection ?? surfaceProjection
+    }
 
-            if lhs.laneIndex != rhs.laneIndex {
-                return lhs.laneIndex < rhs.laneIndex
-            }
-            return lhs.cardID.uuidString < rhs.cardID.uuidString
-        }
+    private var orderedItems: [BoardSurfaceItem] {
+        effectiveSurfaceProjection.surfaceItems.sorted(by: indexBoardSurfaceItemSort)
     }
 
     private var flowItems: [BoardSurfaceItem] {
@@ -458,7 +465,7 @@ struct IndexBoardSurfacePhaseTwoView: View {
     }
 
     private var laneByKey: [String: BoardSurfaceLane] {
-        Dictionary(uniqueKeysWithValues: surfaceProjection.lanes.map { (laneKey(for: $0.parentCardID), $0) })
+        Dictionary(uniqueKeysWithValues: effectiveSurfaceProjection.lanes.map { (laneKey(for: $0.parentCardID), $0) })
     }
 
     private var groupByLaneKey: [String: IndexBoardGroupProjection] {
@@ -545,29 +552,10 @@ struct IndexBoardSurfacePhaseTwoView: View {
     }
 
     private var displayedFlowSlotIndexByCardID: [UUID: Int] {
-        guard let drag = cardDragState else { return baseFlowSlotIndexByCardID }
-
-        let movingCardIDs = drag.movingCardIDSet
-        let visibleItems = flowItems.filter { !movingCardIDs.contains($0.cardID) }
-        guard case .flow(let rawDropSlotIndex) = drag.dropPlacement else {
-            return Dictionary(uniqueKeysWithValues: visibleItems.enumerated().map { index, item in
-                (item.cardID, index)
-            })
-        }
-
-        let safeDropSlotIndex = min(max(0, rawDropSlotIndex), visibleItems.count)
-        let reservedSlotCount = max(1, drag.movingCardIDs.count)
-        var slotIndexByCardID: [UUID: Int] = [:]
-        slotIndexByCardID.reserveCapacity(visibleItems.count)
-
-        for (visibleIndex, item) in visibleItems.enumerated() {
-            let displayIndex = visibleIndex >= safeDropSlotIndex
-                ? visibleIndex + reservedSlotCount
-                : visibleIndex
-            slotIndexByCardID[item.cardID] = displayIndex
-        }
-
-        return slotIndexByCardID
+        Dictionary(uniqueKeysWithValues: flowItems.compactMap { item in
+            guard let slotIndex = item.slotIndex else { return nil }
+            return (item.cardID, slotIndex)
+        })
     }
 
     private var occupiedGridPositionByCardID: [UUID: IndexBoardGridPosition] {
@@ -693,10 +681,12 @@ struct IndexBoardSurfacePhaseTwoView: View {
             pendingRevealCardID = revealCardID
             attemptPendingCardReveal()
         }
+        .onChange(of: surfaceProjection) { _, newValue in
+            settlePresentationProjection(with: newValue)
+        }
         .onDisappear {
             flushDeferredViewportPersistence()
         }
-        .animation(.interactiveSpring(response: 0.20, dampingFraction: 0.90), value: renderedEntries.map(\.id))
     }
 
     private var boardScrollContent: some View {
@@ -1055,6 +1045,7 @@ struct IndexBoardSurfacePhaseTwoView: View {
         )
         drag.dropPlacement = resolvedDropPlacement(for: drag)
         cardDragState = drag
+        presentationSurfaceProjection = resolvedPresentationSurfaceProjection(for: drag)
     }
 
     private func handleCardDragEnded(_ item: BoardSurfaceItem, value: DragGesture.Value) {
@@ -1064,14 +1055,16 @@ struct IndexBoardSurfacePhaseTwoView: View {
         let shouldCommit = target != drag.sourceTarget
         flushDeferredViewportPersistence()
         withAnimation(.interactiveSpring(response: 0.18, dampingFraction: 0.92)) {
+            presentationSurfaceProjection = shouldCommit
+                ? resolvedPresentationSurfaceProjection(for: drag)
+                : nil
             cardDragState = nil
-            if shouldCommit {
-                if drag.movingCardIDs.count > 1 {
-                    onCardMoveSelection(drag.movingCardIDs, item.cardID, target)
-                } else {
-                    onCardMove(item.cardID, target)
-                }
-            }
+        }
+        guard shouldCommit else { return }
+        if drag.movingCardIDs.count > 1 {
+            onCardMoveSelection(drag.movingCardIDs, item.cardID, target)
+        } else {
+            onCardMove(item.cardID, target)
         }
     }
 
@@ -1357,6 +1350,132 @@ struct IndexBoardSurfacePhaseTwoView: View {
             return .parent(laneParentID)
         }
         return .root
+    }
+
+    private func settlePresentationProjection(with liveProjection: BoardSurfaceProjection) {
+        guard cardDragState == nil,
+              let presentationSurfaceProjection else { return }
+        guard presentationSurfaceProjection.surfaceItems == liveProjection.surfaceItems else { return }
+        withAnimation(.interactiveSpring(response: 0.18, dampingFraction: 0.92)) {
+            self.presentationSurfaceProjection = nil
+        }
+    }
+
+    private func resolvedPresentationSurfaceProjection(
+        for drag: IndexBoardSurfaceCardDragState
+    ) -> BoardSurfaceProjection {
+        let baseItems = surfaceProjection.surfaceItems.sorted(by: indexBoardSurfaceItemSort)
+        let movingIDs = drag.movingCardIDSet
+        let movingItemsByCardID = Dictionary(uniqueKeysWithValues: baseItems.compactMap { item -> (UUID, BoardSurfaceItem)? in
+            movingIDs.contains(item.cardID) ? (item.cardID, item) : nil
+        })
+        let movingItems = drag.movingCardIDs.compactMap { movingItemsByCardID[$0] }
+        let stationaryFlowItems = baseItems
+            .filter { !movingIDs.contains($0.cardID) && !$0.isDetached }
+            .sorted { ($0.slotIndex ?? .max) < ($1.slotIndex ?? .max) }
+        let stationaryDetachedItems = baseItems.filter { !movingIDs.contains($0.cardID) && $0.isDetached }
+
+        let resolvedItems: [BoardSurfaceItem]
+        switch drag.dropPlacement {
+        case .flow(let rawDropSlotIndex):
+            let target = resolvedDropTarget(for: drag)
+            let safeDropSlotIndex = min(max(0, rawDropSlotIndex), stationaryFlowItems.count)
+            let laneParentID = target.laneParentID ?? drag.sourceLaneParentID
+            let laneIndex = resolvedLaneIndex(
+                for: laneParentID,
+                fallback: movingItems.first?.laneIndex ?? 0
+            )
+            let insertedMovingItems = movingItems.map { item in
+                BoardSurfaceItem(
+                    cardID: item.cardID,
+                    laneParentID: laneParentID,
+                    laneIndex: laneIndex,
+                    slotIndex: nil,
+                    detachedGridPosition: nil
+                )
+            }
+
+            var flowItems = stationaryFlowItems
+            flowItems.insert(contentsOf: insertedMovingItems, at: safeDropSlotIndex)
+            let normalizedFlowItems = flowItems.enumerated().map { index, item in
+                BoardSurfaceItem(
+                    cardID: item.cardID,
+                    laneParentID: item.laneParentID,
+                    laneIndex: resolvedLaneIndex(for: item.laneParentID, fallback: item.laneIndex),
+                    slotIndex: index,
+                    detachedGridPosition: nil
+                )
+            }
+            resolvedItems = normalizedFlowItems + stationaryDetachedItems
+        case .detached(let startPosition):
+            let normalizedFlowItems = stationaryFlowItems.enumerated().map { index, item in
+                BoardSurfaceItem(
+                    cardID: item.cardID,
+                    laneParentID: item.laneParentID,
+                    laneIndex: item.laneIndex,
+                    slotIndex: index,
+                    detachedGridPosition: nil
+                )
+            }
+            let occupiedPositions = Set(
+                normalizedFlowItems.compactMap { item -> IndexBoardGridPosition? in
+                    guard let slotIndex = item.slotIndex else { return nil }
+                    return resolvedFlowGridPosition(for: slotIndex)
+                } +
+                stationaryDetachedItems.compactMap(\.detachedGridPosition)
+            )
+            let detachedPositions = resolvedDetachedSelectionPreviewPositions(
+                count: movingItems.count,
+                start: startPosition,
+                occupied: occupiedPositions
+            )
+            let detachedItems = zip(movingItems, detachedPositions).map { item, position in
+                BoardSurfaceItem(
+                    cardID: item.cardID,
+                    laneParentID: item.laneParentID,
+                    laneIndex: item.laneIndex,
+                    slotIndex: nil,
+                    detachedGridPosition: position
+                )
+            }
+            resolvedItems = normalizedFlowItems + stationaryDetachedItems + detachedItems
+        }
+
+        return BoardSurfaceProjection(
+            source: surfaceProjection.source,
+            lanes: surfaceProjection.lanes,
+            surfaceItems: resolvedItems.sorted(by: indexBoardSurfaceItemSort),
+            orderedCardIDs: resolvedItems
+                .sorted(by: indexBoardSurfaceItemSort)
+                .map(\.cardID)
+        )
+    }
+
+    private func resolvedLaneIndex(for laneParentID: UUID?, fallback: Int) -> Int {
+        surfaceProjection.lanes.first(where: { $0.parentCardID == laneParentID })?.laneIndex ?? fallback
+    }
+
+    private func resolvedDetachedSelectionPreviewPositions(
+        count: Int,
+        start: IndexBoardGridPosition,
+        occupied: Set<IndexBoardGridPosition>
+    ) -> [IndexBoardGridPosition] {
+        guard count > 0 else { return [] }
+        var positions: [IndexBoardGridPosition] = []
+        positions.reserveCapacity(count)
+        var taken = occupied
+        var nextColumn = start.column
+
+        while positions.count < count {
+            let candidate = IndexBoardGridPosition(column: nextColumn, row: start.row)
+            if !taken.contains(candidate) {
+                positions.append(candidate)
+                taken.insert(candidate)
+            }
+            nextColumn += 1
+        }
+
+        return positions
     }
 
     private func resolvedInitialColumnCount() -> Int {

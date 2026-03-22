@@ -1206,6 +1206,7 @@ final class FileStore: ObservableObject {
             let scenarioRecords: [ScenarioRecord] = (try? await readJSON(url: scenariosURL, decoder: decoder)) ?? []
             var scenarioMap: [UUID: Scenario] = [:]
             scenarioFolderByID = [:]
+            var didRepairInvalidParentLinks = false
             
             // Map to store folder URLs for parallel loading
             var scenarioFolders: [UUID: URL] = [:]
@@ -1277,6 +1278,7 @@ final class FileStore: ObservableObject {
 
                 scenario.performWithoutTimestampTracking {
                     var cardMap: [UUID: SceneCard] = Dictionary(minimumCapacity: result.cardRecords.count)
+                    let recordByID = Dictionary(uniqueKeysWithValues: result.cardRecords.map { ($0.id, $0) })
                     for r in result.cardRecords {
                         let content = result.cardContents[r.id] ?? ""
                         let card = SceneCard(
@@ -1298,10 +1300,35 @@ final class FileStore: ObservableObject {
                         lastSavedCardContent[s.id, default: [:]][r.id] = content
                     }
 
+                    var repairedInvalidParents = false
                     for r in result.cardRecords {
-                        if let parentID = r.parentID, let card = cardMap[r.id], let parent = cardMap[parentID] {
-                            card.parent = parent
+                        guard let parentID = r.parentID,
+                              let card = cardMap[r.id],
+                              let parent = cardMap[parentID] else { continue }
+
+                        var visited: Set<UUID> = [card.id]
+                        var currentParentID: UUID? = parentID
+                        var createsCycle = false
+                        while let currentParentIDValue = currentParentID {
+                            guard visited.insert(currentParentIDValue).inserted else {
+                                createsCycle = true
+                                break
+                            }
+                            currentParentID = recordByID[currentParentIDValue]?.parentID
                         }
+
+                        if createsCycle {
+                            repairedInvalidParents = true
+                            continue
+                        }
+
+                        card.parent = parent
+                    }
+
+                    if repairedInvalidParents {
+                        didRepairInvalidParentLinks = true
+                        scenario.markCardRecordsDirty()
+                        scenario.bumpCardsVersion()
                     }
 
                     var snapshots: [HistorySnapshot] = []
@@ -1343,7 +1370,11 @@ final class FileStore: ObservableObject {
                 for scenario in scenarios {
                     scenario.bumpCardsVersion()
                 }
-                primeSavedCachesFromCurrentState()
+                if didRepairInvalidParentLinks {
+                    saveAll(immediate: true)
+                } else {
+                    primeSavedCachesFromCurrentState()
+                }
             }
     }
 

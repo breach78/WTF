@@ -8,6 +8,8 @@ struct IndexBoardCardDropTarget: Equatable {
     let laneParentID: UUID?
     let previousCardID: UUID?
     let nextCardID: UUID?
+    let previousTempMember: IndexBoardTempStripMember?
+    let nextTempMember: IndexBoardTempStripMember?
     let detachedGridPosition: IndexBoardGridPosition?
     let preferredColumnCount: Int?
 
@@ -17,6 +19,8 @@ struct IndexBoardCardDropTarget: Equatable {
         laneParentID: UUID? = nil,
         previousCardID: UUID? = nil,
         nextCardID: UUID? = nil,
+        previousTempMember: IndexBoardTempStripMember? = nil,
+        nextTempMember: IndexBoardTempStripMember? = nil,
         detachedGridPosition: IndexBoardGridPosition? = nil,
         preferredColumnCount: Int? = nil
     ) {
@@ -25,8 +29,35 @@ struct IndexBoardCardDropTarget: Equatable {
         self.laneParentID = laneParentID
         self.previousCardID = previousCardID
         self.nextCardID = nextCardID
+        self.previousTempMember = previousTempMember
+        self.nextTempMember = nextTempMember
         self.detachedGridPosition = detachedGridPosition
         self.preferredColumnCount = preferredColumnCount
+    }
+
+    var isTempStripTarget: Bool {
+        detachedGridPosition != nil || previousTempMember != nil || nextTempMember != nil
+    }
+}
+
+private struct IndexBoardResolvedGroupMoveContext {
+    let previousGroup: IndexBoardGroupProjection?
+    let nextGroup: IndexBoardGroupProjection?
+
+    init(previousGroup: IndexBoardGroupProjection?, nextGroup: IndexBoardGroupProjection?) {
+        self.previousGroup = previousGroup
+        self.nextGroup = nextGroup
+    }
+
+    init(
+        groups projection: IndexBoardProjection,
+        movingGroupID: IndexBoardGroupID,
+        targetIndex: Int
+    ) {
+        let visibleGroups = projection.groups.filter { $0.id != movingGroupID && !$0.isTempGroup && $0.parentCard != nil }
+        let safeTargetIndex = min(max(0, targetIndex), visibleGroups.count)
+        self.previousGroup = safeTargetIndex > 0 ? visibleGroups[safeTargetIndex - 1] : nil
+        self.nextGroup = safeTargetIndex < visibleGroups.count ? visibleGroups[safeTargetIndex] : nil
     }
 }
 
@@ -1431,6 +1462,7 @@ extension ScenarioWriterView {
         projection: IndexBoardProjection
     ) {
         let liveProjection = resolvedIndexBoardProjection() ?? projection
+        let referenceSurfaceProjection = resolvedIndexBoardSurfaceProjection()
         let movingCards = resolvedIndexBoardMovingCards(
             cardIDs: cardIDs,
             preferredColumns: target.preferredColumnCount ?? 1
@@ -1440,7 +1472,7 @@ extension ScenarioWriterView {
         let draggedCard = movingCards.first(where: { $0.id == draggedCardID }) ?? movingCards.first
         guard let draggedCard else { return }
 
-        if target.detachedGridPosition != nil {
+        if target.isTempStripTarget {
             commitDetachedIndexBoardCardMoveSelection(
                 movingCards: movingCards,
                 draggedCard: draggedCard,
@@ -1508,6 +1540,12 @@ extension ScenarioWriterView {
             normalizeAffectedParents(oldParents: oldParents, destinationParent: destinationParent)
         }
 
+        if let normalizedSurfaceProjection = resolvedIndexBoardSurfaceProjection(
+            referenceSurfaceProjection: referenceSurfaceProjection
+        ) {
+            persistIndexBoardSurfacePresentation(normalizedSurfaceProjection)
+        }
+
         selectedCardIDs = movingIDs
         changeActiveCard(to: draggedCard, shouldFocusMain: false, deferToMainAsync: false, force: true)
         commitCardMutation(
@@ -1522,10 +1560,11 @@ extension ScenarioWriterView {
         projection: IndexBoardProjection
     ) {
         let liveProjection = resolvedIndexBoardProjection() ?? projection
+        let referenceSurfaceProjection = resolvedIndexBoardSurfaceProjection()
         guard let movingCard = findCard(by: cardID) else { return }
         let isCurrentlyDetached = activeIndexBoardSession?.detachedGridPositionByCardID[movingCard.id] != nil
 
-        if target.detachedGridPosition != nil {
+        if target.isTempStripTarget {
             commitDetachedIndexBoardCardMove(
                 movingCard: movingCard,
                 target: target
@@ -1596,6 +1635,12 @@ extension ScenarioWriterView {
             )
         }
 
+        if let normalizedSurfaceProjection = resolvedIndexBoardSurfaceProjection(
+            referenceSurfaceProjection: referenceSurfaceProjection
+        ) {
+            persistIndexBoardSurfacePresentation(normalizedSurfaceProjection)
+        }
+
         selectedCardIDs = [movingCard.id]
         changeActiveCard(to: movingCard, shouldFocusMain: false, deferToMainAsync: false, force: true)
         commitCardMutation(
@@ -1608,22 +1653,32 @@ extension ScenarioWriterView {
         movingCard: SceneCard,
         target: IndexBoardCardDropTarget
     ) {
-        guard let detachedGridPosition = target.detachedGridPosition else { return }
-        let preferredColumns = max(1, target.preferredColumnCount ?? 1)
+        let referenceSurfaceProjection = resolvedIndexBoardSurfaceProjection()
         let previousState = captureScenarioState()
-
-        updateIndexBoardDetachedPosition(cardID: movingCard.id, position: detachedGridPosition)
+        let updatedTempStrips = resolvedUpdatedIndexBoardTempStrips(
+            referenceSurfaceProjection: referenceSurfaceProjection,
+            movingMembers: [IndexBoardTempStripMember(kind: .card, id: movingCard.id)],
+            target: target
+        )
 
         scenario.performBatchedCardMutation {
-            if movingCard.isArchived {
-                movingCard.isArchived = false
-            }
-
-            movingCard.isFloating = false
-            reindexIndexBoardSiblingsVisually(
-                parent: movingCard.parent,
-                preferredColumns: preferredColumns
+            let tempContainer = ensureIndexBoardTempContainer()
+            applyIndexBoardParentPlacement(
+                movingCard: movingCard,
+                destinationParent: tempContainer,
+                destinationIndex: liveOrderedSiblings(parent: tempContainer).count
             )
+            applyIndexBoardTempStripOrdering(updatedTempStrips)
+        }
+        applyIndexBoardTempStripPresentation(
+            updatedTempStrips,
+            referenceSurfaceProjection: referenceSurfaceProjection
+        )
+
+        if let normalizedSurfaceProjection = resolvedIndexBoardSurfaceProjection(
+            referenceSurfaceProjection: referenceSurfaceProjection
+        ) {
+            persistIndexBoardSurfacePresentation(normalizedSurfaceProjection)
         }
 
         selectedCardIDs = [movingCard.id]
@@ -1639,45 +1694,35 @@ extension ScenarioWriterView {
         draggedCard: SceneCard,
         target: IndexBoardCardDropTarget
     ) {
-        guard let detachedGridPosition = target.detachedGridPosition else { return }
-        let preferredColumns = max(1, target.preferredColumnCount ?? 1)
         let movingIDs = Set(movingCards.map(\.id))
+        let referenceSurfaceProjection = resolvedIndexBoardSurfaceProjection()
         let previousState = captureScenarioState()
-
-        let occupiedPositions = Set(
-            resolvedIndexBoardVisualGridPositionByCardID(
-                surfaceProjection: resolvedIndexBoardSurfaceProjection(),
-                preferredColumns: preferredColumns
-            )
-            .compactMap { entry -> IndexBoardGridPosition? in
-                movingIDs.contains(entry.key) ? nil : entry.value
-            }
+        let updatedTempStrips = resolvedUpdatedIndexBoardTempStrips(
+            referenceSurfaceProjection: referenceSurfaceProjection,
+            movingMembers: movingCards.map { IndexBoardTempStripMember(kind: .card, id: $0.id) },
+            target: target
         )
-        let detachedPositions = resolvedDetachedSelectionPositions(
-            count: movingCards.count,
-            start: detachedGridPosition,
-            occupied: occupiedPositions
-        )
-
-        for (card, position) in zip(movingCards, detachedPositions) {
-            updateIndexBoardDetachedPosition(cardID: card.id, position: position)
-        }
 
         scenario.performBatchedCardMutation {
-            let affectedParents = Dictionary(grouping: movingCards, by: { $0.parent?.id })
+            let tempContainer = ensureIndexBoardTempContainer()
             for card in movingCards {
-                if card.isArchived {
-                    card.isArchived = false
-                }
-                card.isFloating = false
-            }
-            for parentID in affectedParents.keys {
-                let parent = parentID.flatMap { findCard(by: $0) }
-                reindexIndexBoardSiblingsVisually(
-                    parent: parent,
-                    preferredColumns: preferredColumns
+                applyIndexBoardParentPlacement(
+                    movingCard: card,
+                    destinationParent: tempContainer,
+                    destinationIndex: liveOrderedSiblings(parent: tempContainer).count
                 )
             }
+            applyIndexBoardTempStripOrdering(updatedTempStrips)
+        }
+        applyIndexBoardTempStripPresentation(
+            updatedTempStrips,
+            referenceSurfaceProjection: referenceSurfaceProjection
+        )
+
+        if let normalizedSurfaceProjection = resolvedIndexBoardSurfaceProjection(
+            referenceSurfaceProjection: referenceSurfaceProjection
+        ) {
+            persistIndexBoardSurfacePresentation(normalizedSurfaceProjection)
         }
 
         selectedCardIDs = movingIDs
@@ -1694,65 +1739,236 @@ extension ScenarioWriterView {
         projection: IndexBoardProjection
     ) {
         let liveProjection = resolvedIndexBoardProjection() ?? projection
-        guard let movingGroup = liveProjection.groups.first(where: { $0.id == groupID }) else { return }
-        guard let movingParentCard = movingGroup.parentCard else { return }
-
-        let visibleGroups = liveProjection.groups.filter { $0.id != groupID }
+        guard let movingGroup = liveProjection.groups.first(where: { $0.id == groupID }),
+              let movingParentCard = movingGroup.parentCard else { return }
+        let visibleGroups = liveProjection.groups.filter { $0.id != groupID && !$0.isTempGroup && $0.parentCard != nil }
+        let currentVisibleGroups = liveProjection.groups.filter { !$0.isTempGroup && $0.parentCard != nil }
         let safeTargetIndex = min(max(0, targetIndex), visibleGroups.count)
-        if let sourceIndex = liveProjection.groups.firstIndex(where: { $0.id == groupID }),
-           sourceIndex == safeTargetIndex {
+        if let sourceIndex = currentVisibleGroups.firstIndex(where: { $0.id == groupID }),
+           sourceIndex == safeTargetIndex,
+           !movingGroup.isTempGroup {
             return
         }
 
-        let previousGroup = safeTargetIndex > 0 ? visibleGroups[safeTargetIndex - 1] : nil
-        let nextGroup = safeTargetIndex < visibleGroups.count ? visibleGroups[safeTargetIndex] : nil
-        let destination = resolvedIndexBoardGroupDestination(
-            movingParentCard: movingParentCard,
-            previousGroup: previousGroup,
-            nextGroup: nextGroup
-        )
-
         let previousState = captureScenarioState()
         scenario.performBatchedCardMutation {
-            if movingParentCard.isArchived {
-                movingParentCard.isArchived = false
-            }
-
-            let oldParent = movingParentCard.parent
-            normalizeIndices(parent: oldParent)
-
-            let destinationParent = destination.parent
-            var insertionIndex = destination.index
-            if oldParent?.id == destinationParent?.id,
-               movingParentCard.orderIndex < insertionIndex {
-                insertionIndex -= 1
-            }
-            insertionIndex = max(0, insertionIndex)
-
-            let destinationSiblings = liveOrderedSiblings(parent: destinationParent)
-            for sibling in destinationSiblings where sibling.id != movingParentCard.id && sibling.orderIndex >= insertionIndex {
-                sibling.orderIndex += 1
-            }
-
-            movingParentCard.parent = destinationParent
-            movingParentCard.orderIndex = insertionIndex
-            movingParentCard.isFloating = false
-
-            normalizeIndices(parent: movingParentCard.parent)
-            if oldParent?.id != movingParentCard.parent?.id {
-                normalizeIndices(parent: oldParent)
-            }
-
-            synchronizeMovedSubtreeCategoryIfNeeded(
-                for: movingParentCard,
-                oldParent: oldParent,
-                newParent: movingParentCard.parent
+            applyIndexBoardGroupMove(
+                movingParentCard: movingParentCard,
+                context: IndexBoardResolvedGroupMoveContext(
+                    groups: resolvedIndexBoardProjection() ?? projection,
+                    movingGroupID: groupID,
+                    targetIndex: safeTargetIndex
+                )
             )
         }
 
         commitCardMutation(
             previousState: previousState,
             actionName: "보드 그룹 이동"
+        )
+    }
+
+    func commitIndexBoardParentGroupMove(
+        target: IndexBoardParentGroupDropTarget,
+        projection: IndexBoardProjection
+    ) {
+        guard target.parentCardID != activeIndexBoardSession?.source.parentID else { return }
+        if let surfaceProjection = resolvedIndexBoardSurfaceProjection(),
+           let movingGroup = surfaceProjection.parentGroups.first(where: { $0.parentCardID == target.parentCardID }),
+           movingGroup.isTempGroup {
+            let previousState = captureScenarioState()
+            let updatedTempStrips = resolvedUpdatedIndexBoardTempStrips(
+                referenceSurfaceProjection: surfaceProjection,
+                movingMembers: [IndexBoardTempStripMember(kind: .group, id: target.parentCardID)],
+                target: IndexBoardCardDropTarget(
+                    groupID: .parent(target.parentCardID),
+                    insertionIndex: 0,
+                    detachedGridPosition: target.origin
+                )
+            )
+            scenario.performBatchedCardMutation {
+                applyIndexBoardTempStripOrdering(updatedTempStrips)
+            }
+            applyIndexBoardTempStripPresentation(
+                updatedTempStrips,
+                referenceSurfaceProjection: surfaceProjection
+            )
+            commitCardMutation(
+                previousState: previousState,
+                actionName: "보드 부모 그룹 이동"
+            )
+            return
+        }
+        updateIndexBoardGroupPosition(parentCardID: target.parentCardID, position: target.origin)
+        guard let surfaceProjection = resolvedIndexBoardSurfaceProjection() else { return }
+
+        let previousState = captureScenarioState()
+        scenario.performBatchedCardMutation {
+            applyIndexBoardSurfaceParentOrdering(
+                surfaceProjection: surfaceProjection,
+                projection: projection
+            )
+        }
+
+        commitCardMutation(
+            previousState: previousState,
+            actionName: "보드 부모 그룹 이동"
+        )
+    }
+
+    func setIndexBoardParentGroupTemp(
+        parentCardID: UUID,
+        isTemp: Bool,
+        projection: IndexBoardProjection
+    ) {
+        guard isIndexBoardActive,
+              parentCardID != activeIndexBoardSession?.source.parentID,
+              let movingParentCard = findCard(by: parentCardID) else { return }
+
+        let previousState = captureScenarioState()
+        scenario.performBatchedCardMutation {
+            if isTemp {
+                let tempContainer = ensureIndexBoardTempContainer()
+                applyIndexBoardParentPlacement(
+                    movingCard: movingParentCard,
+                    destinationParent: tempContainer,
+                    destinationIndex: liveOrderedSiblings(parent: tempContainer).count
+                )
+            } else {
+                let sourceParent = activeIndexBoardSession?.source.parentID.flatMap { findCard(by: $0) }
+                applyIndexBoardParentPlacement(
+                    movingCard: movingParentCard,
+                    destinationParent: sourceParent,
+                    destinationIndex: liveOrderedSiblings(parent: sourceParent).count
+                )
+            }
+
+            if let surfaceProjection = resolvedIndexBoardSurfaceProjection() {
+                applyIndexBoardSurfaceParentOrdering(
+                    surfaceProjection: surfaceProjection,
+                    projection: projection
+                )
+            }
+        }
+
+        commitCardMutation(
+            previousState: previousState,
+            actionName: isTemp ? "보드 그룹 Temp 이동" : "보드 그룹 Temp 복귀"
+        )
+    }
+
+    private func applyIndexBoardSurfaceParentOrdering(
+        surfaceProjection: BoardSurfaceProjection,
+        projection: IndexBoardProjection
+    ) {
+        let desiredMainlineParentIDs = surfaceProjection.parentGroups
+            .filter { !$0.isTempGroup }
+            .compactMap(\.parentCardID)
+        let desiredTempParentIDs = surfaceProjection.parentGroups
+            .filter(\.isTempGroup)
+            .compactMap(\.parentCardID)
+        let desiredTempParentIDSet = Set(desiredTempParentIDs)
+        let sourceParent = activeIndexBoardSession?.source.parentID.flatMap { findCard(by: $0) }
+        let tempContainer = ensureIndexBoardTempContainer()
+
+        let tempStartIndex = liveOrderedSiblings(parent: tempContainer)
+            .filter { !desiredTempParentIDSet.contains($0.id) }
+            .count
+
+        for (offset, parentID) in desiredTempParentIDs.enumerated() {
+            guard parentID != sourceParent?.id else { continue }
+            guard let parentCard = findCard(by: parentID) else { continue }
+            applyIndexBoardParentPlacement(
+                movingCard: parentCard,
+                destinationParent: tempContainer,
+                destinationIndex: tempStartIndex + offset
+            )
+        }
+
+        for (targetIndex, parentID) in desiredMainlineParentIDs.enumerated() {
+            guard parentID != sourceParent?.id else { continue }
+            guard let parentCard = findCard(by: parentID) else { continue }
+            let currentProjection = resolvedIndexBoardProjection() ?? projection
+            let movingGroupID = IndexBoardGroupID.parent(parentID)
+            let visibleGroups = currentProjection.groups.filter {
+                $0.id != movingGroupID && !$0.isTempGroup && $0.parentCard != nil
+            }
+            let safeTargetIndex = min(max(0, targetIndex), visibleGroups.count)
+            let previousGroup = safeTargetIndex > 0 ? visibleGroups[safeTargetIndex - 1] : nil
+            let nextGroup = safeTargetIndex < visibleGroups.count ? visibleGroups[safeTargetIndex] : nil
+
+            if previousGroup == nil && nextGroup == nil {
+                applyIndexBoardParentPlacement(
+                    movingCard: parentCard,
+                    destinationParent: sourceParent,
+                    destinationIndex: 0
+                )
+            } else {
+                applyIndexBoardGroupMove(
+                    movingParentCard: parentCard,
+                    context: IndexBoardResolvedGroupMoveContext(
+                        previousGroup: previousGroup,
+                        nextGroup: nextGroup
+                    )
+                )
+            }
+        }
+    }
+
+    private func applyIndexBoardGroupMove(
+        movingParentCard: SceneCard,
+        context: IndexBoardResolvedGroupMoveContext
+    ) {
+        let destination = resolvedIndexBoardGroupDestination(
+            movingParentCard: movingParentCard,
+            previousGroup: context.previousGroup,
+            nextGroup: context.nextGroup
+        )
+        applyIndexBoardParentPlacement(
+            movingCard: movingParentCard,
+            destinationParent: destination.parent,
+            destinationIndex: destination.index
+        )
+    }
+
+    private func applyIndexBoardParentPlacement(
+        movingCard: SceneCard,
+        destinationParent: SceneCard?,
+        destinationIndex: Int
+    ) {
+        guard isValidIndexBoardParent(destinationParent, for: movingCard) else { return }
+        if movingCard.isArchived {
+            movingCard.isArchived = false
+        }
+
+        let oldParent = movingCard.parent
+        normalizeIndices(parent: oldParent)
+
+        var insertionIndex = destinationIndex
+        if oldParent?.id == destinationParent?.id,
+           movingCard.orderIndex < insertionIndex {
+            insertionIndex -= 1
+        }
+        insertionIndex = max(0, insertionIndex)
+
+        let destinationSiblings = liveOrderedSiblings(parent: destinationParent)
+        for sibling in destinationSiblings where sibling.id != movingCard.id && sibling.orderIndex >= insertionIndex {
+            sibling.orderIndex += 1
+        }
+
+        movingCard.parent = destinationParent
+        movingCard.orderIndex = insertionIndex
+        movingCard.isFloating = false
+
+        normalizeIndices(parent: movingCard.parent)
+        if oldParent?.id != movingCard.parent?.id {
+            normalizeIndices(parent: oldParent)
+        }
+
+        synchronizeMovedSubtreeCategoryIfNeeded(
+            for: movingCard,
+            oldParent: oldParent,
+            newParent: movingCard.parent
         )
     }
 
@@ -1874,6 +2090,100 @@ extension ScenarioWriterView {
         }
     }
 
+    private func resolvedIndexBoardTempGroupWidths(
+        surfaceProjection: BoardSurfaceProjection?
+    ) -> [UUID: Int] {
+        Dictionary(
+            uniqueKeysWithValues: surfaceProjection?.parentGroups.compactMap { placement in
+                guard placement.isTempGroup,
+                      let parentCardID = placement.parentCardID else {
+                    return nil
+                }
+                return (parentCardID, placement.width)
+            } ?? []
+        )
+    }
+
+    private func resolvedUpdatedIndexBoardTempStrips(
+        referenceSurfaceProjection: BoardSurfaceProjection?,
+        movingMembers: [IndexBoardTempStripMember],
+        target: IndexBoardCardDropTarget
+    ) -> [IndexBoardTempStripState] {
+        resolvedIndexBoardTempStripsByApplyingMove(
+            strips: referenceSurfaceProjection?.tempStrips ?? [],
+            movingMembers: movingMembers,
+            previousMember: target.previousTempMember,
+            nextMember: target.nextTempMember,
+            parkingPosition: target.detachedGridPosition
+        )
+    }
+
+    private func applyIndexBoardTempStripPresentation(
+        _ strips: [IndexBoardTempStripState],
+        referenceSurfaceProjection: BoardSurfaceProjection?
+    ) {
+        let layout = resolvedIndexBoardTempStripSurfaceLayout(
+            strips: strips,
+            tempGroupWidthsByParentID: resolvedIndexBoardTempGroupWidths(
+                surfaceProjection: referenceSurfaceProjection
+            )
+        )
+        let tempGroupIDs = Set(
+            strips.flatMap(\.members).compactMap { member in
+                member.kind == .group ? member.id : nil
+            }
+        )
+
+        indexBoardRuntime.updateSession(for: scenario.id, paneID: paneContextID) { session in
+            session.tempStrips = strips
+            session.detachedGridPositionByCardID = layout.detachedPositionsByCardID
+            for parentCardID in tempGroupIDs {
+                if let position = layout.groupOriginByParentID[parentCardID] {
+                    session.groupGridPositionByParentID[parentCardID] = position
+                }
+            }
+        }
+    }
+
+    private func applyIndexBoardTempStripOrdering(
+        _ strips: [IndexBoardTempStripState]
+    ) {
+        guard let tempContainer = resolvedIndexBoardTempContainer() else { return }
+        let orderedMemberIDs = strips
+            .sorted { lhs, rhs in
+                if lhs.row != rhs.row { return lhs.row < rhs.row }
+                if lhs.anchorColumn != rhs.anchorColumn { return lhs.anchorColumn < rhs.anchorColumn }
+                return lhs.id < rhs.id
+            }
+            .flatMap(\.members)
+            .map(\.id)
+        let uniqueOrderedIDs = orderedMemberIDs.reduce(into: [UUID]()) { partialResult, cardID in
+            if !partialResult.contains(cardID) {
+                partialResult.append(cardID)
+            }
+        }
+        let tempChildren = liveOrderedSiblings(parent: tempContainer)
+        let remainingIDs = tempChildren.map(\.id).filter { !uniqueOrderedIDs.contains($0) }
+        let finalIDs = uniqueOrderedIDs + remainingIDs
+
+        for (index, cardID) in finalIDs.enumerated() {
+            guard let card = findCard(by: cardID) else { continue }
+            card.parent = tempContainer
+            card.orderIndex = index
+            card.isFloating = false
+        }
+
+        normalizeIndices(parent: tempContainer)
+    }
+
+    private func reindexIndexBoardDetachedSiblingsVisually(preferredColumns: Int?) {
+        guard let tempContainer = resolvedIndexBoardTempContainer() else { return }
+        reindexIndexBoardSiblingsVisually(
+            parent: tempContainer,
+            preferredColumns: max(1, preferredColumns ?? 1)
+        )
+    }
+
     private func reindexIndexBoardSiblingsVisually(
         parent: SceneCard?,
         preferredColumns: Int
@@ -1918,7 +2228,9 @@ extension ScenarioWriterView {
         positionByCardID.reserveCapacity(surfaceProjection.surfaceItems.count)
 
         for item in surfaceProjection.surfaceItems {
-            if let detachedGridPosition = item.detachedGridPosition {
+            if let explicitGridPosition = item.gridPosition {
+                positionByCardID[item.cardID] = explicitGridPosition
+            } else if let detachedGridPosition = item.detachedGridPosition {
                 positionByCardID[item.cardID] = detachedGridPosition
             } else if let slotIndex = item.slotIndex {
                 positionByCardID[item.cardID] = IndexBoardGridPosition(
@@ -2026,7 +2338,9 @@ extension ScenarioWriterView {
         movingCard: SceneCard
     ) -> SceneCard? {
         var current = candidate
+        var visited: Set<UUID> = []
         while let parent = current {
+            guard visited.insert(parent.id).inserted else { return nil }
             if isValidIndexBoardParent(parent, for: movingCard) {
                 return parent
             }

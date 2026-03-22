@@ -39,6 +39,51 @@ extension ScenarioWriterView {
         return liveOrderedSiblings(parent: noteCard).first(where: isIndexBoardTempContainerCard(_:))
     }
 
+    func ensureIndexBoardTempContainer() -> SceneCard {
+        if let existing = resolvedIndexBoardTempContainer() {
+            return existing
+        }
+
+        let rootCard: SceneCard = {
+            if let existing = resolvedIndexBoardRootCard() {
+                return existing
+            }
+            let title = scenario.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            let root = SceneCard(
+                content: title.isEmpty ? "제목 없음" : title,
+                orderIndex: liveOrderedSiblings(parent: nil).count,
+                scenario: scenario
+            )
+            scenario.cards.append(root)
+            return root
+        }()
+
+        let noteCard: SceneCard = {
+            if let existing = liveOrderedSiblings(parent: rootCard).first(where: isIndexBoardNoteContainerCard(_:)) {
+                return existing
+            }
+            let note = SceneCard(
+                content: ScenarioCardCategory.note,
+                orderIndex: liveOrderedSiblings(parent: rootCard).count,
+                parent: rootCard,
+                scenario: scenario,
+                category: ScenarioCardCategory.note
+            )
+            scenario.cards.append(note)
+            return note
+        }()
+
+        let tempCard = SceneCard(
+            content: IndexBoardTempPathConstants.tempTitle,
+            orderIndex: liveOrderedSiblings(parent: noteCard).count,
+            parent: noteCard,
+            scenario: scenario,
+            category: ScenarioCardCategory.note
+        )
+        scenario.cards.append(tempCard)
+        return tempCard
+    }
+
     func liveIndexBoardTempChildCards() -> [SceneCard] {
         guard let tempContainer = resolvedIndexBoardTempContainer() else { return [] }
         return liveOrderedSiblings(parent: tempContainer)
@@ -64,49 +109,7 @@ extension ScenarioWriterView {
         var createdCard: SceneCard?
 
         scenario.performBatchedCardMutation {
-            let rootCard: SceneCard = {
-                if let existing = resolvedIndexBoardRootCard() {
-                    return existing
-                }
-                let title = scenario.title.trimmingCharacters(in: .whitespacesAndNewlines)
-                let root = SceneCard(
-                    content: title.isEmpty ? "제목 없음" : title,
-                    orderIndex: liveOrderedSiblings(parent: nil).count,
-                    scenario: scenario
-                )
-                scenario.cards.append(root)
-                return root
-            }()
-
-            let noteCard: SceneCard = {
-                if let existing = liveOrderedSiblings(parent: rootCard).first(where: isIndexBoardNoteContainerCard(_:)) {
-                    return existing
-                }
-                let note = SceneCard(
-                    content: ScenarioCardCategory.note,
-                    orderIndex: liveOrderedSiblings(parent: rootCard).count,
-                    parent: rootCard,
-                    scenario: scenario,
-                    category: ScenarioCardCategory.note
-                )
-                scenario.cards.append(note)
-                return note
-            }()
-
-            let tempCard: SceneCard = {
-                if let existing = liveOrderedSiblings(parent: noteCard).first(where: isIndexBoardTempContainerCard(_:)) {
-                    return existing
-                }
-                let temp = SceneCard(
-                    content: IndexBoardTempPathConstants.tempTitle,
-                    orderIndex: liveOrderedSiblings(parent: noteCard).count,
-                    parent: noteCard,
-                    scenario: scenario,
-                    category: ScenarioCardCategory.note
-                )
-                scenario.cards.append(temp)
-                return temp
-            }()
+            let tempCard = ensureIndexBoardTempContainer()
 
             let newCard = SceneCard(
                 orderIndex: liveOrderedSiblings(parent: tempCard).count,

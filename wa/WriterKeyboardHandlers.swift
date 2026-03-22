@@ -1202,13 +1202,19 @@ extension ScenarioWriterView {
         return levels[levelIndex].cards
     }
 
+    private func resolvedMainBoundaryNavigableLevel(at levelIndex: Int) -> [SceneCard]? {
+        guard let level = resolvedMainUnfilteredLevel(at: levelIndex) else { return nil }
+        let filtered = level.filter { !isIndexBoardTempDescendant(cardID: $0.id) }
+        return filtered.isEmpty ? level : filtered
+    }
+
     func mainCrossCategoryBoundaryTarget(
         for card: SceneCard,
         levelIndex: Int,
         step: Int
     ) -> SceneCard? {
         guard levelIndex >= 2 else { return nil }
-        guard let level = resolvedMainUnfilteredLevel(at: levelIndex),
+        guard let level = resolvedMainBoundaryNavigableLevel(at: levelIndex),
               let index = level.firstIndex(where: { $0.id == card.id }) else {
             return nil
         }
@@ -1227,7 +1233,7 @@ extension ScenarioWriterView {
         fallback: [SceneCard]
     ) -> [SceneCard] {
         guard target.category != card.category,
-              let fullLevel = resolvedMainUnfilteredLevel(at: levelIndex) else {
+              let fullLevel = resolvedMainBoundaryNavigableLevel(at: levelIndex) else {
             return fallback
         }
         return fullLevel

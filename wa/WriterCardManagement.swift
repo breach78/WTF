@@ -2978,7 +2978,13 @@ extension ScenarioWriterView {
 
     func isDescendant(_ card: SceneCard, of targetID: UUID) -> Bool {
         var curr = findCard(by: targetID)?.parent
-        while let p = curr { if p.id == card.id { return true }; curr = p.parent }; return false
+        var visited: Set<UUID> = []
+        while let p = curr {
+            guard visited.insert(p.id).inserted else { return false }
+            if p.id == card.id { return true }
+            curr = p.parent
+        }
+        return false
     }
 
     func resolvedLevelsWithParents() -> [LevelData] {

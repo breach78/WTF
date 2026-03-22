@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 struct IndexBoardScaffoldView: View {
     let session: IndexBoardSessionState
@@ -198,21 +199,74 @@ extension ScenarioWriterView {
         guard !showFocusMode else { return false }
         guard !isPreviewingHistory else { return false }
         guard sourceDepth >= 0 else { return false }
-        return indexBoardRuntime.canActivate(scenarioID: scenario.id, paneID: paneContextID)
+        return true
+    }
+
+    private func mergedIndexBoardSourceCardIDs(_ liveIDs: [UUID], persistedIDs: [UUID]) -> [UUID] {
+        var ordered: [UUID] = []
+        var seen: Set<UUID> = []
+        for cardID in liveIDs + persistedIDs {
+            if seen.insert(cardID).inserted {
+                ordered.append(cardID)
+            }
+        }
+        return ordered
+    }
+
+    private func confirmIndexBoardSourceReplacement(
+        currentSourceParentID: UUID?,
+        incomingSourceParentID: UUID?
+    ) -> Bool {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "보드 컬럼을 바꿀까요?"
+        let currentTitle = indexBoardSourceTitle(for: currentSourceParentID)
+        let incomingTitle = indexBoardSourceTitle(for: incomingSourceParentID)
+        alert.informativeText = "\"\(currentTitle)\" 보드 배치를 버리고 \"\(incomingTitle)\" 컬럼을 새 보드로 엽니다."
+        alert.addButton(withTitle: "바꾸기")
+        alert.addButton(withTitle: "취소")
+        return alert.runModal() == .alertFirstButtonReturn
     }
 
     func openIndexBoard(sourceParentID: UUID?, sourceDepth: Int, sourceCardIDs: [UUID]) {
         guard canOpenIndexBoard(sourceParentID: sourceParentID, sourceDepth: sourceDepth) else { return }
 
-        let session = IndexBoardSessionState(
-            source: IndexBoardColumnSource(parentID: sourceParentID, depth: sourceDepth),
-            sourceCardIDs: sourceCardIDs,
-            entrySnapshot: captureIndexBoardEntrySnapshot()
-        )
+        let source = IndexBoardColumnSource(parentID: sourceParentID, depth: sourceDepth)
+        let entrySnapshot = captureIndexBoardEntrySnapshot()
+        let persistedSession = indexBoardRuntime.persistedSession(for: scenario.id, entrySnapshot: entrySnapshot)
+        let existingSession = activeIndexBoardSession ?? persistedSession
+
+        if let existingSession,
+           existingSession.source != source,
+           !confirmIndexBoardSourceReplacement(
+            currentSourceParentID: existingSession.sourceParentID,
+            incomingSourceParentID: sourceParentID
+           ) {
+            return
+        }
+
+        let session: IndexBoardSessionState
+        if let persistedSession,
+           persistedSession.source == source {
+            session = IndexBoardSessionState(
+                source: source,
+                sourceCardIDs: mergedIndexBoardSourceCardIDs(sourceCardIDs, persistedIDs: persistedSession.sourceCardIDs),
+                entrySnapshot: entrySnapshot,
+                viewport: persistedSession.viewport,
+                presentation: persistedSession.presentation,
+                navigation: IndexBoardNavigationState()
+            )
+        } else {
+            session = IndexBoardSessionState(
+                source: source,
+                sourceCardIDs: sourceCardIDs,
+                entrySnapshot: entrySnapshot
+            )
+        }
 
         finishEditing()
         indexBoardRuntime.activate(session, scenarioID: scenario.id, paneID: paneContextID)
-        let summaryTargetIDs = sourceCardIDs + liveIndexBoardTempChildCards().map(\.id)
+        let summaryTargetIDs = session.sourceCardIDs + liveIndexBoardTempChildCards().map(\.id)
         reconcileIndexBoardSummaries(for: Array(Set(summaryTargetIDs)))
         isMainViewFocused = true
     }
@@ -403,16 +457,22 @@ extension ScenarioWriterView {
         }
     }
 
-    func resolvedIndexBoardSurfaceProjection() -> BoardSurfaceProjection? {
+    func resolvedIndexBoardSurfaceProjection(
+        referenceSurfaceProjection: BoardSurfaceProjection? = nil
+    ) -> BoardSurfaceProjection? {
         guard let session = activeIndexBoardSession else { return nil }
         let tempContainer = resolvedIndexBoardTempContainer()
+        let tempContainerID = tempContainer?.id
         let liveCards = resolvedLiveIndexBoardSourceCards(for: session)
+        let sourceParentIDs = Set(liveCards.compactMap { $0.parent?.id })
         let regularCards = liveCards.filter { card in
             guard let tempContainer else { return true }
             if card.id == tempContainer.id { return false }
             return card.parent?.id != tempContainer.id
         }
-        let tempChildCards = liveIndexBoardTempChildCards()
+        let tempChildCards = liveIndexBoardTempChildCards().filter { card in
+            !sourceParentIDs.contains(card.id)
+        }
         var orderedCardIDs: [UUID] = []
         orderedCardIDs.reserveCapacity(regularCards.count + tempChildCards.count)
         var seenCardIDs: Set<UUID> = []
@@ -422,94 +482,266 @@ extension ScenarioWriterView {
             }
         }
 
-        var cardsByLaneParentID: [UUID?: [SceneCard]] = [:]
-        var laneParentOrder: [UUID?] = []
-
+        var cardsByParentGroupID: [BoardSurfaceParentGroupID: [SceneCard]] = [:]
+        var parentGroupOrder: [BoardSurfaceParentGroupID] = []
         for card in regularCards {
-            let laneParentID = card.parent?.id
-            if cardsByLaneParentID[laneParentID] == nil {
-                laneParentOrder.append(laneParentID)
+            let groupID: BoardSurfaceParentGroupID = {
+                if let parentID = card.parent?.id {
+                    return .parent(parentID)
+                }
+                return .root
+            }()
+            if cardsByParentGroupID[groupID] == nil {
+                parentGroupOrder.append(groupID)
             }
-            cardsByLaneParentID[laneParentID, default: []].append(card)
+            cardsByParentGroupID[groupID, default: []].append(card)
         }
 
-        if let tempContainer,
-           !tempChildCards.isEmpty {
-            if cardsByLaneParentID[tempContainer.id] == nil {
-                laneParentOrder.append(tempContainer.id)
+        let storedGroupPositions = activeIndexBoardSession?.groupGridPositionByParentID ?? [:]
+        var nextDefaultColumn = 0
+        var provisionalParentGroups: [BoardSurfaceParentGroupPlacement] = []
+        provisionalParentGroups.reserveCapacity(parentGroupOrder.count)
+        var tempDescendantCache: [UUID: Bool] = [:]
+
+        func resolvedIsTempDescendant(_ cardID: UUID?) -> Bool {
+            guard let cardID, let tempContainerID else { return false }
+            if let cached = tempDescendantCache[cardID] {
+                return cached
             }
-            cardsByLaneParentID[tempContainer.id, default: []].append(contentsOf: tempChildCards)
+
+            var traversalOrder: [UUID] = []
+            traversalOrder.reserveCapacity(8)
+            var visited: Set<UUID> = []
+            var currentID: UUID? = cardID
+            var result = false
+
+            while let currentIDValue = currentID {
+                if let cached = tempDescendantCache[currentIDValue] {
+                    result = cached
+                    break
+                }
+                if currentIDValue == tempContainerID {
+                    result = true
+                    break
+                }
+                guard visited.insert(currentIDValue).inserted else {
+                    result = false
+                    break
+                }
+                traversalOrder.append(currentIDValue)
+                guard let card = findCard(by: currentIDValue) else {
+                    result = false
+                    break
+                }
+                currentID = card.parent?.id
+            }
+
+            for traversedID in traversalOrder {
+                tempDescendantCache[traversedID] = result
+            }
+            return result
         }
 
-        var lanes: [BoardSurfaceLane] = []
-        lanes.reserveCapacity(laneParentOrder.count)
-
-        let detachedGridPositionByCardID = activeIndexBoardSession?.detachedGridPositionByCardID ?? [:]
-
-        var surfaceItems: [BoardSurfaceItem] = []
-        surfaceItems.reserveCapacity(orderedCardIDs.count)
-        var nextSlotIndex = 0
-
-        for (laneIndex, laneParentID) in laneParentOrder.enumerated() {
-            let laneCards = cardsByLaneParentID[laneParentID] ?? []
-            guard !laneCards.isEmpty else { continue }
-            let parentCard = laneParentID.flatMap { findCard(by: $0) }
-            let isTempLane = tempContainer?.id == laneParentID
-            lanes.append(
-                BoardSurfaceLane(
-                    parentCardID: laneParentID,
-                    laneIndex: laneIndex,
-                    labelText: indexBoardLaneLabel(
+        for groupID in parentGroupOrder {
+            let groupCards = cardsByParentGroupID[groupID] ?? []
+            guard !groupCards.isEmpty else { continue }
+            let parentCard = groupID.parentCardID.flatMap { findCard(by: $0) }
+            let fallbackOrigin = IndexBoardGridPosition(column: nextDefaultColumn, row: 0)
+            let resolvedOrigin = groupID.parentCardID.flatMap { storedGroupPositions[$0] } ?? fallbackOrigin
+            let isTempGroup = resolvedIsTempDescendant(groupID.parentCardID)
+            nextDefaultColumn = max(nextDefaultColumn, resolvedOrigin.column + max(1, groupCards.count))
+            provisionalParentGroups.append(
+                BoardSurfaceParentGroupPlacement(
+                    id: groupID,
+                    parentCardID: groupID.parentCardID,
+                    origin: resolvedOrigin,
+                    cardIDs: groupCards.map(\.id),
+                    titleText: indexBoardLaneLabel(
                         for: parentCard,
-                        laneParentID: laneParentID,
+                        laneParentID: groupID.parentCardID,
                         tempContainerID: tempContainer?.id
                     ),
                     subtitleText: indexBoardLaneSubtitle(
                         for: parentCard,
-                        childCards: laneCards,
-                        laneParentID: laneParentID,
+                        childCards: groupCards,
+                        laneParentID: groupID.parentCardID,
                         tempContainerID: tempContainer?.id
                     ),
-                    colorToken: indexBoardLaneColorToken(for: parentCard, childCards: laneCards),
-                    isTempLane: isTempLane
+                    colorToken: indexBoardLaneColorToken(for: parentCard, childCards: groupCards),
+                    isMainline: !isTempGroup,
+                    isTempGroup: isTempGroup
                 )
             )
+        }
 
-            let flowLaneCards = laneCards.filter { detachedGridPositionByCardID[$0.id] == nil }
-            let detachedLaneCards = laneCards.filter { detachedGridPositionByCardID[$0.id] != nil }
+        let tempProvisionalParentGroups = provisionalParentGroups.filter(\.isTempGroup)
+        let mainlineProvisionalParentGroups = provisionalParentGroups.filter { !$0.isTempGroup }
+        let detachedGridPositionByCardID = activeIndexBoardSession?.detachedGridPositionByCardID ?? [:]
+        let maxGroupRow = provisionalParentGroups.map(\.origin.row).max() ?? 0
+        let parkingRow = maxGroupRow + 2
+        var nextParkingColumn = 0
+        var rawDetachedPositionByCardID: [UUID: IndexBoardGridPosition] = [:]
+        rawDetachedPositionByCardID.reserveCapacity(tempChildCards.count)
+        for card in tempChildCards {
+            rawDetachedPositionByCardID[card.id] = detachedGridPositionByCardID[card.id] ?? {
+                defer { nextParkingColumn += 1 }
+                return IndexBoardGridPosition(column: nextParkingColumn, row: parkingRow)
+            }()
+        }
 
-            for card in flowLaneCards {
-                surfaceItems.append(
-                    BoardSurfaceItem(
-                        cardID: card.id,
-                        laneParentID: laneParentID,
-                        laneIndex: laneIndex,
-                        slotIndex: nextSlotIndex,
-                        detachedGridPosition: nil
-                    )
-                )
-                nextSlotIndex += 1
+        let resolvedTempStrips = resolvedIndexBoardTempStrips(
+            persistedStrips: session.tempStrips,
+            tempGroups: tempProvisionalParentGroups,
+            detachedPositionsByCardID: rawDetachedPositionByCardID
+        )
+        let tempStripLayout = resolvedIndexBoardTempStripSurfaceLayout(
+            strips: resolvedTempStrips,
+            tempGroupWidthsByParentID: Dictionary(
+                uniqueKeysWithValues: tempProvisionalParentGroups.compactMap { placement in
+                    placement.parentCardID.map { ($0, placement.width) }
+                }
+            )
+        )
+        let positionedTempParentGroups = tempProvisionalParentGroups.map { placement in
+            guard let parentCardID = placement.parentCardID,
+                  let resolvedOrigin = tempStripLayout.groupOriginByParentID[parentCardID] else {
+                return placement
             }
+            return BoardSurfaceParentGroupPlacement(
+                id: placement.id,
+                parentCardID: placement.parentCardID,
+                origin: resolvedOrigin,
+                cardIDs: placement.cardIDs,
+                titleText: placement.titleText,
+                subtitleText: placement.subtitleText,
+                colorToken: placement.colorToken,
+                isMainline: placement.isMainline,
+                isTempGroup: placement.isTempGroup
+            )
+        }
+        rawDetachedPositionByCardID = tempStripLayout.detachedPositionsByCardID.merging(rawDetachedPositionByCardID) { lhs, _ in lhs }
 
-            for card in detachedLaneCards {
+        let sortedParentGroups = (mainlineProvisionalParentGroups + positionedTempParentGroups).sorted(by: indexBoardSurfaceGroupSort)
+
+        let normalizedSurfaceLayout = normalizedIndexBoardSurfaceLayout(
+            parentGroups: sortedParentGroups,
+            detachedPositionsByCardID: rawDetachedPositionByCardID,
+            referenceParentGroups: referenceSurfaceProjection?.parentGroups,
+            referenceDetachedPositionsByCardID: referenceSurfaceProjection.map { projection in
+                indexBoardDetachedGridPositionsByCardID(from: projection)
+            }
+        )
+        let normalizedParentGroups = normalizedSurfaceLayout.parentGroups.sorted(by: indexBoardSurfaceGroupSort)
+
+        var lanes: [BoardSurfaceLane] = []
+        lanes.reserveCapacity(normalizedParentGroups.count + (tempChildCards.isEmpty ? 0 : 1))
+        var laneIndexByParentID: [UUID?: Int] = [:]
+        for placement in normalizedParentGroups {
+            let laneIndex = lanes.count
+            laneIndexByParentID[placement.parentCardID] = laneIndex
+            lanes.append(
+                BoardSurfaceLane(
+                    parentCardID: placement.parentCardID,
+                    laneIndex: laneIndex,
+                    labelText: placement.titleText,
+                    subtitleText: placement.subtitleText,
+                    colorToken: placement.colorToken,
+                    isTempLane: placement.isTempGroup
+                )
+            )
+        }
+
+        let tempLaneIndex: Int? = {
+            guard let tempContainer,
+                  !tempChildCards.isEmpty else { return nil }
+            let laneIndex = lanes.count
+            laneIndexByParentID[tempContainer.id] = laneIndex
+            lanes.append(
+                BoardSurfaceLane(
+                    parentCardID: tempContainer.id,
+                    laneIndex: laneIndex,
+                    labelText: "Temp",
+                    subtitleText: "트리 밖 카드 \(tempChildCards.count)장",
+                    colorToken: nil,
+                    isTempLane: true
+                )
+            )
+            return laneIndex
+        }()
+
+        var surfaceItems: [BoardSurfaceItem] = []
+        surfaceItems.reserveCapacity(orderedCardIDs.count)
+
+        for placement in normalizedParentGroups {
+            let laneIndex = laneIndexByParentID[placement.parentCardID] ?? 0
+            for (offset, cardID) in placement.cardIDs.enumerated() {
                 surfaceItems.append(
                     BoardSurfaceItem(
-                        cardID: card.id,
-                        laneParentID: laneParentID,
+                        cardID: cardID,
+                        laneParentID: placement.parentCardID,
                         laneIndex: laneIndex,
                         slotIndex: nil,
-                        detachedGridPosition: detachedGridPositionByCardID[card.id]
+                        detachedGridPosition: nil,
+                        gridPosition: IndexBoardGridPosition(
+                            column: placement.origin.column + offset,
+                            row: placement.origin.row
+                        ),
+                        parentGroupID: placement.id
                     )
                 )
             }
         }
 
+        if let tempContainer,
+           let tempLaneIndex {
+            for card in tempChildCards {
+                let resolvedPosition = normalizedSurfaceLayout.detachedPositionsByCardID[card.id]
+                    ?? rawDetachedPositionByCardID[card.id]
+                    ?? IndexBoardGridPosition(column: 0, row: parkingRow)
+                surfaceItems.append(
+                    BoardSurfaceItem(
+                        cardID: card.id,
+                        laneParentID: tempContainer.id,
+                        laneIndex: tempLaneIndex,
+                        slotIndex: nil,
+                        detachedGridPosition: resolvedPosition,
+                        gridPosition: resolvedPosition,
+                        parentGroupID: nil
+                    )
+                )
+            }
+        }
+
+        let sortedItems = surfaceItems.sorted(by: indexBoardSurfaceItemGridSort)
         return BoardSurfaceProjection(
             source: session.source,
+            startAnchor: BoardSurfaceStartAnchor(
+                gridPosition: IndexBoardGridPosition(column: 0, row: 0),
+                labelText: "START"
+            ),
             lanes: lanes,
-            surfaceItems: surfaceItems,
-            orderedCardIDs: orderedCardIDs
+            parentGroups: normalizedParentGroups,
+            tempStrips: resolvedTempStrips,
+            surfaceItems: sortedItems,
+            orderedCardIDs: sortedItems.map(\.cardID)
         )
+    }
+
+    func persistIndexBoardSurfacePresentation(_ surfaceProjection: BoardSurfaceProjection) {
+        guard isIndexBoardActive else { return }
+
+        let groupPositions = Dictionary(
+            uniqueKeysWithValues: surfaceProjection.parentGroups.compactMap { placement in
+                placement.parentCardID.map { ($0, placement.origin) }
+            }
+        )
+        let detachedPositions = indexBoardDetachedGridPositionsByCardID(from: surfaceProjection)
+
+        indexBoardRuntime.updateSession(for: scenario.id, paneID: paneContextID) { session in
+            session.groupGridPositionByParentID = groupPositions
+            session.detachedGridPositionByCardID = detachedPositions
+            session.tempStrips = surfaceProjection.tempStrips
+        }
     }
 
     private func resolvedLiveIndexBoardSourceCards(for session: IndexBoardSessionState) -> [SceneCard] {
@@ -551,30 +783,25 @@ extension ScenarioWriterView {
             }
     }
 
-    func resolvedIndexBoardProjection() -> IndexBoardProjection? {
-        guard let surfaceProjection = resolvedIndexBoardSurfaceProjection() else { return nil }
-
-        let groups = surfaceProjection.lanes.compactMap { lane -> IndexBoardGroupProjection? in
-            let childCards = surfaceProjection.surfaceItems
-                .filter { $0.laneIndex == lane.laneIndex }
-                .compactMap { findCard(by: $0.cardID) }
+    func resolvedIndexBoardProjection(
+        from surfaceProjection: BoardSurfaceProjection
+    ) -> IndexBoardProjection {
+        let groups = surfaceProjection.parentGroups.compactMap { placement -> IndexBoardGroupProjection? in
+            let childCards = placement.cardIDs.compactMap { findCard(by: $0) }
             guard !childCards.isEmpty else { return nil }
-
-            let parentCard = lane.parentCardID.flatMap { findCard(by: $0) }
-            let isTempGroup = resolvedIndexBoardTempContainer()?.id == lane.parentCardID
-
+            let parentCard = placement.parentCardID.flatMap { findCard(by: $0) }
             return IndexBoardGroupProjection(
-                id: lane.parentCardID.map { IndexBoardGroupID.parent($0) } ?? .root,
+                id: placement.parentCardID.map { IndexBoardGroupID.parent($0) } ?? .root,
                 parentCard: parentCard,
-                title: lane.labelText,
-                subtitle: lane.subtitleText,
+                title: placement.titleText,
+                subtitle: placement.subtitleText,
                 statusText: indexBoardLaneStatusText(
                     for: parentCard,
                     childCards: childCards,
-                    laneParentID: lane.parentCardID,
-                    isTempLane: isTempGroup
+                    laneParentID: placement.parentCardID,
+                    isTempLane: placement.isTempGroup
                 ),
-                isTempGroup: isTempGroup,
+                isTempGroup: placement.isTempGroup,
                 childCards: childCards
             )
         }
@@ -584,6 +811,122 @@ extension ScenarioWriterView {
             orderedCardIDs: surfaceProjection.orderedCardIDs,
             groups: groups
         )
+    }
+
+    func resolvedIndexBoardProjection() -> IndexBoardProjection? {
+        guard let surfaceProjection = resolvedIndexBoardSurfaceProjection() else { return nil }
+        return resolvedIndexBoardProjection(from: surfaceProjection)
+    }
+
+    private func resolvedIndexBoardMainlineGroupIDs(
+        from groups: [BoardSurfaceParentGroupPlacement]
+    ) -> Set<BoardSurfaceParentGroupID> {
+        guard let startGroup = groups.min(by: { lhs, rhs in
+            if lhs.origin.row != rhs.origin.row {
+                return lhs.origin.row < rhs.origin.row
+            }
+            if lhs.origin.column != rhs.origin.column {
+                return lhs.origin.column < rhs.origin.column
+            }
+            return lhs.id.id < rhs.id.id
+        }) else {
+            return []
+        }
+
+        let groupsByID = Dictionary(uniqueKeysWithValues: groups.map { ($0.id, $0) })
+        var visited: Set<BoardSurfaceParentGroupID> = [startGroup.id]
+        var queue: [BoardSurfaceParentGroupID] = [startGroup.id]
+
+        while let currentID = queue.first {
+            queue.removeFirst()
+            guard let current = groupsByID[currentID] else { continue }
+            for candidate in groups where !visited.contains(candidate.id) {
+                if indexBoardSurfaceGroupsAreConnected(current, candidate) {
+                    visited.insert(candidate.id)
+                    queue.append(candidate.id)
+                }
+            }
+        }
+
+        return visited
+    }
+
+    private func normalizedIndexBoardParentGroups(
+        _ groups: [BoardSurfaceParentGroupPlacement],
+        mainlineGroupIDs: Set<BoardSurfaceParentGroupID>
+    ) -> [BoardSurfaceParentGroupPlacement] {
+        let mainlineGroups = groups.filter { mainlineGroupIDs.contains($0.id) }
+        let rowShift = mainlineGroups.map(\.origin.row).min() ?? 0
+        let columnShift = mainlineGroups.map(\.origin.column).min() ?? 0
+
+        return groups.map { group in
+            let isMainline = mainlineGroupIDs.contains(group.id)
+            let shiftedOrigin: IndexBoardGridPosition
+            if isMainline {
+                shiftedOrigin = IndexBoardGridPosition(
+                    column: group.origin.column - columnShift,
+                    row: group.origin.row - rowShift
+                )
+            } else {
+                shiftedOrigin = group.origin
+            }
+
+            return BoardSurfaceParentGroupPlacement(
+                id: group.id,
+                parentCardID: group.parentCardID,
+                origin: shiftedOrigin,
+                cardIDs: group.cardIDs,
+                titleText: group.titleText,
+                subtitleText: group.subtitleText,
+                colorToken: group.colorToken,
+                isMainline: isMainline,
+                isTempGroup: !isMainline
+            )
+        }
+    }
+
+    private func indexBoardSurfaceGroupsAreConnected(
+        _ lhs: BoardSurfaceParentGroupPlacement,
+        _ rhs: BoardSurfaceParentGroupPlacement
+    ) -> Bool {
+        if lhs.origin.row == rhs.origin.row {
+            return lhs.occupiedColumns.upperBound + 1 == rhs.occupiedColumns.lowerBound ||
+                rhs.occupiedColumns.upperBound + 1 == lhs.occupiedColumns.lowerBound
+        }
+
+        if abs(lhs.origin.row - rhs.origin.row) == 1 {
+            return lhs.occupiedColumns.overlaps(rhs.occupiedColumns)
+        }
+
+        return false
+    }
+
+    private func indexBoardSurfaceGroupSort(
+        _ lhs: BoardSurfaceParentGroupPlacement,
+        _ rhs: BoardSurfaceParentGroupPlacement
+    ) -> Bool {
+        if lhs.origin.row != rhs.origin.row {
+            return lhs.origin.row < rhs.origin.row
+        }
+        if lhs.origin.column != rhs.origin.column {
+            return lhs.origin.column < rhs.origin.column
+        }
+        return lhs.id.id < rhs.id.id
+    }
+
+    private func indexBoardSurfaceItemGridSort(
+        _ lhs: BoardSurfaceItem,
+        _ rhs: BoardSurfaceItem
+    ) -> Bool {
+        let lhsPosition = lhs.gridPosition ?? lhs.detachedGridPosition ?? IndexBoardGridPosition(column: .max / 4, row: .max / 4)
+        let rhsPosition = rhs.gridPosition ?? rhs.detachedGridPosition ?? IndexBoardGridPosition(column: .max / 4, row: .max / 4)
+        if lhsPosition.row != rhsPosition.row {
+            return lhsPosition.row < rhsPosition.row
+        }
+        if lhsPosition.column != rhsPosition.column {
+            return lhsPosition.column < rhsPosition.column
+        }
+        return lhs.cardID.uuidString < rhs.cardID.uuidString
     }
 
     func indexBoardLaneLabel(
@@ -668,7 +1011,8 @@ extension ScenarioWriterView {
         guard isIndexBoardActive else { return }
         let clamped = min(max(scale, IndexBoardZoom.minScale), IndexBoardZoom.maxScale)
         let rounded = (clamped * 100).rounded() / 100
-        indexBoardRuntime.updateSession(for: scenario.id, paneID: paneContextID) { session in
+        indexBoardRuntime.updateSession(for: scenario.id, paneID: paneContextID, persist: false) { session in
+            guard abs(session.zoomScale - rounded) > 0.001 else { return }
             session.zoomScale = rounded
         }
     }
@@ -683,11 +1027,16 @@ extension ScenarioWriterView {
 
     func updateIndexBoardScrollOffset(_ offset: CGPoint) {
         guard isIndexBoardActive else { return }
-        indexBoardRuntime.updateSession(for: scenario.id, paneID: paneContextID) { session in
-            session.scrollOffset = CGPoint(
+        indexBoardRuntime.updateSession(for: scenario.id, paneID: paneContextID, persist: false) { session in
+            let resolvedOffset = CGPoint(
                 x: max(0, offset.x),
                 y: max(0, offset.y)
             )
+            guard abs(session.scrollOffset.x - resolvedOffset.x) > 0.5 ||
+                    abs(session.scrollOffset.y - resolvedOffset.y) > 0.5 else {
+                return
+            }
+            session.scrollOffset = resolvedOffset
         }
     }
 
@@ -709,6 +1058,25 @@ extension ScenarioWriterView {
             keyboardRangeSelectionAnchorCardID = card.id
         }
 
+        changeActiveCard(to: card, deferToMainAsync: false)
+        isMainViewFocused = true
+    }
+
+    func handleIndexBoardCardDragStart(cardID: UUID, movingCardIDs: [UUID]) {
+        guard let card = findCard(by: cardID) else { return }
+
+        finishEditing()
+
+        let movingIDSet = Set(movingCardIDs)
+        if !movingIDSet.isEmpty,
+           selectedCardIDs.isSuperset(of: movingIDSet),
+           movingIDSet.contains(cardID) {
+            selectedCardIDs = movingIDSet
+        } else {
+            selectedCardIDs = [cardID]
+        }
+
+        keyboardRangeSelectionAnchorCardID = cardID
         changeActiveCard(to: card, deferToMainAsync: false)
         isMainViewFocused = true
     }
@@ -806,6 +1174,180 @@ extension ScenarioWriterView {
         isMainViewFocused = true
     }
 
+    func updateIndexBoardGroupPosition(parentCardID: UUID, position: IndexBoardGridPosition?) {
+        guard isIndexBoardActive else { return }
+        indexBoardRuntime.updateSession(for: scenario.id, paneID: paneContextID) { session in
+            if let position {
+                session.groupGridPositionByParentID[parentCardID] = position
+            } else {
+                session.groupGridPositionByParentID.removeValue(forKey: parentCardID)
+            }
+        }
+    }
+
+    private func indexBoardRowMajorPredecessorGroup(
+        in surfaceProjection: BoardSurfaceProjection,
+        targetOrigin: IndexBoardGridPosition
+    ) -> BoardSurfaceParentGroupPlacement? {
+        surfaceProjection.parentGroups
+            .filter { !$0.isTempGroup }
+            .last { placement in
+                if placement.origin.row != targetOrigin.row {
+                    return placement.origin.row < targetOrigin.row
+                }
+                return placement.origin.column <= targetOrigin.column
+            }
+    }
+
+    private func resolvedIndexBoardParentCreationInsertionContext(
+        surfaceProjection: BoardSurfaceProjection,
+        targetOrigin: IndexBoardGridPosition
+    ) -> (parent: SceneCard?, index: Int) {
+        let sourceParent = activeIndexBoardSession?.source.parentID.flatMap { findCard(by: $0) }
+        guard let predecessorGroup = indexBoardRowMajorPredecessorGroup(
+            in: surfaceProjection,
+            targetOrigin: targetOrigin
+        ), let predecessorParent = predecessorGroup.parentCardID.flatMap({ findCard(by: $0) }) else {
+            return (sourceParent, 0)
+        }
+
+        let predecessorContainer: SceneCard? = {
+            guard let candidate = predecessorParent.parent else { return nil }
+            return isIndexBoardTempDescendant(cardID: candidate.id) ? nil : candidate
+        }()
+        let insertionParent = predecessorContainer ?? sourceParent
+
+        guard predecessorParent.parent?.id == insertionParent?.id else {
+            return (insertionParent, liveOrderedSiblings(parent: insertionParent).count)
+        }
+
+        return (insertionParent, predecessorParent.orderIndex + 1)
+    }
+
+    private func resolvedIndexBoardParentCreationCategory(
+        selectedCards: [SceneCard],
+        insertionParent: SceneCard?
+    ) -> String? {
+        func isSemanticParent(_ card: SceneCard?) -> Bool {
+            guard let card else { return false }
+            return !isIndexBoardNoteContainerCard(card) && !isIndexBoardTempContainerCard(card)
+        }
+
+        if isSemanticParent(insertionParent) {
+            return insertionParent?.category
+        }
+
+        if let selectedCategory = selectedCards.lazy.compactMap(\.category).first(where: {
+            $0 != ScenarioCardCategory.note
+        }) {
+            return selectedCategory
+        }
+
+        let sourceParent = activeIndexBoardSession?.source.parentID.flatMap { findCard(by: $0) }
+        if isSemanticParent(sourceParent) {
+            return sourceParent?.category
+        }
+
+        return selectedCards.first?.category
+    }
+
+    func createIndexBoardParentFromSelection() {
+        guard isIndexBoardActive,
+              !selectedCardIDs.isEmpty,
+              let surfaceProjection = resolvedIndexBoardSurfaceProjection() else { return }
+
+        let selectedItems = surfaceProjection.surfaceItems.filter { selectedCardIDs.contains($0.cardID) }
+            .sorted(by: indexBoardSurfaceItemGridSort)
+        let selectedCards = selectedItems.compactMap { item in
+            findCard(by: item.cardID)
+        }
+        guard !selectedCards.isEmpty else { return }
+
+        let targetOrigin = selectedItems.compactMap { $0.gridPosition ?? $0.detachedGridPosition }
+            .min { lhs, rhs in
+                if lhs.row != rhs.row { return lhs.row < rhs.row }
+                return lhs.column < rhs.column
+            } ?? IndexBoardGridPosition(column: 0, row: 0)
+        let insertionContext = resolvedIndexBoardParentCreationInsertionContext(
+            surfaceProjection: surfaceProjection,
+            targetOrigin: targetOrigin
+        )
+
+        let previousState = captureScenarioState()
+        var createdParent: SceneCard?
+        let oldParents = selectedCards.map(\.parent)
+
+        scenario.performBatchedCardMutation {
+            let insertionParent = insertionContext.parent
+            let insertionIndex = min(
+                max(0, insertionContext.index),
+                liveOrderedSiblings(parent: insertionParent).count
+            )
+            let newParentCategory = resolvedIndexBoardParentCreationCategory(
+                selectedCards: selectedCards,
+                insertionParent: insertionParent
+            )
+            let newParent = SceneCard(
+                content: "",
+                orderIndex: insertionIndex,
+                parent: insertionParent,
+                scenario: scenario,
+                category: newParentCategory
+            )
+
+            for sibling in liveOrderedSiblings(parent: insertionParent) where sibling.orderIndex >= insertionIndex {
+                sibling.orderIndex += 1
+            }
+            scenario.cards.append(newParent)
+
+            for (childIndex, card) in selectedCards.enumerated() {
+                let previousParent = card.parent
+                card.parent = newParent
+                card.orderIndex = childIndex
+                card.isFloating = false
+                synchronizeMovedSubtreeCategoryIfNeeded(
+                    for: card,
+                    oldParent: previousParent,
+                    newParent: newParent
+                )
+            }
+
+            normalizeIndices(parent: insertionParent)
+            normalizeIndices(parent: newParent)
+            for oldParent in oldParents {
+                if oldParent?.id != insertionParent?.id {
+                    normalizeIndices(parent: oldParent)
+                }
+            }
+
+            createdParent = newParent
+        }
+
+        guard let createdParent else { return }
+
+        indexBoardRuntime.updateSession(for: scenario.id, paneID: paneContextID) { session in
+            session.sourceCardIDs = mergedIndexBoardSourceCardIDs(
+                session.sourceCardIDs,
+                persistedIDs: selectedCards.map(\.id)
+            )
+            for card in selectedCards {
+                session.detachedGridPositionByCardID.removeValue(forKey: card.id)
+            }
+        }
+        updateIndexBoardGroupPosition(parentCardID: createdParent.id, position: targetOrigin)
+
+        selectedCardIDs = Set(selectedCards.map(\.id))
+        keyboardRangeSelectionAnchorCardID = selectedCards.first?.id
+        if let firstSelectedCard = selectedCards.first {
+            changeActiveCard(to: firstSelectedCard, deferToMainAsync: false)
+            requestIndexBoardReveal(cardID: firstSelectedCard.id)
+        }
+        commitCardMutation(
+            previousState: previousState,
+            actionName: "보드 부모 카드 생성"
+        )
+    }
+
     func toggleIndexBoardCardFace(_ card: SceneCard) {
         guard isIndexBoardActive else { return }
         let nextShowsBack = !(activeIndexBoardSession?.showsBackByCardID[card.id] ?? false)
@@ -816,8 +1358,8 @@ extension ScenarioWriterView {
 
     @ViewBuilder
     func indexBoardCanvas(size: CGSize) -> some View {
-        if let surfaceProjection = resolvedIndexBoardSurfaceProjection(),
-           let projection = resolvedIndexBoardProjection() {
+        if let surfaceProjection = resolvedIndexBoardSurfaceProjection() {
+            let projection = resolvedIndexBoardProjection(from: surfaceProjection)
             let cardsByID = Dictionary(
                 uniqueKeysWithValues: surfaceProjection.orderedCardIDs.compactMap { cardID in
                     findCard(by: cardID).map { (cardID, $0) }
@@ -860,8 +1402,24 @@ extension ScenarioWriterView {
                 onCreateTempCard: {
                     _ = createIndexBoardTempCard()
                 },
+                onCreateParentFromSelection: {
+                    createIndexBoardParentFromSelection()
+                },
+                onSetParentGroupTemp: { parentCardID, isTemp in
+                    setIndexBoardParentGroupTemp(
+                        parentCardID: parentCardID,
+                        isTemp: isTemp,
+                        projection: projection
+                    )
+                },
                 onCardTap: { card in
                     handleIndexBoardCardClick(card, orderedCardIDs: surfaceProjection.orderedCardIDs)
+                },
+                onCardDragStart: { movingCardIDs, draggedCardID in
+                    handleIndexBoardCardDragStart(
+                        cardID: draggedCardID,
+                        movingCardIDs: movingCardIDs
+                    )
                 },
                 onCardOpen: { card in
                     presentIndexBoardEditor(for: card)
@@ -909,6 +1467,12 @@ extension ScenarioWriterView {
                     commitIndexBoardGroupMove(
                         groupID: groupID,
                         targetIndex: targetIndex,
+                        projection: projection
+                    )
+                },
+                onParentGroupMove: { target in
+                    commitIndexBoardParentGroupMove(
+                        target: target,
                         projection: projection
                     )
                 },

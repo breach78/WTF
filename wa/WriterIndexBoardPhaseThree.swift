@@ -240,7 +240,10 @@ struct IndexBoardPhaseThreeView: View {
     let editorSummary: IndexBoardResolvedSummary?
     let onClose: () -> Void
     let onCreateTempCard: () -> Void
+    let onCreateParentFromSelection: () -> Void
+    let onSetParentGroupTemp: (UUID, Bool) -> Void
     let onCardTap: (SceneCard) -> Void
+    let onCardDragStart: ([UUID], UUID) -> Void
     let onCardOpen: (SceneCard) -> Void
     let onCardFaceToggle: (SceneCard) -> Void
     let onZoomScaleChange: (CGFloat) -> Void
@@ -252,6 +255,7 @@ struct IndexBoardPhaseThreeView: View {
     let onMarqueeSelectionChange: (Set<UUID>) -> Void
     let onClearSelection: () -> Void
     let onGroupMove: (IndexBoardGroupID, Int) -> Void
+    let onParentGroupMove: (IndexBoardParentGroupDropTarget) -> Void
     let onEditorDraftChange: (IndexBoardEditorDraft) -> Void
     let onCancelEditor: () -> Void
     let onSaveEditor: () -> Void
@@ -271,7 +275,7 @@ struct IndexBoardPhaseThreeView: View {
         ZStack {
             Group {
                 if let surfaceProjection {
-                    IndexBoardSurfacePhaseTwoView(
+                    IndexBoardSurfaceAppKitPhaseTwoView(
                         surfaceProjection: surfaceProjection,
                         sourceTitle: sourceTitle,
                         canvasSize: canvasSize,
@@ -289,7 +293,10 @@ struct IndexBoardPhaseThreeView: View {
                         isInteractionEnabled: editorDraft == nil,
                         onClose: onClose,
                         onCreateTempCard: onCreateTempCard,
+                        onCreateParentFromSelection: onCreateParentFromSelection,
+                        onSetParentGroupTemp: onSetParentGroupTemp,
                         onCardTap: onCardTap,
+                        onCardDragStart: onCardDragStart,
                         onCardOpen: onCardOpen,
                         onCardFaceToggle: onCardFaceToggle,
                         onZoomScaleChange: onZoomScaleChange,
@@ -300,7 +307,8 @@ struct IndexBoardPhaseThreeView: View {
                         onCardMoveSelection: onCardMoveSelection,
                         onMarqueeSelectionChange: onMarqueeSelectionChange,
                         onClearSelection: onClearSelection,
-                        onGroupMove: onGroupMove
+                        onGroupMove: onGroupMove,
+                        onParentGroupMove: onParentGroupMove
                     )
                 } else {
                     IndexBoardPhaseTwoView(
@@ -368,7 +376,7 @@ extension ScenarioWriterView {
             frontText: card.content,
             showsBack: showsBack
         )
-        indexBoardRuntime.updateSession(for: scenario.id, paneID: paneContextID) { session in
+        indexBoardRuntime.updateSession(for: scenario.id, paneID: paneContextID, persist: false) { session in
             session.lastPresentedCardID = card.id
         }
         isMainViewFocused = true
@@ -389,7 +397,7 @@ extension ScenarioWriterView {
     func updateIndexBoardEditorDraft(_ draft: IndexBoardEditorDraft) {
         guard isIndexBoardActive else { return }
         indexBoardEditorDraft = draft
-        indexBoardRuntime.updateSession(for: scenario.id, paneID: paneContextID) { session in
+        indexBoardRuntime.updateSession(for: scenario.id, paneID: paneContextID, persist: false) { session in
             session.showsBackByCardID[draft.cardID] = draft.showsBack
             session.lastPresentedCardID = draft.cardID
         }
@@ -413,7 +421,7 @@ extension ScenarioWriterView {
 
         selectedCardIDs = [card.id]
         changeActiveCard(to: card, shouldFocusMain: false, deferToMainAsync: false, force: true)
-        indexBoardRuntime.updateSession(for: scenario.id, paneID: paneContextID) { session in
+        indexBoardRuntime.updateSession(for: scenario.id, paneID: paneContextID, persist: false) { session in
             session.showsBackByCardID[draft.cardID] = draft.showsBack
             session.lastPresentedCardID = draft.cardID
         }

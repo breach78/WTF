@@ -9,7 +9,7 @@ private enum IndexBoardSplitPaneRequestKeys {
 extension ScenarioWriterView {
     func requestIndexBoardReveal(cardID: UUID) {
         guard isIndexBoardActive else { return }
-        indexBoardRuntime.updateSession(for: scenario.id, paneID: paneContextID) { session in
+        indexBoardRuntime.updateSession(for: scenario.id, paneID: paneContextID, persist: false) { session in
             session.pendingRevealCardID = cardID
             session.revealRequestToken &+= 1
         }
