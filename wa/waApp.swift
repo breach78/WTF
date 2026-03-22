@@ -6,6 +6,7 @@ extension Notification.Name {
     static let waUndoRequested = Notification.Name("wa.undoRequested")
     static let waRedoRequested = Notification.Name("wa.redoRequested")
     static let waToggleFocusModeRequested = Notification.Name("wa.toggleFocusModeRequested")
+    static let waOpenIndexBoardRequested = Notification.Name("wa.openIndexBoardRequested")
     static let waOpenReferenceWindowRequested = Notification.Name("wa.openReferenceWindowRequested")
     static let waCycleSplitPaneRequested = Notification.Name("wa.cycleSplitPaneRequested")
     static let waSplitPaneActivateRequested = Notification.Name("wa.splitPaneActivateRequested")
@@ -681,6 +682,11 @@ struct waApp: App {
                 .keyboardShortcut("R", modifiers: [.command, .option])
             }
             CommandGroup(after: .textEditing) {
+                Button("인덱스 카드뷰 열기") {
+                    NotificationCenter.default.post(name: .waOpenIndexBoardRequested, object: nil)
+                }
+                .keyboardShortcut("b", modifiers: [.command])
+
                 Button("집중 모드 토글") {
                     NotificationCenter.default.post(name: .waToggleFocusModeRequested, object: nil)
                 }

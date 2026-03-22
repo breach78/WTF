@@ -1213,6 +1213,9 @@ struct ScenarioWriterView: View {
             .onReceive(NotificationCenter.default.publisher(for: .waToggleFocusModeRequested)) { _ in
                 handleToggleFocusModeRequestNotification()
             }
+            .onReceive(NotificationCenter.default.publisher(for: .waOpenIndexBoardRequested)) { _ in
+                handleOpenIndexBoardRequestNotification()
+            }
             .onReceive(NotificationCenter.default.publisher(for: .waRequestSplitPaneFocus)) { notification in
                 handleSplitPaneFocusRequestNotification(notification)
             }

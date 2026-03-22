@@ -35,8 +35,11 @@ private enum IndexBoardSurfaceAppKitConstants {
     static let startAnchorHeight: CGFloat = 26
     static let placeholderShadowRadius: CGFloat = 5
     static let placeholderShadowYOffset: CGFloat = 2
+    static let placeholderHighlightInset: CGFloat = 6
     static let detachedIndicatorLineWidth: CGFloat = 3
     static let detachedParkingIndicatorLineWidth: CGFloat = 2
+    static let hoverIndicatorInset: CGFloat = 4
+    static let hoverIndicatorLineWidth: CGFloat = 1.5
 }
 
 private func indexBoardSurfaceAppKitSort(_ lhs: BoardSurfaceItem, _ rhs: BoardSurfaceItem) -> Bool {
@@ -310,26 +313,11 @@ private func indexBoardThemeColor(
     isActive: Bool = false
 ) -> NSColor {
     let baseHex = theme.usesDarkAppearance ? theme.darkCardBaseColorHex : theme.cardBaseColorHex
-    let accentHex = theme.usesDarkAppearance ? theme.darkCardActiveColorHex : theme.cardActiveColorHex
     let baseRGB = parseHexRGB(customHex ?? baseHex) ?? (theme.usesDarkAppearance ? (0.16, 0.17, 0.20) : (1.0, 1.0, 1.0))
-    let accentRGB = parseHexRGB(accentHex) ?? (theme.usesDarkAppearance ? (0.31, 0.40, 0.52) : (0.74, 0.84, 0.98))
-    let amount: Double
-    if isActive {
-        amount = theme.usesDarkAppearance ? 0.52 : 0.42
-    } else if isSelected {
-        amount = theme.usesDarkAppearance ? 0.32 : 0.26
-    } else {
-        amount = 0
-    }
-    let mixed = (
-        baseRGB.0 + ((accentRGB.0 - baseRGB.0) * amount),
-        baseRGB.1 + ((accentRGB.1 - baseRGB.1) * amount),
-        baseRGB.2 + ((accentRGB.2 - baseRGB.2) * amount)
-    )
     return NSColor(
-        calibratedRed: mixed.0,
-        green: mixed.1,
-        blue: mixed.2,
+        calibratedRed: baseRGB.0,
+        green: baseRGB.1,
+        blue: baseRGB.2,
         alpha: 1
     )
 }
@@ -339,15 +327,7 @@ private func indexBoardThemeBorderColor(
     isSelected: Bool,
     isActive: Bool
 ) -> NSColor {
-    let accentHex = theme.usesDarkAppearance ? theme.darkCardActiveColorHex : theme.cardActiveColorHex
-    let accentRGB = parseHexRGB(accentHex) ?? (theme.usesDarkAppearance ? (0.31, 0.40, 0.52) : (0.74, 0.84, 0.98))
     let borderRGB = theme.usesDarkAppearance ? (0.28, 0.30, 0.36) : (0.78, 0.75, 0.69)
-    if isActive {
-        return NSColor(calibratedRed: accentRGB.0, green: accentRGB.1, blue: accentRGB.2, alpha: 0.96)
-    }
-    if isSelected {
-        return NSColor(calibratedRed: accentRGB.0, green: accentRGB.1, blue: accentRGB.2, alpha: 0.64)
-    }
     return NSColor(calibratedRed: borderRGB.0, green: borderRGB.1, blue: borderRGB.2, alpha: 0.78)
 }
 
@@ -590,7 +570,7 @@ private class IndexBoardSurfaceAppKitCardView: NSView {
         NSGraphicsContext.restoreGraphicsState()
 
         indexBoardThemeBorderColor(theme: theme, isSelected: isSelected, isActive: isActive).setStroke()
-        backgroundPath.lineWidth = isActive ? 1.8 : 1
+        backgroundPath.lineWidth = 1
         backgroundPath.stroke()
 
         let inset = IndexBoardMetrics.cardInnerPadding
@@ -732,6 +712,7 @@ private final class IndexBoardSurfaceAppKitDocumentView: NSView, IndexBoardSurfa
     private var laneWrapperLayers: [String: CAShapeLayer] = [:]
     private let startAnchorLayer = CAShapeLayer()
     private let startAnchorTextLayer = CATextLayer()
+    private let hoverIndicatorLayer = CAShapeLayer()
     private let selectionLayer = CAShapeLayer()
     private var placeholderLayers: [CAShapeLayer] = []
     private var overlayLayers: [CALayer] = []
@@ -752,6 +733,8 @@ private final class IndexBoardSurfaceAppKitDocumentView: NSView, IndexBoardSurfa
     private var frozenLogicalGridBounds: IndexBoardSurfaceAppKitGridBounds? = nil
     private var lastRevealRequestToken: Int = 0
     private var autoScrollTimer: Timer?
+    private var hoverTrackingArea: NSTrackingArea?
+    private var hoverGridPosition: IndexBoardGridPosition?
     fileprivate var suppressViewportChangeNotifications = false
     fileprivate var pendingDropPreservedScrollOrigin: CGPoint? = nil
 
@@ -770,6 +753,8 @@ private final class IndexBoardSurfaceAppKitDocumentView: NSView, IndexBoardSurfa
         startAnchorTextLayer.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .bold)
         layer?.addSublayer(startAnchorLayer)
         layer?.addSublayer(startAnchorTextLayer)
+        hoverIndicatorLayer.isHidden = true
+        layer?.addSublayer(hoverIndicatorLayer)
         layer?.addSublayer(selectionLayer)
     }
 
@@ -782,8 +767,45 @@ private final class IndexBoardSurfaceAppKitDocumentView: NSView, IndexBoardSurfa
         true
     }
 
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        window?.acceptsMouseMovedEvents = true
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverTrackingArea {
+            removeTrackingArea(hoverTrackingArea)
+        }
+        let trackingArea = NSTrackingArea(
+            rect: .zero,
+            options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(trackingArea)
+        hoverTrackingArea = trackingArea
+    }
+
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
         true
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        guard configuration.isInteractionEnabled else {
+            clearHoverIndicator()
+            return
+        }
+        updateHoverIndicator(at: convert(event.locationInWindow, from: nil))
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        guard configuration.isInteractionEnabled else { return }
+        updateHoverIndicator(at: convert(event.locationInWindow, from: nil))
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        clearHoverIndicator()
     }
 
     override func menu(for event: NSEvent) -> NSMenu? {
@@ -829,6 +851,7 @@ private final class IndexBoardSurfaceAppKitDocumentView: NSView, IndexBoardSurfa
             super.mouseDown(with: event)
             return
         }
+        clearHoverIndicator()
         let point = convert(event.locationInWindow, from: nil)
         if let cardID = cardID(at: point) {
             pendingCardClick = (cardID, point, event.clickCount)
@@ -863,6 +886,7 @@ private final class IndexBoardSurfaceAppKitDocumentView: NSView, IndexBoardSurfa
         }
 
         let location = convert(event.locationInWindow, from: nil)
+        clearHoverIndicator()
         if let pendingCardClick {
             if dragState == nil, pendingCardClick.point.distance(to: location) < IndexBoardSurfaceAppKitConstants.dragThreshold {
                 return
@@ -954,6 +978,7 @@ private final class IndexBoardSurfaceAppKitDocumentView: NSView, IndexBoardSurfa
 
         pendingBackgroundClickPoint = nil
         pendingBackgroundClickCount = 0
+        refreshHoverIndicatorFromCurrentMouse()
     }
 
     override func layout() {
@@ -989,6 +1014,29 @@ private final class IndexBoardSurfaceAppKitDocumentView: NSView, IndexBoardSurfa
               let rect = cardFrameByID[cardID] else { return }
         scrollView?.contentView.scrollToVisible(rect.insetBy(dx: -36, dy: -28))
         scrollView?.reflectScrolledClipView(scrollView!.contentView)
+    }
+
+    fileprivate var isInteractingLocally: Bool {
+        dragState != nil || groupDragState != nil
+    }
+
+    func refreshHoverIndicatorFromCurrentMouse() {
+        guard configuration.isInteractionEnabled,
+              dragState == nil,
+              groupDragState == nil,
+              selectionState == nil,
+              let scrollView,
+              let window else {
+            clearHoverIndicator()
+            return
+        }
+        let pointerInWindow = window.mouseLocationOutsideOfEventStream
+        let pointerInScrollView = scrollView.convert(pointerInWindow, from: nil)
+        guard scrollView.bounds.contains(pointerInScrollView) else {
+            clearHoverIndicator()
+            return
+        }
+        updateHoverIndicator(at: convert(pointerInWindow, from: nil))
     }
 
     func handleCardMouseDown(cardID: UUID, event: NSEvent, in view: NSView) {
@@ -1251,11 +1299,31 @@ private final class IndexBoardSurfaceAppKitDocumentView: NSView, IndexBoardSurfa
     }
 
     private func movableParentGroupID(at point: CGPoint) -> UUID? {
-        guard let parentCardID = resolvedTargetParentGroup(at: point, excluding: [])?.parentCardID,
-              parentCardID != configuration.surfaceProjection.source.parentID else {
-            return nil
-        }
-        return parentCardID
+        let candidateGroups = effectiveSurfaceProjection.parentGroups
+            .filter { $0.parentCardID != configuration.surfaceProjection.source.parentID }
+
+        return candidateGroups
+            .compactMap { group -> (UUID, CGRect)? in
+                guard let parentCardID = group.parentCardID else { return nil }
+                let chipFrame = chipFrameByLaneKey[indexBoardSurfaceLaneKey(group.parentCardID)] ?? .null
+                guard !chipFrame.isNull else { return nil }
+                return (
+                    parentCardID,
+                    chipFrame.insetBy(dx: -10, dy: -6)
+                )
+            }
+            .filter { $0.1.contains(point) }
+            .sorted { lhs, rhs in
+                if lhs.1.minY != rhs.1.minY {
+                    return lhs.1.minY < rhs.1.minY
+                }
+                if lhs.1.minX != rhs.1.minX {
+                    return lhs.1.minX < rhs.1.minX
+                }
+                return lhs.0.uuidString < rhs.0.uuidString
+            }
+            .first?
+            .0
     }
 
     private func resolvedFlowGridPosition(for slotIndex: Int) -> IndexBoardGridPosition {
@@ -1828,6 +1896,9 @@ private final class IndexBoardSurfaceAppKitDocumentView: NSView, IndexBoardSurfa
         stopAutoScrollTimer()
         applyCurrentLayout(animationDuration: IndexBoardSurfaceAppKitConstants.commitLayoutAnimationDuration)
         restoreScrollOriginAfterDrop(preservedScrollOrigin, notifySession: false)
+        if !shouldCommit, let preservedScrollOrigin {
+            configuration.onScrollOffsetChange(preservedScrollOrigin)
+        }
 
         guard shouldCommit else { return }
         if dragState.movingCardIDs.count > 1 {
@@ -1878,6 +1949,9 @@ private final class IndexBoardSurfaceAppKitDocumentView: NSView, IndexBoardSurfa
         frozenLogicalGridBounds = nil
         applyCurrentLayout(animationDuration: IndexBoardSurfaceAppKitConstants.commitLayoutAnimationDuration)
         restoreScrollOriginAfterDrop(preservedScrollOrigin, notifySession: false)
+        if !shouldCommit, let preservedScrollOrigin {
+            configuration.onScrollOffsetChange(preservedScrollOrigin)
+        }
         guard shouldCommit else { return }
         configuration.onParentGroupMove(
             IndexBoardParentGroupDropTarget(
@@ -1976,20 +2050,35 @@ private final class IndexBoardSurfaceAppKitDocumentView: NSView, IndexBoardSurfa
             )
         }
 
+        let detachedGridPosition = resolvedDetachedGridPosition(
+            for: drag.pointerInContent,
+            excluding: drag.movingCardIDSet
+        )
+
         if let detachedBlockTarget = resolvedDetachedBlockDropTarget(
             at: dragCardCenter,
             for: drag
         ) {
+            if shouldPreferDetachedParking(
+                at: dragCardCenter,
+                candidatePosition: detachedGridPosition,
+                over: detachedBlockTarget,
+                for: drag
+            ) {
+                return IndexBoardCardDropTarget(
+                    groupID: legacyGroupID(for: tempLaneParentID() ?? drag.sourceLaneParentID),
+                    insertionIndex: drag.sourceTarget.insertionIndex,
+                    laneParentID: tempLaneParentID() ?? drag.sourceLaneParentID,
+                    detachedGridPosition: detachedGridPosition,
+                    preferredColumnCount: nil
+                )
+            }
             if drag.sourceTarget == detachedBlockTarget {
                 return drag.sourceTarget
             }
             return detachedBlockTarget
         }
 
-        let detachedGridPosition = resolvedDetachedGridPosition(
-            for: drag.pointerInContent,
-            excluding: drag.movingCardIDSet
-        )
         if drag.sourceTarget.detachedGridPosition == detachedGridPosition,
            drag.sourceTarget.previousTempMember == nil,
            drag.sourceTarget.nextTempMember == nil,
@@ -2004,6 +2093,37 @@ private final class IndexBoardSurfaceAppKitDocumentView: NSView, IndexBoardSurfa
             detachedGridPosition: detachedGridPosition,
             preferredColumnCount: nil
         )
+    }
+
+    private func shouldPreferDetachedParking(
+        at point: CGPoint,
+        candidatePosition: IndexBoardGridPosition,
+        over stripTarget: IndexBoardCardDropTarget,
+        for drag: IndexBoardSurfaceAppKitDragState
+    ) -> Bool {
+        guard stripTarget.previousTempMember != nil || stripTarget.nextTempMember != nil else {
+            return false
+        }
+        let compactedStrips = resolvedIndexBoardTempStripsAfterRemovingMembers(
+            strips: referenceTempStrips(),
+            movingMembers: drag.movingTempMembers
+        )
+        guard let targetStrip = compactedStrips.first(where: { strip in
+            if let previousMember = stripTarget.previousTempMember, strip.members.contains(previousMember) {
+                return true
+            }
+            if let nextMember = stripTarget.nextTempMember, strip.members.contains(nextMember) {
+                return true
+            }
+            return false
+        }) else {
+            return false
+        }
+        guard candidatePosition.row != targetStrip.row else {
+            return false
+        }
+        let candidateFrame = resolvedCardFrame(for: candidatePosition).insetBy(dx: -18, dy: -18)
+        return candidateFrame.contains(point)
     }
 
     private func isDetachedSourcePreview(_ drag: IndexBoardSurfaceAppKitDragState) -> Bool {
@@ -2344,13 +2464,15 @@ private final class IndexBoardSurfaceAppKitDocumentView: NSView, IndexBoardSurfa
         previousTarget: IndexBoardCardDropTarget
     ) {
         self.dragState = updatedState
-        presentationSurfaceProjection = resolvedPresentationSurfaceProjection(for: updatedState)
         let didRetarget = updatedState.dropTarget != previousTarget
-        applyCurrentLayout(
-            animationDuration: didRetarget
-                ? IndexBoardSurfaceAppKitConstants.previewLayoutAnimationDuration
-                : 0
-        )
+        if didRetarget {
+            presentationSurfaceProjection = resolvedPresentationSurfaceProjection(for: updatedState)
+            applyCurrentLayout(
+                animationDuration: IndexBoardSurfaceAppKitConstants.previewLayoutAnimationDuration
+            )
+        } else {
+            updateOverlayLayers()
+        }
     }
 
     private func applyGroupDragUpdate(
@@ -2358,13 +2480,15 @@ private final class IndexBoardSurfaceAppKitDocumentView: NSView, IndexBoardSurfa
         previousOrigin: IndexBoardGridPosition
     ) {
         self.groupDragState = updatedState
-        presentationSurfaceProjection = resolvedPresentationSurfaceProjection(for: updatedState)
         let didRetarget = updatedState.targetOrigin != previousOrigin
-        applyCurrentLayout(
-            animationDuration: didRetarget
-                ? IndexBoardSurfaceAppKitConstants.previewLayoutAnimationDuration
-                : 0
-        )
+        if didRetarget {
+            presentationSurfaceProjection = resolvedPresentationSurfaceProjection(for: updatedState)
+            applyCurrentLayout(
+                animationDuration: IndexBoardSurfaceAppKitConstants.previewLayoutAnimationDuration
+            )
+        } else {
+            updateOverlayLayers()
+        }
     }
 
     private func resolvedDetachedSelectionPositions(
@@ -2432,6 +2556,7 @@ private final class IndexBoardSurfaceAppKitDocumentView: NSView, IndexBoardSurfa
         updateLaneWrappers()
         updateSelectionLayer()
         updatePlaceholderLayers()
+        updateHoverIndicatorLayer()
         updateOverlayLayers()
 
         NSAnimationContext.runAnimationGroup { context in
@@ -2653,6 +2778,64 @@ private final class IndexBoardSurfaceAppKitDocumentView: NSView, IndexBoardSurfa
         )
     }
 
+    private func updateHoverIndicator(at point: CGPoint) {
+        guard dragState == nil,
+              groupDragState == nil,
+              selectionState == nil else {
+            clearHoverIndicator()
+            return
+        }
+        guard cardID(at: point) == nil,
+              movableParentGroupID(at: point) == nil else {
+            clearHoverIndicator()
+            return
+        }
+
+        let candidate = resolvedNearestGridPosition(for: point)
+        let occupiedPositions = Set(occupiedGridPositionByCardID().values)
+        guard !occupiedPositions.contains(candidate) else {
+            clearHoverIndicator()
+            return
+        }
+
+        hoverGridPosition = candidate
+        updateHoverIndicatorLayer()
+    }
+
+    private func clearHoverIndicator() {
+        hoverGridPosition = nil
+        hoverIndicatorLayer.path = nil
+        hoverIndicatorLayer.isHidden = true
+    }
+
+    private func updateHoverIndicatorLayer() {
+        guard let hoverGridPosition else {
+            clearHoverIndicator()
+            return
+        }
+
+        let frame = resolvedCardFrame(for: hoverGridPosition).insetBy(
+            dx: -IndexBoardSurfaceAppKitConstants.hoverIndicatorInset,
+            dy: -IndexBoardSurfaceAppKitConstants.hoverIndicatorInset
+        )
+        hoverIndicatorLayer.path = CGPath(
+            roundedRect: frame,
+            cornerWidth: 16,
+            cornerHeight: 16,
+            transform: nil
+        )
+        let usesDarkAppearance = configuration.theme.usesDarkAppearance
+        hoverIndicatorLayer.fillColor = NSColor.white.withAlphaComponent(usesDarkAppearance ? 0.04 : 0.10).cgColor
+        hoverIndicatorLayer.strokeColor = NSColor.black.withAlphaComponent(usesDarkAppearance ? 0.30 : 0.24).cgColor
+        hoverIndicatorLayer.lineWidth = IndexBoardSurfaceAppKitConstants.hoverIndicatorLineWidth
+        hoverIndicatorLayer.lineDashPattern = [8, 6]
+        hoverIndicatorLayer.shadowColor = NSColor.black.withAlphaComponent(usesDarkAppearance ? 0.08 : 0.04).cgColor
+        hoverIndicatorLayer.shadowRadius = 3
+        hoverIndicatorLayer.shadowOpacity = 1
+        hoverIndicatorLayer.shadowOffset = .zero
+        hoverIndicatorLayer.isHidden = false
+    }
+
     private func updatePlaceholderLayers() {
         placeholderLayers.forEach { $0.removeFromSuperlayer() }
         placeholderLayers.removeAll()
@@ -2668,14 +2851,26 @@ private final class IndexBoardSurfaceAppKitDocumentView: NSView, IndexBoardSurfa
             placeholderFrames = [groupFrame]
             placeholderStyle = .flow
         } else {
+            let highlightedCardIDs = orderedItems
+                .map(\.cardID)
+                .filter { configuration.selectedCardIDs.contains($0) || configuration.activeCardID == $0 }
+            placeholderFrames = highlightedCardIDs.compactMap { cardFrameByID[$0] }
+            placeholderStyle = .detachedSlot
+        }
+
+        guard !placeholderFrames.isEmpty else {
             return
         }
         for frame in placeholderFrames {
+            let emphasizedFrame = frame.insetBy(
+                dx: -IndexBoardSurfaceAppKitConstants.placeholderHighlightInset,
+                dy: -IndexBoardSurfaceAppKitConstants.placeholderHighlightInset
+            )
             let layer = CAShapeLayer()
             layer.path = CGPath(
-                roundedRect: frame,
-                cornerWidth: 14,
-                cornerHeight: 14,
+                roundedRect: emphasizedFrame,
+                cornerWidth: 16,
+                cornerHeight: 16,
                 transform: nil
             )
             layer.fillColor = resolvedPlaceholderFillColor(style: placeholderStyle).cgColor
@@ -2686,7 +2881,13 @@ private final class IndexBoardSurfaceAppKitDocumentView: NSView, IndexBoardSurfa
             layer.shadowRadius = IndexBoardSurfaceAppKitConstants.placeholderShadowRadius
             layer.shadowOpacity = 1
             layer.shadowOffset = CGSize(width: 0, height: IndexBoardSurfaceAppKitConstants.placeholderShadowYOffset)
-            self.layer?.addSublayer(layer)
+            if let hostLayer = self.layer {
+                if selectionLayer.superlayer === hostLayer {
+                    hostLayer.insertSublayer(layer, below: selectionLayer)
+                } else {
+                    hostLayer.insertSublayer(layer, at: 0)
+                }
+            }
             placeholderLayers.append(layer)
         }
     }
@@ -2856,7 +3057,6 @@ private final class IndexBoardSurfaceAppKitDocumentView: NSView, IndexBoardSurfa
 
         scrollView.contentView.setBoundsOrigin(CGPoint(x: targetX, y: targetY))
         scrollView.reflectScrolledClipView(scrollView.contentView)
-        configuration.onScrollOffsetChange(CGPoint(x: targetX, y: targetY))
         let previousTarget = dragState.dropTarget
         dragState.dropTarget = resolvedDropTarget(for: dragState)
         applyCardDragUpdate(dragState, previousTarget: previousTarget)
@@ -2911,8 +3111,12 @@ private final class IndexBoardSurfaceAppKitContainerView: NSView {
     private let scrollView: NSScrollView
     private let documentView: IndexBoardSurfaceAppKitDocumentView
     private var scrollObserver: NSObjectProtocol?
+    private var willStartMagnifyObserver: NSObjectProtocol?
     private var magnifyObserver: NSObjectProtocol?
     private var isApplyingExternalViewport = false
+    private var isLiveMagnifying = false
+    private var pendingLiveMagnification: CGFloat?
+    private var pendingLiveScrollOrigin: CGPoint?
 
     init(configuration: IndexBoardSurfaceAppKitConfiguration) {
         backgroundView = IndexBoardSurfaceAppKitBackgroundView(theme: configuration.theme)
@@ -2945,12 +3149,20 @@ private final class IndexBoardSurfaceAppKitContainerView: NSView {
         ) { [weak self] _ in
             self?.handleViewportChanged()
         }
+        willStartMagnifyObserver = NotificationCenter.default.addObserver(
+            forName: NSScrollView.willStartLiveMagnifyNotification,
+            object: scrollView,
+            queue: .main
+        ) { [weak self] _ in
+            self?.isLiveMagnifying = true
+        }
         magnifyObserver = NotificationCenter.default.addObserver(
             forName: NSScrollView.didEndLiveMagnifyNotification,
             object: scrollView,
             queue: .main
         ) { [weak self] _ in
-            self?.handleMagnificationChanged()
+            self?.isLiveMagnifying = false
+            self?.syncViewportAfterLiveMagnify()
         }
 
         update(configuration: configuration)
@@ -2964,6 +3176,9 @@ private final class IndexBoardSurfaceAppKitContainerView: NSView {
     deinit {
         if let scrollObserver {
             NotificationCenter.default.removeObserver(scrollObserver)
+        }
+        if let willStartMagnifyObserver {
+            NotificationCenter.default.removeObserver(willStartMagnifyObserver)
         }
         if let magnifyObserver {
             NotificationCenter.default.removeObserver(magnifyObserver)
@@ -2979,16 +3194,34 @@ private final class IndexBoardSurfaceAppKitContainerView: NSView {
     func update(configuration: IndexBoardSurfaceAppKitConfiguration) {
         backgroundView.theme = configuration.theme
         documentView.updateConfiguration(configuration)
+        documentView.layoutSubtreeIfNeeded()
 
-        if abs(scrollView.magnification - configuration.zoomScale) > 0.001 {
+        if let pendingLiveMagnification,
+           abs(configuration.zoomScale - pendingLiveMagnification) <= 0.001 {
+            self.pendingLiveMagnification = nil
+        }
+        if let pendingLiveScrollOrigin,
+           abs(configuration.scrollOffset.x - pendingLiveScrollOrigin.x) <= 0.5 &&
+            abs(configuration.scrollOffset.y - pendingLiveScrollOrigin.y) <= 0.5 {
+            self.pendingLiveScrollOrigin = nil
+        }
+
+        if !isLiveMagnifying,
+           pendingLiveMagnification == nil,
+           abs(scrollView.magnification - configuration.zoomScale) > 0.001 {
             isApplyingExternalViewport = true
-            scrollView.setMagnification(configuration.zoomScale, centeredAt: .zero)
+            scrollView.setMagnification(
+                configuration.zoomScale,
+                centeredAt: resolvedMagnificationCenter()
+            )
             isApplyingExternalViewport = false
         }
 
         let currentOrigin = scrollView.contentView.bounds.origin
-        if abs(currentOrigin.x - configuration.scrollOffset.x) > 0.5 ||
-            abs(currentOrigin.y - configuration.scrollOffset.y) > 0.5 {
+        if !isLiveMagnifying &&
+            pendingLiveScrollOrigin == nil &&
+            (abs(currentOrigin.x - configuration.scrollOffset.x) > 0.5 ||
+             abs(currentOrigin.y - configuration.scrollOffset.y) > 0.5) {
             isApplyingExternalViewport = true
             scrollView.contentView.setBoundsOrigin(NSPoint(x: max(0, configuration.scrollOffset.x), y: max(0, configuration.scrollOffset.y)))
             scrollView.reflectScrolledClipView(scrollView.contentView)
@@ -3024,19 +3257,55 @@ private final class IndexBoardSurfaceAppKitContainerView: NSView {
     private func handleViewportChanged() {
         guard !isApplyingExternalViewport,
               !documentView.suppressViewportChangeNotifications else { return }
+        if documentView.isInteractingLocally {
+            return
+        }
+        if isLiveMagnifying {
+            documentView.refreshHoverIndicatorFromCurrentMouse()
+            return
+        }
         let origin = scrollView.contentView.bounds.origin
         let resolvedOrigin = CGPoint(x: max(0, origin.x), y: max(0, origin.y))
         guard abs(resolvedOrigin.x - documentView.configuration.scrollOffset.x) > 0.5 ||
                 abs(resolvedOrigin.y - documentView.configuration.scrollOffset.y) > 0.5 else {
+            documentView.refreshHoverIndicatorFromCurrentMouse()
             return
         }
         documentView.configuration.onScrollOffsetChange(resolvedOrigin)
+        documentView.refreshHoverIndicatorFromCurrentMouse()
     }
 
     private func handleMagnificationChanged() {
         guard !isApplyingExternalViewport else { return }
         guard abs(scrollView.magnification - documentView.configuration.zoomScale) > 0.001 else { return }
         documentView.configuration.onZoomScaleChange(scrollView.magnification)
+    }
+
+    private func syncViewportAfterLiveMagnify() {
+        guard !isApplyingExternalViewport else { return }
+        pendingLiveMagnification = scrollView.magnification
+        handleMagnificationChanged()
+        let origin = scrollView.contentView.bounds.origin
+        let resolvedOrigin = CGPoint(x: max(0, origin.x), y: max(0, origin.y))
+        pendingLiveScrollOrigin = resolvedOrigin
+        if abs(resolvedOrigin.x - documentView.configuration.scrollOffset.x) > 0.5 ||
+            abs(resolvedOrigin.y - documentView.configuration.scrollOffset.y) > 0.5 {
+            documentView.configuration.onScrollOffsetChange(resolvedOrigin)
+        }
+        documentView.refreshHoverIndicatorFromCurrentMouse()
+    }
+
+    private func resolvedMagnificationCenter() -> CGPoint {
+        let visibleRect = scrollView.documentVisibleRect
+        let fallback = CGPoint(x: visibleRect.midX, y: visibleRect.midY)
+        guard let window = scrollView.window else { return fallback }
+        let pointerInWindow = window.mouseLocationOutsideOfEventStream
+        let pointerInScrollView = scrollView.convert(pointerInWindow, from: nil)
+        guard scrollView.bounds.contains(pointerInScrollView),
+              let documentView = scrollView.documentView else {
+            return fallback
+        }
+        return documentView.convert(pointerInScrollView, from: scrollView)
     }
 }
 

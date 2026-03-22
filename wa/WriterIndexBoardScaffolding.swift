@@ -202,6 +202,28 @@ extension ScenarioWriterView {
         return true
     }
 
+    func handleOpenIndexBoardRequestNotification() {
+        guard !isIndexBoardActive else { return }
+
+        let entrySnapshot = captureIndexBoardEntrySnapshot()
+        if let persistedSession = indexBoardRuntime.persistedSession(for: scenario.id, entrySnapshot: entrySnapshot) {
+            let liveCards = resolvedLiveIndexBoardSourceCards(for: persistedSession.source)
+            openIndexBoard(
+                sourceParentID: persistedSession.sourceParentID,
+                sourceDepth: persistedSession.sourceDepth,
+                sourceCardIDs: liveCards.map(\.id)
+            )
+            return
+        }
+
+        guard let fallbackColumn = resolvedFallbackIndexBoardColumnContext() else { return }
+        openIndexBoardForColumn(
+            level: fallbackColumn.level,
+            parent: fallbackColumn.parent,
+            cards: fallbackColumn.cards
+        )
+    }
+
     private func mergedIndexBoardSourceCardIDs(_ liveIDs: [UUID], persistedIDs: [UUID]) -> [UUID] {
         var ordered: [UUID] = []
         var seen: Set<UUID> = []
@@ -211,6 +233,38 @@ extension ScenarioWriterView {
             }
         }
         return ordered
+    }
+
+    private func resolvedFallbackIndexBoardColumnContext() -> (level: Int, parent: SceneCard?, cards: [SceneCard])? {
+        let levels = resolvedDisplayedMainLevelsWithParents()
+        guard !levels.isEmpty else { return nil }
+
+        if let activeID = activeCardID,
+           let location = displayedMainCardLocationByID(activeID),
+           levels.indices.contains(location.level) {
+            let data = levels[location.level]
+            return (level: location.level, parent: data.parent, cards: data.cards)
+        }
+
+        if let visibleLevel = resolvedVisibleMainCanvasLevelFromCurrentScrollPosition() ?? (lastScrolledLevel >= 0 ? lastScrolledLevel : nil),
+           levels.indices.contains(visibleLevel) {
+            let data = levels[visibleLevel]
+            return (level: visibleLevel, parent: data.parent, cards: data.cards)
+        }
+
+        if let firstNonEmpty = levels.enumerated().first(where: { !$0.element.cards.isEmpty }) {
+            return (level: firstNonEmpty.offset, parent: firstNonEmpty.element.parent, cards: firstNonEmpty.element.cards)
+        }
+
+        guard let first = levels.first else { return nil }
+        return (level: 0, parent: first.parent, cards: first.cards)
+    }
+
+    private func resolvedLiveIndexBoardSourceCards(for source: IndexBoardColumnSource) -> [SceneCard] {
+        if let parentID = source.parentID, let parentCard = findCard(by: parentID) {
+            return parentCard.sortedChildren
+        }
+        return scenario.rootCards
     }
 
     private func confirmIndexBoardSourceReplacement(
@@ -713,10 +767,17 @@ extension ScenarioWriterView {
         }
 
         let sortedItems = surfaceItems.sorted(by: indexBoardSurfaceItemGridSort)
+        let startAnchorPosition =
+            normalizedParentGroups
+            .filter { !$0.isTempGroup }
+            .min(by: indexBoardSurfaceGroupSort)?
+            .origin
+            ?? normalizedParentGroups.min(by: indexBoardSurfaceGroupSort)?.origin
+            ?? IndexBoardGridPosition(column: 0, row: 0)
         return BoardSurfaceProjection(
             source: session.source,
             startAnchor: BoardSurfaceStartAnchor(
-                gridPosition: IndexBoardGridPosition(column: 0, row: 0),
+                gridPosition: startAnchorPosition,
                 labelText: "START"
             ),
             lanes: lanes,
