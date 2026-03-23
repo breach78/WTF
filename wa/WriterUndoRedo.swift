@@ -23,6 +23,13 @@ extension ScenarioWriterView {
         let activeCaretLocation: Int?
         let selectedCardIDs: [UUID]
         let changeCount: Int
+        let indexBoardState: IndexBoardUndoState?
+    }
+
+    struct IndexBoardUndoState {
+        let session: IndexBoardSessionState
+        let editorDraft: IndexBoardEditorDraft?
+        let summaryRecordsByCardID: [UUID: IndexBoardCardSummaryRecord]
     }
 
     func captureScenarioState(
@@ -62,7 +69,8 @@ extension ScenarioWriterView {
             activeCardID: effectiveActiveCardID,
             activeCaretLocation: activeCaretLocation,
             selectedCardIDs: Array(selectedCardIDs),
-            changeCount: scenario.changeCountSinceLastSnapshot
+            changeCount: scenario.changeCountSinceLastSnapshot,
+            indexBoardState: captureIndexBoardUndoState()
         )
     }
 
@@ -123,8 +131,34 @@ extension ScenarioWriterView {
             focusLastCommittedContentByCard = Dictionary(uniqueKeysWithValues: scenario.cards.map { ($0.id, $0.content) })
             resetFocusTypingCoalescing()
         }
+        restoreIndexBoardUndoState(state.indexBoardState)
         saveWriterChanges()
         isApplyingUndo = false
+    }
+
+    func captureIndexBoardUndoState() -> IndexBoardUndoState? {
+        guard let session = activeIndexBoardSession else { return nil }
+        return IndexBoardUndoState(
+            session: session,
+            editorDraft: indexBoardEditorDraft,
+            summaryRecordsByCardID: store.indexBoardSummaryRecordsByScenarioID[scenario.id] ?? [:]
+        )
+    }
+
+    func restoreIndexBoardUndoState(_ state: IndexBoardUndoState?) {
+        guard let state else { return }
+
+        store.replaceIndexBoardSummaryRecords(state.summaryRecordsByCardID, for: scenario.id)
+
+        if isIndexBoardActive {
+            indexBoardRuntime.updateSession(for: scenario.id, paneID: paneContextID) { restoredSession in
+                restoredSession = state.session
+            }
+            indexBoardEditorDraft = state.editorDraft
+        } else {
+            indexBoardRuntime.replacePersistedSession(state.session, for: scenario.id)
+            indexBoardEditorDraft = nil
+        }
     }
 
     func pushUndoState(_ previous: ScenarioState, actionName: String) {

@@ -1,30 +1,23 @@
 {
-  "/Users/three/app_build/wa/wa/ContentView.swift" : {
-    "const-values" : "/Users/three/app_build/wa/.codex_derived/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/ContentView.swiftconstvalues",
-    "dependencies" : "/Users/three/app_build/wa/.codex_derived/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/ContentView.d",
-    "diagnostics" : "/Users/three/app_build/wa/.codex_derived/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/ContentView.dia",
-    "object" : "/Users/three/app_build/wa/.codex_derived/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/ContentView.o",
-    "swift-dependencies" : "/Users/three/app_build/wa/.codex_derived/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/ContentView.swiftdeps"
+  "/Users/three/app_build/wa/wa/MainContainerView.swift" : {
+    "const-values" : "/Users/three/app_build/wa/.codex_derived/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/MainContainerView.swiftconstvalues",
+    "dependencies" : "/Users/three/app_build/wa/.codex_derived/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/MainContainerView.d",
+    "diagnostics" : "/Users/three/app_build/wa/.codex_derived/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/MainContainerView.dia",
+    "object" : "/Users/three/app_build/wa/.codex_derived/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/MainContainerView.o",
+    "swift-dependencies" : "/Users/three/app_build/wa/.codex_derived/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/MainContainerView.swiftdeps"
   },
-  "/Users/three/app_build/wa/wa/FocusModeLayoutCoordinator.swift" : {
-    "const-values" : "/Users/three/app_build/wa/.codex_derived/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/FocusModeLayoutCoordinator.swiftconstvalues",
-    "dependencies" : "/Users/three/app_build/wa/.codex_derived/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/FocusModeLayoutCoordinator.d",
-    "diagnostics" : "/Users/three/app_build/wa/.codex_derived/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/FocusModeLayoutCoordinator.dia",
-    "object" : "/Users/three/app_build/wa/.codex_derived/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/FocusModeLayoutCoordinator.o",
-    "swift-dependencies" : "/Users/three/app_build/wa/.codex_derived/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/FocusModeLayoutCoordinator.swiftdeps"
+  "/Users/three/app_build/wa/wa/WriterAI+CandidateActions.swift" : {
+    "const-values" : "/Users/three/app_build/wa/.codex_derived/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterAI+CandidateActions.swiftconstvalues",
+    "dependencies" : "/Users/three/app_build/wa/.codex_derived/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterAI+CandidateActions.d",
+    "diagnostics" : "/Users/three/app_build/wa/.codex_derived/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterAI+CandidateActions.dia",
+    "object" : "/Users/three/app_build/wa/.codex_derived/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterAI+CandidateActions.o",
+    "swift-dependencies" : "/Users/three/app_build/wa/.codex_derived/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterAI+CandidateActions.swiftdeps"
   },
-  "/Users/three/app_build/wa/wa/FocusMonitor.swift" : {
-    "const-values" : "/Users/three/app_build/wa/.codex_derived/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/FocusMonitor.swiftconstvalues",
-    "dependencies" : "/Users/three/app_build/wa/.codex_derived/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/FocusMonitor.d",
-    "diagnostics" : "/Users/three/app_build/wa/.codex_derived/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/FocusMonitor.dia",
-    "object" : "/Users/three/app_build/wa/.codex_derived/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/FocusMonitor.o",
-    "swift-dependencies" : "/Users/three/app_build/wa/.codex_derived/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/FocusMonitor.swiftdeps"
-  },
-  "/Users/three/app_build/wa/wa/GeminiService.swift" : {
-    "const-values" : "/Users/three/app_build/wa/.codex_derived/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/GeminiService.swiftconstvalues",
-    "dependencies" : "/Users/three/app_build/wa/.codex_derived/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/GeminiService.d",
-    "diagnostics" : "/Users/three/app_build/wa/.codex_derived/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/GeminiService.dia",
-    "object" : "/Users/three/app_build/wa/.codex_derived/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/GeminiService.o",
-    "swift-dependencies" : "/Users/three/app_build/wa/.codex_derived/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/GeminiService.swiftdeps"
+  "/Users/three/app_build/wa/wa/WriterAI+ChatView.swift" : {
+    "const-values" : "/Users/three/app_build/wa/.codex_derived/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterAI+ChatView.swiftconstvalues",
+    "dependencies" : "/Users/three/app_build/wa/.codex_derived/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterAI+ChatView.d",
+    "diagnostics" : "/Users/three/app_build/wa/.codex_derived/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterAI+ChatView.dia",
+    "object" : "/Users/three/app_build/wa/.codex_derived/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterAI+ChatView.o",
+    "swift-dependencies" : "/Users/three/app_build/wa/.codex_derived/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterAI+ChatView.swiftdeps"
   }
 }

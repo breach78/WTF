@@ -2,7 +2,7 @@ import SwiftUI
 import Combine
 
 enum IndexBoardZoom {
-    static let minScale: CGFloat = 0.70
+    static let minScale: CGFloat = 0.30
     static let maxScale: CGFloat = 1.60
     static let defaultScale: CGFloat = 1.0
     static let step: CGFloat = 0.05
@@ -243,6 +243,10 @@ final class IndexBoardRuntime: ObservableObject {
         activeSessionByScenarioID[scenarioID]?.descriptor.paneID == paneID
     }
 
+    var hasActiveSession: Bool {
+        !activeSessionByScenarioID.isEmpty
+    }
+
     func canActivate(scenarioID: UUID, paneID: Int) -> Bool {
         guard let active = activeSessionByScenarioID[scenarioID] else { return true }
         return active.descriptor.paneID == paneID
@@ -306,6 +310,35 @@ final class IndexBoardRuntime: ObservableObject {
             ),
             navigation: IndexBoardNavigationState()
         )
+    }
+
+    func replacePersistedSession(_ session: IndexBoardSessionState?, for scenarioID: UUID) {
+        var records: [String: IndexBoardPersistedSessionRecord] = [:]
+        if let data = UserDefaults.standard.data(forKey: persistedSessionsKey),
+           let decoded = try? JSONDecoder().decode([String: IndexBoardPersistedSessionRecord].self, from: data) {
+            records = decoded
+        }
+
+        if let session {
+            records[scenarioID.uuidString] = IndexBoardPersistedSessionRecord(
+                source: session.source,
+                sourceCardIDs: session.sourceCardIDs,
+                zoomScale: Double(session.zoomScale),
+                scrollOffsetX: Double(session.scrollOffset.x),
+                scrollOffsetY: Double(session.scrollOffset.y),
+                detachedGridPositionByCardID: session.detachedGridPositionByCardID.persistedIndexBoardDictionary,
+                groupGridPositionByParentID: session.groupGridPositionByParentID.persistedIndexBoardDictionary,
+                tempStrips: session.tempStrips,
+                collapsedLaneParentIDs: Array(session.collapsedLaneParentIDs),
+                showsBackByCardID: session.showsBackByCardID.persistedIndexBoardBoolDictionary,
+                lastPresentedCardID: session.lastPresentedCardID
+            )
+        } else {
+            records.removeValue(forKey: scenarioID.uuidString)
+        }
+
+        guard let encoded = try? JSONEncoder().encode(records) else { return }
+        UserDefaults.standard.set(encoded, forKey: persistedSessionsKey)
     }
 
     private func persistedSessionRecord(for scenarioID: UUID) -> IndexBoardPersistedSessionRecord? {

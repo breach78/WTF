@@ -155,6 +155,17 @@ extension ScenarioWriterView {
             return .handled
         }
         if press.phase == .down &&
+           press.modifiers.contains(.command) &&
+           !press.modifiers.contains(.option) &&
+           !press.modifiers.contains(.control) &&
+           !press.modifiers.contains(.shift) &&
+           (press.key == .delete || press.key == .init("\u{7f}")) {
+            DispatchQueue.main.async {
+                deleteSelectedIndexBoardCards()
+            }
+            return .handled
+        }
+        if press.phase == .down &&
            !press.modifiers.contains(.command) &&
            !press.modifiers.contains(.option) &&
            !press.modifiers.contains(.control) {
@@ -176,13 +187,16 @@ extension ScenarioWriterView {
 
         switch press.characters {
         case "-", "_":
-            stepIndexBoardZoom(by: -IndexBoardZoom.step)
+            stepIndexBoardZoom(by: -0.10)
             return .handled
         case "=", "+":
-            stepIndexBoardZoom(by: IndexBoardZoom.step)
+            stepIndexBoardZoom(by: 0.10)
             return .handled
         case "0", ")":
             resetIndexBoardZoom()
+            return .handled
+        case "9", "(":
+            setIndexBoardZoomScale(IndexBoardZoom.minScale)
             return .handled
         default:
             return nil
@@ -512,7 +526,8 @@ extension ScenarioWriterView {
     }
 
     func resolvedIndexBoardSurfaceProjection(
-        referenceSurfaceProjection: BoardSurfaceProjection? = nil
+        referenceSurfaceProjection: BoardSurfaceProjection? = nil,
+        preferredLeadingParentCardID: UUID? = nil
     ) -> BoardSurfaceProjection? {
         guard let session = activeIndexBoardSession else { return nil }
         let tempContainer = resolvedIndexBoardTempContainer()
@@ -683,7 +698,8 @@ extension ScenarioWriterView {
             referenceParentGroups: referenceSurfaceProjection?.parentGroups,
             referenceDetachedPositionsByCardID: referenceSurfaceProjection.map { projection in
                 indexBoardDetachedGridPositionsByCardID(from: projection)
-            }
+            },
+            preferredLeadingParentCardID: preferredLeadingParentCardID
         )
         let normalizedParentGroups = normalizedSurfaceLayout.parentGroups.sorted(by: indexBoardSurfaceGroupSort)
 
@@ -797,11 +813,15 @@ extension ScenarioWriterView {
             }
         )
         let detachedPositions = indexBoardDetachedGridPositionsByCardID(from: surfaceProjection)
+        let canonicalTempStrips = indexBoardTempStrips(
+            tempGroups: surfaceProjection.parentGroups.filter(\.isTempGroup),
+            detachedPositionsByCardID: detachedPositions
+        )
 
         indexBoardRuntime.updateSession(for: scenario.id, paneID: paneContextID) { session in
             session.groupGridPositionByParentID = groupPositions
             session.detachedGridPositionByCardID = detachedPositions
-            session.tempStrips = surfaceProjection.tempStrips
+            session.tempStrips = canonicalTempStrips
         }
     }
 
@@ -1235,6 +1255,186 @@ extension ScenarioWriterView {
         isMainViewFocused = true
     }
 
+    func deleteSelectedIndexBoardCards() {
+        performIndexBoardDeletion(
+            cards: selectedCardsForDeletion(),
+            preferredAnchorCardID: activeCardID,
+            actionName: "보드 카드 삭제"
+        )
+    }
+
+    func deleteIndexBoardCardFromContextMenu(_ cardID: UUID) {
+        let targetIDs: [UUID]
+        if selectedCardIDs.contains(cardID) {
+            let selectedIDSet = selectedCardIDs
+            let orderedSelection = resolvedIndexBoardSurfaceProjection()?.orderedCardIDs.filter { selectedIDSet.contains($0) } ?? []
+            targetIDs = orderedSelection.isEmpty ? [cardID] : orderedSelection
+        } else {
+            targetIDs = [cardID]
+        }
+
+        performIndexBoardDeletion(
+            cards: targetIDs.compactMap { findCard(by: $0) },
+            preferredAnchorCardID: cardID,
+            actionName: "보드 카드 삭제"
+        )
+    }
+
+    func deleteIndexBoardParentGroupFromContextMenu(_ parentCardID: UUID) {
+        guard let parentCard = findCard(by: parentCardID),
+              !isIndexBoardTempContainerCard(parentCard),
+              !isIndexBoardNoteContainerCard(parentCard) else { return }
+
+        performIndexBoardDeletion(
+            cards: [parentCard],
+            preferredAnchorCardID: parentCardID,
+            actionName: "보드 그룹 삭제"
+        )
+    }
+
+    private func performIndexBoardDeletion(
+        cards: [SceneCard],
+        preferredAnchorCardID: UUID?,
+        actionName: String
+    ) {
+        guard isIndexBoardActive else { return }
+        guard !cards.isEmpty else { return }
+
+        let orderedCardIDsBefore = resolvedIndexBoardSurfaceProjection()?.orderedCardIDs ?? cards.map(\.id)
+        let previousState = captureScenarioState()
+        let deleteOutcome = resolveDeleteSelectionOutcome(from: cards)
+        let removedIDs = deleteOutcome.idsToRemove
+        let didChangeContent = deleteOutcome.didChangeContent
+        guard didChangeContent || !removedIDs.isEmpty else { return }
+
+        archiveRemovedCards(removedIDs)
+        cleanupIndexBoardSessionAfterDelete(removedIDs, persist: false)
+
+        let nextCandidate = resolvedNextIndexBoardCandidateAfterDelete(
+            orderedCardIDsBefore: orderedCardIDsBefore,
+            removedIDs: removedIDs,
+            preferredAnchorCardID: preferredAnchorCardID ?? cards.first?.id
+        )
+        updateIndexBoardSelectionAfterDelete(
+            removedIDs: removedIDs,
+            nextCandidate: nextCandidate
+        )
+
+        if let surfaceProjection = resolvedIndexBoardSurfaceProjection(
+            preferredLeadingParentCardID: nextCandidate?.parent?.id
+        ) {
+            persistIndexBoardSurfacePresentation(surfaceProjection)
+        } else {
+            indexBoardRuntime.updateSession(for: scenario.id, paneID: paneContextID) { _ in }
+        }
+
+        commitCardMutation(
+            previousState: previousState,
+            actionName: actionName,
+            forceSnapshot: true
+        )
+        isMainViewFocused = true
+    }
+
+    private func cleanupIndexBoardSessionAfterDelete(_ removedIDs: Set<UUID>, persist: Bool) {
+        guard !removedIDs.isEmpty else { return }
+        indexBoardRuntime.updateSession(for: scenario.id, paneID: paneContextID, persist: persist) { session in
+            session.sourceCardIDs.removeAll { removedIDs.contains($0) }
+            session.collapsedLaneParentIDs.subtract(removedIDs)
+            session.showsBackByCardID = session.showsBackByCardID.filter { !removedIDs.contains($0.key) }
+            session.detachedGridPositionByCardID = session.detachedGridPositionByCardID.filter { !removedIDs.contains($0.key) }
+            session.groupGridPositionByParentID = session.groupGridPositionByParentID.filter { !removedIDs.contains($0.key) }
+            session.tempStrips = session.tempStrips.compactMap { strip in
+                let members = strip.members.filter { !removedIDs.contains($0.id) }
+                guard !members.isEmpty else { return nil }
+                return IndexBoardTempStripState(
+                    id: strip.id,
+                    row: strip.row,
+                    anchorColumn: strip.anchorColumn,
+                    members: members
+                )
+            }
+            if let lastPresentedCardID = session.lastPresentedCardID,
+               removedIDs.contains(lastPresentedCardID) {
+                session.lastPresentedCardID = nil
+            }
+            if let pendingRevealCardID = session.pendingRevealCardID,
+               removedIDs.contains(pendingRevealCardID) {
+                session.pendingRevealCardID = nil
+            }
+        }
+    }
+
+    private func resolvedNextIndexBoardCandidateAfterDelete(
+        orderedCardIDsBefore: [UUID],
+        removedIDs: Set<UUID>,
+        preferredAnchorCardID: UUID?
+    ) -> SceneCard? {
+        let remainingIDs = orderedCardIDsBefore.filter { !removedIDs.contains($0) }
+        guard !remainingIDs.isEmpty else { return nil }
+
+        if let preferredAnchorCardID,
+           let anchorIndex = orderedCardIDsBefore.firstIndex(of: preferredAnchorCardID) {
+            if anchorIndex + 1 < orderedCardIDsBefore.count {
+                for candidateID in orderedCardIDsBefore[(anchorIndex + 1)...] where !removedIDs.contains(candidateID) {
+                    if let card = findCard(by: candidateID), !card.isArchived { return card }
+                }
+            }
+            if anchorIndex > 0 {
+                for candidateID in orderedCardIDsBefore[..<anchorIndex].reversed() where !removedIDs.contains(candidateID) {
+                    if let card = findCard(by: candidateID), !card.isArchived { return card }
+                }
+            }
+        }
+
+        for candidateID in remainingIDs {
+            if let card = findCard(by: candidateID), !card.isArchived {
+                return card
+            }
+        }
+        return nil
+    }
+
+    private func updateIndexBoardSelectionAfterDelete(
+        removedIDs: Set<UUID>,
+        nextCandidate: SceneCard?
+    ) {
+        selectedCardIDs.subtract(removedIDs)
+        let activeWasRemoved = activeCardID.map { removedIDs.contains($0) } ?? false
+
+        if activeWasRemoved {
+            if let nextCandidate {
+                selectedCardIDs = [nextCandidate.id]
+                keyboardRangeSelectionAnchorCardID = nextCandidate.id
+                changeActiveCard(
+                    to: nextCandidate,
+                    shouldFocusMain: false,
+                    deferToMainAsync: false,
+                    force: true
+                )
+            } else {
+                selectedCardIDs = []
+                keyboardRangeSelectionAnchorCardID = nil
+                activeCardID = nil
+                resetActiveRelationStateCache()
+                synchronizeActiveRelationState(for: nil)
+            }
+            return
+        }
+
+        if let anchorID = keyboardRangeSelectionAnchorCardID,
+           removedIDs.contains(anchorID) {
+            keyboardRangeSelectionAnchorCardID = selectedCardIDs.first
+        }
+
+        if selectedCardIDs.isEmpty,
+           let activeCardID,
+           !removedIDs.contains(activeCardID) {
+            selectedCardIDs = [activeCardID]
+            keyboardRangeSelectionAnchorCardID = activeCardID
+        }
+    }
+
     func updateIndexBoardGroupPosition(parentCardID: UUID, position: IndexBoardGridPosition?) {
         guard isIndexBoardActive else { return }
         indexBoardRuntime.updateSession(for: scenario.id, paneID: paneContextID) { session in
@@ -1421,13 +1621,16 @@ extension ScenarioWriterView {
     func indexBoardCanvas(size: CGSize) -> some View {
         if let surfaceProjection = resolvedIndexBoardSurfaceProjection() {
             let projection = resolvedIndexBoardProjection(from: surfaceProjection)
+            let referencedCardIDs = Array(
+                Set(surfaceProjection.orderedCardIDs + surfaceProjection.parentGroups.compactMap(\.parentCardID))
+            )
             let cardsByID = Dictionary(
-                uniqueKeysWithValues: surfaceProjection.orderedCardIDs.compactMap { cardID in
+                uniqueKeysWithValues: referencedCardIDs.compactMap { cardID in
                     findCard(by: cardID).map { (cardID, $0) }
                 }
             )
             let summaryByCardID = Dictionary(
-                uniqueKeysWithValues: surfaceProjection.orderedCardIDs.compactMap { cardID in
+                uniqueKeysWithValues: referencedCardIDs.compactMap { cardID in
                     resolvedIndexBoardSummary(for: cardID).map { (cardID, $0) }
                 }
             )
@@ -1443,9 +1646,11 @@ extension ScenarioWriterView {
                 canvasSize: size,
                 theme: IndexBoardRenderTheme(
                     usesDarkAppearance: isDarkAppearanceActive,
-                    cardBaseColorHex: cardBaseColorHex,
+                    backgroundColorHex: backgroundColorHex,
+                    darkBackgroundColorHex: darkBackgroundColorHex,
+                    cardBaseColorHex: cardActiveColorHex,
                     cardActiveColorHex: cardActiveColorHex,
-                    darkCardBaseColorHex: darkCardBaseColorHex,
+                    darkCardBaseColorHex: darkCardActiveColorHex,
                     darkCardActiveColorHex: darkCardActiveColorHex
                 ),
                 cardsByID: cardsByID,
@@ -1463,6 +1668,9 @@ extension ScenarioWriterView {
                 onCreateTempCard: {
                     _ = createIndexBoardTempCard()
                 },
+                onCreateTempCardAt: { position in
+                    _ = createIndexBoardTempCard(at: position)
+                },
                 onCreateParentFromSelection: {
                     createIndexBoardParentFromSelection()
                 },
@@ -1472,6 +1680,16 @@ extension ScenarioWriterView {
                         isTemp: isTemp,
                         projection: projection
                     )
+                },
+                onSetCardColor: { cardID, hex in
+                    guard let card = findCard(by: cardID) else { return }
+                    setCardColor(card, hex: hex)
+                },
+                onDeleteCard: { cardID in
+                    deleteIndexBoardCardFromContextMenu(cardID)
+                },
+                onDeleteParentGroup: { parentCardID in
+                    deleteIndexBoardParentGroupFromContextMenu(parentCardID)
                 },
                 onCardTap: { card in
                     handleIndexBoardCardClick(card, orderedCardIDs: surfaceProjection.orderedCardIDs)
@@ -1484,6 +1702,10 @@ extension ScenarioWriterView {
                 },
                 onCardOpen: { card in
                     presentIndexBoardEditor(for: card)
+                },
+                onParentCardOpen: { parentCardID in
+                    guard let parentCard = findCard(by: parentCardID) else { return }
+                    presentIndexBoardEditor(for: parentCard)
                 },
                 onCardFaceToggle: { card in
                     toggleIndexBoardCardFace(card)

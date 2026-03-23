@@ -1484,6 +1484,7 @@ extension ScenarioWriterView {
         guard let targetGroup = liveProjection.groups.first(where: { $0.id == target.groupID }) else { return }
         let visibleCards = targetGroup.childCards.filter { !movingIDs.contains($0.id) }
         let safeInsertionIndex = min(max(0, target.insertionIndex), visibleCards.count)
+        let previousState = captureScenarioState()
 
         movingCards.forEach { updateIndexBoardDetachedPosition(cardID: $0.id, position: nil) }
 
@@ -1514,7 +1515,6 @@ extension ScenarioWriterView {
             return
         }
 
-        let previousState = captureScenarioState()
         let oldParents = movingCards.map(\.parent)
         scenario.performBatchedCardMutation {
             let destinationSiblings = liveOrderedSiblings(parent: destinationParent)
@@ -1586,6 +1586,7 @@ extension ScenarioWriterView {
             return
         }
 
+        let previousState = captureScenarioState()
         updateIndexBoardDetachedPosition(cardID: movingCard.id, position: nil)
 
         let destination = resolvedIndexBoardCardDestination(
@@ -1597,7 +1598,6 @@ extension ScenarioWriterView {
             projection: liveProjection
         )
 
-        let previousState = captureScenarioState()
         scenario.performBatchedCardMutation {
             if movingCard.isArchived {
                 movingCard.isArchived = false
@@ -1772,7 +1772,6 @@ extension ScenarioWriterView {
         target: IndexBoardParentGroupDropTarget,
         projection: IndexBoardProjection
     ) {
-        guard target.parentCardID != activeIndexBoardSession?.source.parentID else { return }
         if let surfaceProjection = resolvedIndexBoardSurfaceProjection(),
            let movingGroup = surfaceProjection.parentGroups.first(where: { $0.parentCardID == target.parentCardID }),
            movingGroup.isTempGroup {
@@ -1799,10 +1798,12 @@ extension ScenarioWriterView {
             )
             return
         }
-        updateIndexBoardGroupPosition(parentCardID: target.parentCardID, position: target.origin)
-        guard let surfaceProjection = resolvedIndexBoardSurfaceProjection() else { return }
-
         let previousState = captureScenarioState()
+        updateIndexBoardGroupPosition(parentCardID: target.parentCardID, position: target.origin)
+        guard let surfaceProjection = resolvedIndexBoardSurfaceProjection(
+            preferredLeadingParentCardID: target.parentCardID
+        ) else { return }
+        persistIndexBoardSurfacePresentation(surfaceProjection)
         scenario.performBatchedCardMutation {
             applyIndexBoardSurfaceParentOrdering(
                 surfaceProjection: surfaceProjection,

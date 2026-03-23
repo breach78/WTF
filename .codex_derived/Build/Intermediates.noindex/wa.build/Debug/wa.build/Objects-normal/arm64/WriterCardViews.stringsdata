@@ -23,7 +23,15 @@
         "key": "연결 끊기",
         "location": {
           "startingColumn": 20,
-          "startingLine": 893
+          "startingLine": 906
+        }
+      },
+      {
+        "comment": "",
+        "key": "인덱스 카드 뷰로 보기",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 911
         }
       },
       {
@@ -31,7 +39,7 @@
         "key": "AI",
         "location": {
           "startingColumn": 22,
-          "startingLine": 898
+          "startingLine": 915
         }
       },
       {
@@ -39,7 +47,7 @@
         "key": "전사 모드",
         "location": {
           "startingColumn": 24,
-          "startingLine": 916
+          "startingLine": 933
         }
       },
       {
@@ -47,7 +55,15 @@
         "key": "내용 없음 카드 전체 삭제",
         "location": {
           "startingColumn": 24,
-          "startingLine": 923
+          "startingLine": 940
+        }
+      },
+      {
+        "comment": "",
+        "key": "인덱스 카드 뷰로 보기",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 944
         }
       },
       {
@@ -55,7 +71,7 @@
         "key": "클론 카드",
         "location": {
           "startingColumn": 24,
-          "startingLine": 927
+          "startingLine": 948
         }
       },
       {
@@ -63,7 +79,7 @@
         "key": "다른 클론으로 이동",
         "location": {
           "startingColumn": 22,
-          "startingLine": 931
+          "startingLine": 952
         }
       },
       {
@@ -71,7 +87,7 @@
         "key": "레퍼런스 카드로",
         "location": {
           "startingColumn": 24,
-          "startingLine": 939
+          "startingLine": 960
         }
       },
       {
@@ -79,7 +95,7 @@
         "key": "새 상위 카드 만들기",
         "location": {
           "startingColumn": 24,
-          "startingLine": 943
+          "startingLine": 964
         }
       },
       {
@@ -87,7 +103,7 @@
         "key": "AI",
         "location": {
           "startingColumn": 22,
-          "startingLine": 947
+          "startingLine": 968
         }
       },
       {
@@ -95,7 +111,7 @@
         "key": "삭제",
         "location": {
           "startingColumn": 24,
-          "startingLine": 963
+          "startingLine": 984
         }
       },
       {
@@ -103,7 +119,7 @@
         "key": "카드 색",
         "location": {
           "startingColumn": 22,
-          "startingLine": 969
+          "startingLine": 990
         }
       },
       {
@@ -111,7 +127,7 @@
         "key": "전사 모드",
         "location": {
           "startingColumn": 24,
-          "startingLine": 981
+          "startingLine": 1002
         }
       },
       {
@@ -119,7 +135,7 @@
         "key": "완전 삭제 (모든 곳)",
         "location": {
           "startingColumn": 24,
-          "startingLine": 986
+          "startingLine": 1007
         }
       },
       {
@@ -127,7 +143,7 @@
         "key": "구체화",
         "location": {
           "startingColumn": 28,
-          "startingLine": 899
+          "startingLine": 916
         }
       },
       {
@@ -135,7 +151,7 @@
         "key": "다음 장면",
         "location": {
           "startingColumn": 28,
-          "startingLine": 901
+          "startingLine": 918
         }
       },
       {
@@ -143,7 +159,7 @@
         "key": "대안",
         "location": {
           "startingColumn": 28,
-          "startingLine": 903
+          "startingLine": 920
         }
       },
       {
@@ -151,7 +167,7 @@
         "key": "선택 카드 요약",
         "location": {
           "startingColumn": 28,
-          "startingLine": 906
+          "startingLine": 923
         }
       },
       {
@@ -159,7 +175,7 @@
         "key": "자식 카드 요약",
         "location": {
           "startingColumn": 28,
-          "startingLine": 908
+          "startingLine": 925
         }
       },
       {
@@ -167,7 +183,7 @@
         "key": "구체화",
         "location": {
           "startingColumn": 28,
-          "startingLine": 948
+          "startingLine": 969
         }
       },
       {
@@ -175,52 +191,12 @@
         "key": "다음 장면",
         "location": {
           "startingColumn": 28,
-          "startingLine": 950
+          "startingLine": 971
         }
       },
       {
         "comment": "",
         "key": "대안",
-        "location": {
-          "startingColumn": 28,
-          "startingLine": 952
-        }
-      },
-      {
-        "comment": "",
-        "key": "선택 카드 요약",
-        "location": {
-          "startingColumn": 28,
-          "startingLine": 955
-        }
-      },
-      {
-        "comment": "",
-        "key": "자식 카드 요약",
-        "location": {
-          "startingColumn": 28,
-          "startingLine": 957
-        }
-      },
-      {
-        "comment": "",
-        "key": "기본",
-        "location": {
-          "startingColumn": 28,
-          "startingLine": 970
-        }
-      },
-      {
-        "comment": "",
-        "key": "연보라",
-        "location": {
-          "startingColumn": 28,
-          "startingLine": 972
-        }
-      },
-      {
-        "comment": "",
-        "key": "하늘",
         "location": {
           "startingColumn": 28,
           "startingLine": 973
@@ -228,23 +204,7 @@
       },
       {
         "comment": "",
-        "key": "민트",
-        "location": {
-          "startingColumn": 28,
-          "startingLine": 974
-        }
-      },
-      {
-        "comment": "",
-        "key": "살구",
-        "location": {
-          "startingColumn": 28,
-          "startingLine": 975
-        }
-      },
-      {
-        "comment": "",
-        "key": "연노랑",
+        "key": "선택 카드 요약",
         "location": {
           "startingColumn": 28,
           "startingLine": 976
@@ -252,10 +212,66 @@
       },
       {
         "comment": "",
+        "key": "자식 카드 요약",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 978
+        }
+      },
+      {
+        "comment": "",
+        "key": "기본",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 991
+        }
+      },
+      {
+        "comment": "",
+        "key": "연보라",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 993
+        }
+      },
+      {
+        "comment": "",
+        "key": "하늘",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 994
+        }
+      },
+      {
+        "comment": "",
+        "key": "민트",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 995
+        }
+      },
+      {
+        "comment": "",
+        "key": "살구",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 996
+        }
+      },
+      {
+        "comment": "",
+        "key": "연노랑",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 997
+        }
+      },
+      {
+        "comment": "",
         "key": "AI 후보",
         "location": {
           "startingColumn": 34,
-          "startingLine": 1056
+          "startingLine": 1080
         }
       },
       {
@@ -263,7 +279,7 @@
         "key": "선택",
         "location": {
           "startingColumn": 40,
-          "startingLine": 1063
+          "startingLine": 1087
         }
       },
       {
@@ -271,7 +287,7 @@
         "key": "+",
         "location": {
           "startingColumn": 22,
-          "startingLine": 1312
+          "startingLine": 1336
         }
       }
     ]

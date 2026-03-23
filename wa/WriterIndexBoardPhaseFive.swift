@@ -102,7 +102,7 @@ extension ScenarioWriterView {
     }
 
     @discardableResult
-    func createIndexBoardTempCard() -> SceneCard? {
+    func createIndexBoardTempCard(at position: IndexBoardGridPosition? = nil) -> SceneCard? {
         guard isIndexBoardActive else { return nil }
 
         let previousState = captureScenarioState()
@@ -132,6 +132,19 @@ extension ScenarioWriterView {
             deferToMainAsync: false,
             force: true
         )
+        if let position {
+            indexBoardRuntime.updateSession(for: scenario.id, paneID: paneContextID) { session in
+                session.detachedGridPositionByCardID[createdCard.id] = position
+                session.tempStrips.append(
+                    IndexBoardTempStripState(
+                        id: "temp-strip:\(position.row):\(position.column):card:\(createdCard.id.uuidString)",
+                        row: position.row,
+                        anchorColumn: position.column,
+                        members: [IndexBoardTempStripMember(kind: .card, id: createdCard.id)]
+                    )
+                )
+            }
+        }
         requestIndexBoardReveal(cardID: createdCard.id)
         commitCardMutation(
             previousState: previousState,

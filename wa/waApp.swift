@@ -576,6 +576,7 @@ struct waApp: App {
     @State private var store: FileStore?
     @StateObject private var appWindowState = AppWindowState()
     @StateObject private var referenceCardStore = ReferenceCardStore()
+    @StateObject private var indexBoardRuntime = IndexBoardRuntime.shared
     @State private var didHideReferenceWindowOnLaunch: Bool = false
     @State private var storeSetupRequestID: Int = 0
 
@@ -716,18 +717,19 @@ struct waApp: App {
                     adjustMainWorkspaceZoom(by: -0.05)
                 }
                 .keyboardShortcut("-", modifiers: [.command])
-                .disabled(mainWorkspaceZoomScale <= 0.70)
+                .disabled(mainWorkspaceZoomScale <= 0.70 || indexBoardRuntime.hasActiveSession)
 
                 Button("메인 작업창 줌 확대") {
                     adjustMainWorkspaceZoom(by: 0.05)
                 }
                 .keyboardShortcut("=", modifiers: [.command])
-                .disabled(mainWorkspaceZoomScale >= 1.60)
+                .disabled(mainWorkspaceZoomScale >= 1.60 || indexBoardRuntime.hasActiveSession)
 
                 Button("메인 작업창 줌 100%") {
                     mainWorkspaceZoomScale = 1.0
                 }
                 .keyboardShortcut("0", modifiers: [.command])
+                .disabled(indexBoardRuntime.hasActiveSession)
                 Divider()
 
                 Menu("편집기") {

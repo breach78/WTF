@@ -210,4 +210,26 @@ extension ScenarioWriterView {
         guard let cardID, let card = findCard(by: cardID) else { return nil }
         return resolvedIndexBoardSummary(for: card)
     }
+
+    @MainActor
+    func setIndexBoardManualSummary(for card: SceneCard, summaryText: String) {
+        let normalizedSummary = indexBoardNormalizedSummarySourceText(summaryText)
+        var records = store.indexBoardSummaryRecordsByScenarioID[scenario.id] ?? [:]
+
+        if normalizedSummary.isEmpty {
+            records.removeValue(forKey: card.id)
+        } else {
+            records[card.id] = IndexBoardCardSummaryRecord(
+                cardID: card.id,
+                summaryText: normalizedSummary,
+                sourceContentHash: indexBoardSummaryContentHash(for: card.content),
+                updatedAt: Date(),
+                sourceType: .manual,
+                isStale: false
+            )
+        }
+
+        store.replaceIndexBoardSummaryRecords(records, for: scenario.id)
+        store.saveAll()
+    }
 }

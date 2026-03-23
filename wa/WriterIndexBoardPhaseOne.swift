@@ -54,17 +54,16 @@ enum IndexBoardMetrics {
 
 struct IndexBoardRenderTheme {
     let usesDarkAppearance: Bool
+    let backgroundColorHex: String
+    let darkBackgroundColorHex: String
     let cardBaseColorHex: String
     let cardActiveColorHex: String
     let darkCardBaseColorHex: String
     let darkCardActiveColorHex: String
 
-    private var boardTopRGB: (Double, Double, Double) {
-        usesDarkAppearance ? (0.10, 0.11, 0.13) : (0.96, 0.94, 0.89)
-    }
-
-    private var boardBottomRGB: (Double, Double, Double) {
-        usesDarkAppearance ? (0.14, 0.15, 0.18) : (0.90, 0.88, 0.82)
+    private var boardRGB: (Double, Double, Double) {
+        let resolvedHex = usesDarkAppearance ? darkBackgroundColorHex : backgroundColorHex
+        return parseHexRGB(resolvedHex) ?? (usesDarkAppearance ? (0.07, 0.08, 0.10) : (0.96, 0.95, 0.93))
     }
 
     private var groupRGB: (Double, Double, Double) {
@@ -88,7 +87,7 @@ struct IndexBoardRenderTheme {
 
     var boardBackground: LinearGradient {
         LinearGradient(
-            colors: [color(from: boardTopRGB), color(from: boardBottomRGB)],
+            colors: [color(from: boardRGB), color(from: boardRGB)],
             startPoint: .topLeading,
             endPoint: .bottomTrailing
         )

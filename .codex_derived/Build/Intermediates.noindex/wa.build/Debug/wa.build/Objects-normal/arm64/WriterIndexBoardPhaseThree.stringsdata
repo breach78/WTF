@@ -1,0 +1,32 @@
+{
+  "source": "/Users/three/app_build/wa/wa/WriterIndexBoardPhaseThree.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "닫기",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 83
+        }
+      },
+      {
+        "comment": "",
+        "key": "Board Editor",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 72
+        }
+      },
+      {
+        "comment": "",
+        "key": "요약 · 원문",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 75
+        }
+      }
+    ]
+  },
+  "version": 1
+}

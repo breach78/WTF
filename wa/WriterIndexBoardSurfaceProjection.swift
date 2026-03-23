@@ -814,15 +814,104 @@ func indexBoardDetachedGridPositionsByCardID(
     }
 }
 
+private func resolvedIndexBoardNonOverlappingParentGroups(
+    _ parentGroups: [BoardSurfaceParentGroupPlacement],
+    preferredLeadingParentCardID: UUID? = nil
+) -> [BoardSurfaceParentGroupPlacement] {
+    let nonTempGroups = parentGroups.filter { !$0.isTempGroup }
+    guard !nonTempGroups.isEmpty else { return parentGroups }
+
+    func sortGroups(
+        _ lhs: BoardSurfaceParentGroupPlacement,
+        _ rhs: BoardSurfaceParentGroupPlacement
+    ) -> Bool {
+        if lhs.origin.column != rhs.origin.column {
+            return lhs.origin.column < rhs.origin.column
+        }
+        return lhs.id.id < rhs.id.id
+    }
+
+    let groupsByRow = Dictionary(grouping: nonTempGroups, by: { $0.origin.row })
+    var resolvedOriginByID: [BoardSurfaceParentGroupID: IndexBoardGridPosition] = [:]
+
+    for (row, rowGroups) in groupsByRow {
+        let sortedGroups = rowGroups.sorted(by: sortGroups)
+
+        if let preferredLeadingParentCardID,
+           let preferredGroup = sortedGroups.first(where: { $0.parentCardID == preferredLeadingParentCardID }) {
+            let preferredStartColumn = preferredGroup.origin.column
+            resolvedOriginByID[preferredGroup.id] = preferredGroup.origin
+
+            let unaffectedLeadingGroups = sortedGroups.filter {
+                $0.id != preferredGroup.id && $0.occupiedColumns.upperBound < preferredStartColumn
+            }
+            for group in unaffectedLeadingGroups {
+                resolvedOriginByID[group.id] = group.origin
+            }
+
+            var cursor = preferredGroup.origin.column + preferredGroup.width
+            let trailingGroups = sortedGroups.filter {
+                $0.id != preferredGroup.id && $0.occupiedColumns.upperBound >= preferredStartColumn
+            }
+
+            for group in trailingGroups {
+                let resolvedColumn = max(group.origin.column, cursor)
+                resolvedOriginByID[group.id] = IndexBoardGridPosition(
+                    column: resolvedColumn,
+                    row: row
+                )
+                cursor = resolvedColumn + group.width
+            }
+            continue
+        }
+
+        var cursor: Int?
+        for group in sortedGroups {
+            let resolvedColumn = max(group.origin.column, cursor ?? group.origin.column)
+            resolvedOriginByID[group.id] = IndexBoardGridPosition(
+                column: resolvedColumn,
+                row: row
+            )
+            cursor = resolvedColumn + group.width
+        }
+    }
+
+    return parentGroups.map { group in
+        guard let resolvedOrigin = resolvedOriginByID[group.id] else { return group }
+        return BoardSurfaceParentGroupPlacement(
+            id: group.id,
+            parentCardID: group.parentCardID,
+            origin: resolvedOrigin,
+            cardIDs: group.cardIDs,
+            titleText: group.titleText,
+            subtitleText: group.subtitleText,
+            colorToken: group.colorToken,
+            isMainline: group.isMainline,
+            isTempGroup: group.isTempGroup
+        )
+    }
+}
+
 func normalizedIndexBoardSurfaceLayout(
     parentGroups: [BoardSurfaceParentGroupPlacement],
     detachedPositionsByCardID: [UUID: IndexBoardGridPosition],
     referenceParentGroups: [BoardSurfaceParentGroupPlacement]? = nil,
-    referenceDetachedPositionsByCardID: [UUID: IndexBoardGridPosition]? = nil
+    referenceDetachedPositionsByCardID: [UUID: IndexBoardGridPosition]? = nil,
+    preferredLeadingParentCardID: UUID? = nil
 ) -> (
     parentGroups: [BoardSurfaceParentGroupPlacement],
     detachedPositionsByCardID: [UUID: IndexBoardGridPosition]
 ) {
+    if let preferredLeadingParentCardID {
+        return (
+            parentGroups: resolvedIndexBoardNonOverlappingParentGroups(
+                parentGroups,
+                preferredLeadingParentCardID: preferredLeadingParentCardID
+            ),
+            detachedPositionsByCardID: detachedPositionsByCardID
+        )
+    }
+
     let mainlineParentGroups = parentGroups.filter { !$0.isTempGroup }
     let referenceMainlineParentGroups = (referenceParentGroups ?? parentGroups).filter { !$0.isTempGroup }
 
@@ -1010,9 +1099,13 @@ func normalizedIndexBoardSurfaceLayout(
             isTempGroup: group.isTempGroup
         )
     }
+    let resolvedParentGroups = resolvedIndexBoardNonOverlappingParentGroups(
+        normalizedParentGroups,
+        preferredLeadingParentCardID: preferredLeadingParentCardID
+    )
 
     return (
-        parentGroups: normalizedParentGroups,
+        parentGroups: resolvedParentGroups,
         detachedPositionsByCardID: detachedPositionsByCardID
     )
 }

@@ -6,7 +6,7 @@
 	<integer>12</integer>
 	<key>logs</key>
 	<dict>
-		<key>8EF2B647-835D-454C-A7FD-31509035B740</key>
+		<key>30385BA5-CD07-442C-9E9A-9990B1508B1E</key>
 		<dict>
 			<key>className</key>
 			<string>IDECommandLineBuildLog</string>
@@ -15,13 +15,13 @@
 			<key>domainType</key>
 			<string>Xcode.IDEActivityLogDomainType.BuildLog</string>
 			<key>fileName</key>
-			<string>8EF2B647-835D-454C-A7FD-31509035B740.xcactivitylog</string>
+			<string>30385BA5-CD07-442C-9E9A-9990B1508B1E.xcactivitylog</string>
 			<key>hasPrimaryLog</key>
 			<true/>
 			<key>primaryObservable</key>
 			<dict>
 				<key>highLevelStatus</key>
-				<string>S</string>
+				<string>W</string>
 				<key>totalNumberOfAnalyzerIssues</key>
 				<integer>0</integer>
 				<key>totalNumberOfErrors</key>
@@ -29,7 +29,7 @@
 				<key>totalNumberOfTestFailures</key>
 				<integer>0</integer>
 				<key>totalNumberOfWarnings</key>
-				<integer>0</integer>
+				<integer>2</integer>
 			</dict>
 			<key>schemeIdentifier-containerName</key>
 			<string>wa project</string>
@@ -38,15 +38,15 @@
 			<key>schemeIdentifier-sharedScheme</key>
 			<integer>1</integer>
 			<key>signature</key>
-			<string>Cleaning project wa with scheme wa and configuration Debug</string>
+			<string>Building project wa with scheme wa and configuration Debug</string>
 			<key>timeStartedRecording</key>
-			<real>793927501.53962398</real>
+			<real>795935878.63948202</real>
 			<key>timeStoppedRecording</key>
-			<real>793927501.96908605</real>
+			<real>795935886.87981498</real>
 			<key>title</key>
-			<string>Cleaning project wa with scheme wa and configuration Debug</string>
+			<string>Building project wa with scheme wa and configuration Debug</string>
 			<key>uniqueIdentifier</key>
-			<string>8EF2B647-835D-454C-A7FD-31509035B740</string>
+			<string>30385BA5-CD07-442C-9E9A-9990B1508B1E</string>
 		</dict>
 	</dict>
 </dict>
