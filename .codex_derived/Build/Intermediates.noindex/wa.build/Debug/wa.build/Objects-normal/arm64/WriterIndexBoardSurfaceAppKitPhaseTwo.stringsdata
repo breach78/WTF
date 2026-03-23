@@ -7,7 +7,7 @@
         "key": "줌 100%",
         "location": {
           "startingColumn": 23,
-          "startingLine": 5354
+          "startingLine": 5664
         }
       },
       {
@@ -15,7 +15,7 @@
         "key": "표시할 카드가 없습니다.",
         "location": {
           "startingColumn": 18,
-          "startingLine": 5446
+          "startingLine": 5756
         }
       },
       {
@@ -23,7 +23,7 @@
         "key": "빈 배경 더블클릭이나 N으로 임시 카드를 만들 수 있습니다.",
         "location": {
           "startingColumn": 18,
-          "startingLine": 5449
+          "startingLine": 5759
         }
       }
     ]

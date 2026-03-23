@@ -52,6 +52,210 @@ enum IndexBoardMetrics {
     static let cardInnerPadding: CGFloat = 12
 }
 
+enum IndexBoardThemePreset: String, CaseIterable, Identifiable {
+    case currentDefault
+    case figjamSlate
+    case miroMidnight
+    case milanoteStudio
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .currentDefault:
+            return "기본"
+        case .figjamSlate:
+            return "FigJam Slate"
+        case .miroMidnight:
+            return "Miro Midnight"
+        case .milanoteStudio:
+            return "Milanote Studio"
+        }
+    }
+
+    var subtitle: String {
+        switch self {
+        case .currentDefault:
+            return "현재 보드 톤을 그대로 사용"
+        case .figjamSlate:
+            return "파스텔 포인트가 있는 잉크 톤"
+        case .miroMidnight:
+            return "차가운 네이비 캔버스"
+        case .milanoteStudio:
+            return "따뜻한 차콜 스튜디오 톤"
+        }
+    }
+
+    var previewHexes: [String] {
+        switch self {
+        case .currentDefault:
+            return ["4B4F56", "686F7B", "8F98A4", "BFD7FF"]
+        case .figjamSlate:
+            return ["2A2438", "3B3351", "5B5277", "FF9E42"]
+        case .miroMidnight:
+            return ["172032", "25314A", "41577A", "4C9AFF"]
+        case .milanoteStudio:
+            return ["211D1A", "312A25", "5A5148", "D9B36C"]
+        }
+    }
+
+    func lightBoardBackgroundStartHex(fallback: String) -> String {
+        switch self {
+        case .currentDefault:
+            return fallback
+        case .figjamSlate:
+            return "F6F0EA"
+        case .miroMidnight:
+            return "EEF2F8"
+        case .milanoteStudio:
+            return "F5EFE6"
+        }
+    }
+
+    func lightBoardBackgroundEndHex(fallback: String) -> String {
+        switch self {
+        case .currentDefault:
+            return fallback
+        case .figjamSlate:
+            return "EFE7DC"
+        case .miroMidnight:
+            return "E5EDF7"
+        case .milanoteStudio:
+            return "EDE4D7"
+        }
+    }
+
+    func darkBoardBackgroundStartHex(fallback: String) -> String {
+        switch self {
+        case .currentDefault:
+            return fallback
+        case .figjamSlate:
+            return "2A2438"
+        case .miroMidnight:
+            return "1B2333"
+        case .milanoteStudio:
+            return "25211D"
+        }
+    }
+
+    func darkBoardBackgroundEndHex(fallback: String) -> String {
+        switch self {
+        case .currentDefault:
+            return fallback
+        case .figjamSlate:
+            return "1D1A30"
+        case .miroMidnight:
+            return "111827"
+        case .milanoteStudio:
+            return "1A1714"
+        }
+    }
+
+    var lightGroupBackgroundHex: String {
+        switch self {
+        case .currentDefault:
+            return "FAF7F0"
+        case .figjamSlate:
+            return "FFF7EF"
+        case .miroMidnight:
+            return "F8FBFF"
+        case .milanoteStudio:
+            return "FFFAF2"
+        }
+    }
+
+    var darkGroupBackgroundHex: String {
+        switch self {
+        case .currentDefault:
+            return "292C33"
+        case .figjamSlate:
+            return "39324D"
+        case .miroMidnight:
+            return "25314A"
+        case .milanoteStudio:
+            return "332D28"
+        }
+    }
+
+    var lightGroupBorderHex: String {
+        switch self {
+        case .currentDefault:
+            return "C7BFB0"
+        case .figjamSlate:
+            return "DCC6B1"
+        case .miroMidnight:
+            return "B7C6DA"
+        case .milanoteStudio:
+            return "D7C7B3"
+        }
+    }
+
+    var darkGroupBorderHex: String {
+        switch self {
+        case .currentDefault:
+            return "474C5C"
+        case .figjamSlate:
+            return "665B7D"
+        case .miroMidnight:
+            return "4E6382"
+        case .milanoteStudio:
+            return "6A5E54"
+        }
+    }
+
+    var lightTabBackgroundHex: String {
+        switch self {
+        case .currentDefault:
+            return "E3DCCC"
+        case .figjamSlate:
+            return "F3DFC8"
+        case .miroMidnight:
+            return "D9E7F6"
+        case .milanoteStudio:
+            return "ECDDCA"
+        }
+    }
+
+    var darkTabBackgroundHex: String {
+        switch self {
+        case .currentDefault:
+            return "363A47"
+        case .figjamSlate:
+            return "4A4162"
+        case .miroMidnight:
+            return "32415F"
+        case .milanoteStudio:
+            return "443C36"
+        }
+    }
+
+    func lightAccentHex(fallback: String) -> String {
+        switch self {
+        case .currentDefault:
+            return fallback
+        case .figjamSlate:
+            return "FF9E42"
+        case .miroMidnight:
+            return "4C9AFF"
+        case .milanoteStudio:
+            return "D9B36C"
+        }
+    }
+
+    func darkAccentHex(fallback: String) -> String {
+        switch self {
+        case .currentDefault:
+            return fallback
+        case .figjamSlate:
+            return "FFB25E"
+        case .miroMidnight:
+            return "89B4FF"
+        case .milanoteStudio:
+            return "E3BF7A"
+        }
+    }
+}
+
 struct IndexBoardRenderTheme {
     let usesDarkAppearance: Bool
     let backgroundColorHex: String
@@ -60,53 +264,116 @@ struct IndexBoardRenderTheme {
     let cardActiveColorHex: String
     let darkCardBaseColorHex: String
     let darkCardActiveColorHex: String
+    let boardBackgroundStartHex: String
+    let boardBackgroundEndHex: String
+    let darkBoardBackgroundStartHex: String
+    let darkBoardBackgroundEndHex: String
+    let groupBackgroundHex: String
+    let darkGroupBackgroundHex: String
+    let groupBorderHex: String
+    let darkGroupBorderHex: String
+    let tabBackgroundHex: String
+    let darkTabBackgroundHex: String
+    let accentHex: String
+    let darkAccentHex: String
 
-    private var boardRGB: (Double, Double, Double) {
-        let resolvedHex = usesDarkAppearance ? darkBackgroundColorHex : backgroundColorHex
-        return parseHexRGB(resolvedHex) ?? (usesDarkAppearance ? (0.07, 0.08, 0.10) : (0.96, 0.95, 0.93))
+    var resolvedBoardBackgroundStartHex: String {
+        usesDarkAppearance ? darkBoardBackgroundStartHex : boardBackgroundStartHex
     }
 
-    private var groupRGB: (Double, Double, Double) {
-        usesDarkAppearance ? (0.16, 0.17, 0.20) : (0.98, 0.97, 0.94)
+    var resolvedBoardBackgroundEndHex: String {
+        usesDarkAppearance ? darkBoardBackgroundEndHex : boardBackgroundEndHex
     }
 
-    private var groupBorderRGB: (Double, Double, Double) {
-        usesDarkAppearance ? (0.28, 0.30, 0.36) : (0.78, 0.75, 0.69)
+    var resolvedGroupBackgroundHex: String {
+        usesDarkAppearance ? darkGroupBackgroundHex : groupBackgroundHex
     }
 
-    private var tabRGB: (Double, Double, Double) {
-        usesDarkAppearance ? (0.21, 0.23, 0.28) : (0.89, 0.86, 0.80)
+    var resolvedGroupBorderHex: String {
+        usesDarkAppearance ? darkGroupBorderHex : groupBorderHex
     }
 
-    private var accentRGB: (Double, Double, Double) {
-        if usesDarkAppearance {
-            return parseHexRGB(darkCardActiveColorHex) ?? (0.31, 0.40, 0.52)
-        }
-        return parseHexRGB(cardActiveColorHex) ?? (0.74, 0.84, 0.98)
+    var resolvedTabBackgroundHex: String {
+        usesDarkAppearance ? darkTabBackgroundHex : tabBackgroundHex
+    }
+
+    var resolvedAccentHex: String {
+        usesDarkAppearance ? darkAccentHex : accentHex
+    }
+
+    var resolvedBoardBackgroundStartRGB: (Double, Double, Double) {
+        parseHexRGB(resolvedBoardBackgroundStartHex) ?? (usesDarkAppearance ? (0.07, 0.08, 0.10) : (0.96, 0.95, 0.93))
+    }
+
+    var resolvedBoardBackgroundEndRGB: (Double, Double, Double) {
+        parseHexRGB(resolvedBoardBackgroundEndHex) ?? resolvedBoardBackgroundStartRGB
+    }
+
+    var resolvedGroupBackgroundRGB: (Double, Double, Double) {
+        parseHexRGB(resolvedGroupBackgroundHex) ?? (usesDarkAppearance ? (0.16, 0.17, 0.20) : (0.98, 0.97, 0.94))
+    }
+
+    var resolvedGroupBorderRGB: (Double, Double, Double) {
+        parseHexRGB(resolvedGroupBorderHex) ?? (usesDarkAppearance ? (0.28, 0.30, 0.36) : (0.78, 0.75, 0.69))
+    }
+
+    var resolvedTabBackgroundRGB: (Double, Double, Double) {
+        parseHexRGB(resolvedTabBackgroundHex) ?? (usesDarkAppearance ? (0.21, 0.23, 0.28) : (0.89, 0.86, 0.80))
+    }
+
+    var resolvedAccentRGB: (Double, Double, Double) {
+        parseHexRGB(resolvedAccentHex) ?? (usesDarkAppearance ? (0.31, 0.40, 0.52) : (0.74, 0.84, 0.98))
+    }
+
+    var renderSignature: String {
+        [
+            usesDarkAppearance ? "dark" : "light",
+            backgroundColorHex,
+            darkBackgroundColorHex,
+            cardBaseColorHex,
+            cardActiveColorHex,
+            darkCardBaseColorHex,
+            darkCardActiveColorHex,
+            boardBackgroundStartHex,
+            boardBackgroundEndHex,
+            darkBoardBackgroundStartHex,
+            darkBoardBackgroundEndHex,
+            groupBackgroundHex,
+            darkGroupBackgroundHex,
+            groupBorderHex,
+            darkGroupBorderHex,
+            tabBackgroundHex,
+            darkTabBackgroundHex,
+            accentHex,
+            darkAccentHex
+        ].joined(separator: "|")
     }
 
     var boardBackground: LinearGradient {
         LinearGradient(
-            colors: [color(from: boardRGB), color(from: boardRGB)],
+            colors: [
+                color(from: resolvedBoardBackgroundStartRGB),
+                color(from: resolvedBoardBackgroundEndRGB)
+            ],
             startPoint: .topLeading,
             endPoint: .bottomTrailing
         )
     }
 
     var groupBackground: Color {
-        color(from: groupRGB)
+        color(from: resolvedGroupBackgroundRGB)
     }
 
     var groupBorder: Color {
-        color(from: groupBorderRGB)
+        color(from: resolvedGroupBorderRGB)
     }
 
     var tabBackground: Color {
-        color(from: tabRGB)
+        color(from: resolvedTabBackgroundRGB)
     }
 
     var accentColor: Color {
-        color(from: accentRGB)
+        color(from: resolvedAccentRGB)
     }
 
     var primaryTextColor: Color {
@@ -120,7 +387,7 @@ struct IndexBoardRenderTheme {
     func cardFillColor(customHex: String?, isSelected: Bool, isActive: Bool) -> Color {
         let baseHex = usesDarkAppearance ? darkCardBaseColorHex : cardBaseColorHex
         let baseRGB = parseHexRGB(customHex ?? baseHex) ?? (usesDarkAppearance ? (0.16, 0.17, 0.20) : (1.0, 1.0, 1.0))
-        let accent = accentRGB
+        let accent = resolvedAccentRGB
         let amount: Double
         if isActive {
             amount = usesDarkAppearance ? 0.52 : 0.42

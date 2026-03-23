@@ -153,15 +153,6 @@ extension ScenarioWriterView {
             return .handled
         }
         if press.phase == .down &&
-           press.key == .return &&
-           !press.modifiers.contains(.command) &&
-           !press.modifiers.contains(.option) &&
-           !press.modifiers.contains(.control) &&
-           !press.modifiers.contains(.shift) {
-            presentIndexBoardEditorForSelection()
-            return .handled
-        }
-        if press.phase == .down &&
            press.modifiers.contains(.command) &&
            !press.modifiers.contains(.option) &&
            !press.modifiers.contains(.control) &&
@@ -176,6 +167,17 @@ extension ScenarioWriterView {
            !press.modifiers.contains(.command) &&
            !press.modifiers.contains(.option) &&
            !press.modifiers.contains(.control) {
+            if press.key == .return {
+                return canBeginIndexBoardInlineEditingFromKeyboard() ? nil : .handled
+            }
+
+            let hasPrintableCharacter =
+                !press.characters.isEmpty &&
+                press.characters.unicodeScalars.contains { !CharacterSet.controlCharacters.contains($0) }
+            if hasPrintableCharacter && canBeginIndexBoardInlineEditingFromKeyboard() {
+                return nil
+            }
+
             let normalized = press.characters.lowercased()
             if normalized == "n" || press.characters == "ㅜ" {
                 _ = createIndexBoardTempCard()
@@ -183,6 +185,17 @@ extension ScenarioWriterView {
             }
         }
         return .handled
+    }
+
+    func canBeginIndexBoardInlineEditingFromKeyboard() -> Bool {
+        guard !isIndexBoardEditorPresented else { return false }
+        guard selectedCardIDs.count == 1,
+              let selectedCardID = selectedCardIDs.first,
+              activeCardID == selectedCardID,
+              findCard(by: selectedCardID) != nil else {
+            return false
+        }
+        return true
     }
 
     func handleIndexBoardSharedPanelShortcut(_ press: KeyPress) -> KeyPress.Result? {
@@ -1779,6 +1792,7 @@ extension ScenarioWriterView {
                     resolvedIndexBoardSummary(for: cardID).map { (cardID, $0) }
                 }
             )
+            let boardThemePreset = IndexBoardThemePreset(rawValue: indexBoardThemePresetID) ?? .currentDefault
             let zoomScale = clampedIndexBoardZoomScale
             let scrollOffset = activeIndexBoardSession?.scrollOffset ?? .zero
             let showsBackByCardID = activeIndexBoardSession?.showsBackByCardID ?? [:]
@@ -1796,7 +1810,19 @@ extension ScenarioWriterView {
                     cardBaseColorHex: cardActiveColorHex,
                     cardActiveColorHex: cardActiveColorHex,
                     darkCardBaseColorHex: darkCardActiveColorHex,
-                    darkCardActiveColorHex: darkCardActiveColorHex
+                    darkCardActiveColorHex: darkCardActiveColorHex,
+                    boardBackgroundStartHex: boardThemePreset.lightBoardBackgroundStartHex(fallback: backgroundColorHex),
+                    boardBackgroundEndHex: boardThemePreset.lightBoardBackgroundEndHex(fallback: backgroundColorHex),
+                    darkBoardBackgroundStartHex: boardThemePreset.darkBoardBackgroundStartHex(fallback: darkBackgroundColorHex),
+                    darkBoardBackgroundEndHex: boardThemePreset.darkBoardBackgroundEndHex(fallback: darkBackgroundColorHex),
+                    groupBackgroundHex: boardThemePreset.lightGroupBackgroundHex,
+                    darkGroupBackgroundHex: boardThemePreset.darkGroupBackgroundHex,
+                    groupBorderHex: boardThemePreset.lightGroupBorderHex,
+                    darkGroupBorderHex: boardThemePreset.darkGroupBorderHex,
+                    tabBackgroundHex: boardThemePreset.lightTabBackgroundHex,
+                    darkTabBackgroundHex: boardThemePreset.darkTabBackgroundHex,
+                    accentHex: boardThemePreset.lightAccentHex(fallback: cardActiveColorHex),
+                    darkAccentHex: boardThemePreset.darkAccentHex(fallback: darkCardActiveColorHex)
                 ),
                 cardsByID: cardsByID,
                 activeCardID: activeCardID,
@@ -1863,6 +1889,13 @@ extension ScenarioWriterView {
                 },
                 onCardFaceToggle: { card in
                     toggleIndexBoardCardFace(card)
+                },
+                allowsInlineEditing: indexBoardEditorDraft == nil,
+                onInlineEditingChange: { isEditing in
+                    isIndexBoardInlineEditing = isEditing
+                },
+                onInlineCardEditCommit: { cardID, contentText in
+                    commitIndexBoardInlineEdit(cardID: cardID, contentText: contentText)
                 },
                 onZoomScaleChange: { scale in
                     setIndexBoardZoomScale(scale)

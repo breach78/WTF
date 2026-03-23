@@ -68,6 +68,7 @@ struct ScenarioWriterView: View {
     @AppStorage("darkCardBaseColorHex") var darkCardBaseColorHex: String = "1A2029"
     @AppStorage("darkCardActiveColorHex") var darkCardActiveColorHex: String = "2A3A4E"
     @AppStorage("darkCardRelatedColorHex") var darkCardRelatedColorHex: String = "242F3F"
+    @AppStorage("indexBoardThemePresetID") var indexBoardThemePresetID: String = IndexBoardThemePreset.currentDefault.rawValue
     @AppStorage("exportCenteredFontSize") var exportCenteredFontSize: Double = 12.0
     @AppStorage("exportCenteredCharacterBold") var exportCenteredCharacterBold: Bool = true
     @AppStorage("exportCenteredSceneHeadingBold") var exportCenteredSceneHeadingBold: Bool = true
@@ -102,6 +103,7 @@ struct ScenarioWriterView: View {
     @State var selectedCardIDs: Set<UUID> = []
     @State var editingCardID: UUID? = nil
     @State var indexBoardEditorDraft: IndexBoardEditorDraft? = nil
+    @State var isIndexBoardInlineEditing: Bool = false
     @State var pendingIndexBoardCreationPrevStateByCardID: [UUID: ScenarioState] = [:]
     @State var showDeleteAlert: Bool = false
     @State var pendingUpperCardCreationRequest: UpperCardCreationRequest? = nil

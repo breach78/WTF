@@ -272,7 +272,7 @@ private struct IndexBoardPhaseThreeEditorView: View {
                     .lineLimit(2)
                     .padding(.horizontal, 4)
                     .padding(.vertical, 1)
-                    .offset(y: 17)
+                    .offset(y: 9)
                     .allowsHitTesting(false)
             }
 
@@ -361,6 +361,9 @@ struct IndexBoardPhaseThreeView: View {
     let onCardOpen: (SceneCard) -> Void
     let onParentCardOpen: (UUID) -> Void
     let onCardFaceToggle: (SceneCard) -> Void
+    let allowsInlineEditing: Bool
+    let onInlineEditingChange: (Bool) -> Void
+    let onInlineCardEditCommit: (UUID, String) -> Void
     let onZoomScaleChange: (CGFloat) -> Void
     let onZoomStep: (CGFloat) -> Void
     let onZoomReset: () -> Void
@@ -438,6 +441,9 @@ struct IndexBoardPhaseThreeView: View {
                     onCardDragStart: onCardDragStart,
                     onCardOpen: onCardOpen,
                     onParentCardOpen: onParentCardOpen,
+                    allowsInlineEditing: allowsInlineEditing,
+                    onInlineEditingChange: onInlineEditingChange,
+                    onInlineCardEditCommit: onInlineCardEditCommit,
                     onCardFaceToggle: onCardFaceToggle,
                     onZoomScaleChange: onZoomScaleChange,
                     onZoomStep: onZoomStep,
@@ -487,21 +493,30 @@ struct IndexBoardPhaseThreeView: View {
                 )
             }
         }
-        .sheet(isPresented: isEditorPresented) {
+        .overlay {
             if let editorDraft,
                let editorCard {
-                IndexBoardPhaseThreeEditorView(
-                    draft: Binding(
-                        get: { editorDraftBinding.wrappedValue ?? editorDraft },
-                        set: { editorDraftBinding.wrappedValue = $0 }
-                    ),
-                    card: editorCard,
-                    theme: theme,
-                    summary: editorSummary,
-                    onCancel: onCancelEditor,
-                    onSave: onSaveEditor
-                )
-                .frame(minWidth: 860, minHeight: 680)
+                ZStack {
+                    Color.black.opacity(0.12)
+                        .ignoresSafeArea()
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            onCancelEditor()
+                        }
+
+                    IndexBoardPhaseThreeEditorView(
+                        draft: Binding(
+                            get: { editorDraftBinding.wrappedValue ?? editorDraft },
+                            set: { editorDraftBinding.wrappedValue = $0 }
+                        ),
+                        card: editorCard,
+                        theme: theme,
+                        summary: editorSummary,
+                        onCancel: onCancelEditor,
+                        onSave: onSaveEditor
+                    )
+                    .frame(minWidth: 860, minHeight: 680)
+                }
             }
         }
     }
@@ -542,6 +557,43 @@ extension ScenarioWriterView {
     func updateIndexBoardEditorDraft(_ draft: IndexBoardEditorDraft) {
         guard isIndexBoardActive else { return }
         indexBoardEditorDraft = draft
+    }
+
+    func commitIndexBoardInlineEdit(cardID: UUID, contentText: String) {
+        guard isIndexBoardActive else { return }
+        let pendingCreationPreviousState = pendingIndexBoardCreationPrevStateByCardID[cardID]
+        guard let card = findCard(by: cardID) else {
+            pendingIndexBoardCreationPrevStateByCardID.removeValue(forKey: cardID)
+            return
+        }
+
+        var normalizedContent = contentText
+        while normalizedContent.hasSuffix("\n") {
+            normalizedContent.removeLast()
+        }
+
+        let isMeaningfullyEmpty = normalizedContent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        if let pendingCreationPreviousState, isMeaningfullyEmpty {
+            discardPendingIndexBoardCreation(
+                cardID: cardID,
+                previousState: pendingCreationPreviousState
+            )
+            return
+        }
+
+        guard normalizedContent != card.content else {
+            pendingIndexBoardCreationPrevStateByCardID.removeValue(forKey: cardID)
+            return
+        }
+
+        let previousState = pendingCreationPreviousState ?? captureScenarioState()
+        card.content = normalizedContent
+        reconcileIndexBoardSummaries(for: [card.id])
+        commitCardMutation(
+            previousState: previousState,
+            actionName: pendingCreationPreviousState == nil ? "보드 카드 편집" : "보드 Temp 카드 생성"
+        )
+        pendingIndexBoardCreationPrevStateByCardID.removeValue(forKey: cardID)
     }
 
     private func discardPendingIndexBoardCreation(cardID: UUID, previousState: ScenarioState) {

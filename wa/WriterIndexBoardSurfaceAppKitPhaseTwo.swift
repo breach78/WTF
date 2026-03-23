@@ -417,6 +417,9 @@ private struct IndexBoardSurfaceAppKitConfiguration {
     let onCardDragStart: ([UUID], UUID) -> Void
     let onCardOpen: (SceneCard) -> Void
     let onParentCardOpen: (UUID) -> Void
+    let allowsInlineEditing: Bool
+    let onInlineEditingChange: (Bool) -> Void
+    let onInlineCardEditCommit: (UUID, String) -> Void
     let onCardMove: (UUID, IndexBoardCardDropTarget) -> Void
     let onCardMoveSelection: ([UUID], UUID, IndexBoardCardDropTarget) -> Void
     let onMarqueeSelectionChange: (Set<UUID>) -> Void
@@ -446,11 +449,7 @@ private struct IndexBoardSurfaceAppKitRenderState: Equatable {
     let revealCardID: UUID?
     let revealRequestToken: Int
     let isInteractionEnabled: Bool
-    let usesDarkAppearance: Bool
-    let cardBaseColorHex: String
-    let cardActiveColorHex: String
-    let darkCardBaseColorHex: String
-    let darkCardActiveColorHex: String
+    let themeSignature: String
 
     func equalsIgnoringViewport(_ other: IndexBoardSurfaceAppKitRenderState) -> Bool {
         surfaceProjection == other.surfaceProjection &&
@@ -463,11 +462,7 @@ private struct IndexBoardSurfaceAppKitRenderState: Equatable {
         revealCardID == other.revealCardID &&
         revealRequestToken == other.revealRequestToken &&
         isInteractionEnabled == other.isInteractionEnabled &&
-        usesDarkAppearance == other.usesDarkAppearance &&
-        cardBaseColorHex == other.cardBaseColorHex &&
-        cardActiveColorHex == other.cardActiveColorHex &&
-        darkCardBaseColorHex == other.darkCardBaseColorHex &&
-        darkCardActiveColorHex == other.darkCardActiveColorHex
+        themeSignature == other.themeSignature
     }
 }
 
@@ -497,11 +492,7 @@ private extension IndexBoardSurfaceAppKitConfiguration {
             revealCardID: revealCardID,
             revealRequestToken: revealRequestToken,
             isInteractionEnabled: isInteractionEnabled,
-            usesDarkAppearance: theme.usesDarkAppearance,
-            cardBaseColorHex: theme.cardBaseColorHex,
-            cardActiveColorHex: theme.cardActiveColorHex,
-            darkCardBaseColorHex: theme.darkCardBaseColorHex,
-            darkCardActiveColorHex: theme.darkCardActiveColorHex
+            themeSignature: theme.renderSignature
         )
     }
 }
@@ -526,9 +517,7 @@ extension IndexBoardSurfaceAppKitLaneChipModel: Equatable {
         lhs.lane == rhs.lane &&
         lhs.displayText == rhs.displayText &&
         lhs.tintColorToken == rhs.tintColorToken &&
-        lhs.theme.usesDarkAppearance == rhs.theme.usesDarkAppearance &&
-        lhs.theme.cardActiveColorHex == rhs.theme.cardActiveColorHex &&
-        lhs.theme.darkCardActiveColorHex == rhs.theme.darkCardActiveColorHex
+        lhs.theme.renderSignature == rhs.theme.renderSignature
     }
 }
 
@@ -576,7 +565,7 @@ private func indexBoardThemeBorderColor(
     isSelected: Bool,
     isActive: Bool
 ) -> NSColor {
-    let borderRGB = theme.usesDarkAppearance ? (0.28, 0.30, 0.36) : (0.78, 0.75, 0.69)
+    let borderRGB = theme.resolvedGroupBorderRGB
     return NSColor(calibratedRed: borderRGB.0, green: borderRGB.1, blue: borderRGB.2, alpha: 0.78)
 }
 
@@ -593,12 +582,17 @@ private func indexBoardThemeSecondaryTextColor(theme: IndexBoardRenderTheme) -> 
 }
 
 private func indexBoardThemeBoardGradient(theme: IndexBoardRenderTheme) -> NSGradient {
-    let resolvedHex = theme.usesDarkAppearance ? theme.darkBackgroundColorHex : theme.backgroundColorHex
-    let boardRGB = parseHexRGB(resolvedHex) ?? (theme.usesDarkAppearance ? (0.07, 0.08, 0.10) : (0.96, 0.95, 0.93))
+    let startRGB = theme.resolvedBoardBackgroundStartRGB
+    let endRGB = theme.resolvedBoardBackgroundEndRGB
     return NSGradient(
-        starting: NSColor(calibratedRed: boardRGB.0, green: boardRGB.1, blue: boardRGB.2, alpha: 1),
-        ending: NSColor(calibratedRed: boardRGB.0, green: boardRGB.1, blue: boardRGB.2, alpha: 1)
+        starting: NSColor(calibratedRed: startRGB.0, green: startRGB.1, blue: startRGB.2, alpha: 1),
+        ending: NSColor(calibratedRed: endRGB.0, green: endRGB.1, blue: endRGB.2, alpha: 1)
     )!
+}
+
+private func indexBoardThemeAccentColor(theme: IndexBoardRenderTheme) -> NSColor {
+    let accentRGB = theme.resolvedAccentRGB
+    return NSColor(calibratedRed: accentRGB.0, green: accentRGB.1, blue: accentRGB.2, alpha: 1)
 }
 
 private func indexBoardSurfaceResolvedPreviewText(
@@ -761,11 +755,7 @@ private final class IndexBoardSurfaceAppKitLaneChipView: NSView {
            let rgb = parseHexRGB(token) {
             return NSColor(calibratedRed: rgb.0, green: rgb.1, blue: rgb.2, alpha: 1)
         }
-        let accentHex = model.theme.usesDarkAppearance ? model.theme.darkCardActiveColorHex : model.theme.cardActiveColorHex
-        if let rgb = parseHexRGB(accentHex) {
-            return NSColor(calibratedRed: rgb.0, green: rgb.1, blue: rgb.2, alpha: 1)
-        }
-        return NSColor.controlAccentColor
+        return indexBoardThemeAccentColor(theme: model.theme)
     }
 }
 
@@ -805,11 +795,7 @@ private class IndexBoardSurfaceAppKitCardView: NSView {
     ) {
         let needsRefresh =
             self.card !== card ||
-            self.theme?.usesDarkAppearance != theme.usesDarkAppearance ||
-            self.theme?.cardBaseColorHex != theme.cardBaseColorHex ||
-            self.theme?.cardActiveColorHex != theme.cardActiveColorHex ||
-            self.theme?.darkCardBaseColorHex != theme.darkCardBaseColorHex ||
-            self.theme?.darkCardActiveColorHex != theme.darkCardActiveColorHex ||
+            self.theme?.renderSignature != theme.renderSignature ||
             self.isSelected != isSelected ||
             self.isActive != isActive ||
             self.summary != summary ||
@@ -927,7 +913,21 @@ private final class IndexBoardSurfaceAppKitInteractiveCardView: IndexBoardSurfac
     }
 }
 
-private final class IndexBoardSurfaceAppKitDocumentView: NSView, IndexBoardSurfaceAppKitCardInteractionDelegate, IndexBoardSurfaceAppKitLaneChipInteractionDelegate {
+private final class IndexBoardSurfaceAppKitInlineTextView: NSTextView {
+    var onPostInteraction: (() -> Void)?
+
+    override func keyDown(with event: NSEvent) {
+        super.keyDown(with: event)
+        onPostInteraction?()
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        super.mouseDown(with: event)
+        onPostInteraction?()
+    }
+}
+
+private final class IndexBoardSurfaceAppKitDocumentView: NSView, IndexBoardSurfaceAppKitCardInteractionDelegate, IndexBoardSurfaceAppKitLaneChipInteractionDelegate, NSTextViewDelegate {
     var configuration: IndexBoardSurfaceAppKitConfiguration
     private var lastRenderState: IndexBoardSurfaceAppKitRenderState
 
@@ -973,6 +973,11 @@ private final class IndexBoardSurfaceAppKitDocumentView: NSView, IndexBoardSurfa
     private var hoverGridPosition: IndexBoardGridPosition?
     private var isHoverIndicatorSuppressed = false
     private var baselineSession: IndexBoardSurfaceAppKitBaselineSession? = nil
+    private var inlineEditorScrollView: NSScrollView?
+    private weak var inlineEditorTextView: NSTextView?
+    private var inlineEditingCardID: UUID?
+    private var inlineEditingOriginalContent = ""
+    private var isEndingInlineEditing = false
     fileprivate var suppressViewportChangeNotifications = false
     fileprivate var pendingDropPreservedScrollOrigin: CGPoint? = nil
     fileprivate var defersLayoutForLiveViewport = false
@@ -983,8 +988,10 @@ private final class IndexBoardSurfaceAppKitDocumentView: NSView, IndexBoardSurfa
         super.init(frame: .zero)
         wantsLayer = true
         layerContentsRedrawPolicy = .onSetNeedsDisplay
-        selectionLayer.fillColor = NSColor.controlAccentColor.withAlphaComponent(configuration.theme.usesDarkAppearance ? 0.14 : 0.10).cgColor
-        selectionLayer.strokeColor = NSColor.controlAccentColor.withAlphaComponent(0.82).cgColor
+        selectionLayer.fillColor = indexBoardThemeAccentColor(theme: configuration.theme)
+            .withAlphaComponent(configuration.theme.usesDarkAppearance ? 0.14 : 0.10).cgColor
+        selectionLayer.strokeColor = indexBoardThemeAccentColor(theme: configuration.theme)
+            .withAlphaComponent(0.82).cgColor
         selectionLayer.lineWidth = 1.5
         startAnchorTextLayer.contentsScale = NSScreen.main?.backingScaleFactor ?? 2
         startAnchorTextLayer.alignmentMode = .center
@@ -1002,7 +1009,15 @@ private final class IndexBoardSurfaceAppKitDocumentView: NSView, IndexBoardSurfa
         fatalError("init(coder:) has not been implemented")
     }
 
+    deinit {
+        endInlineEditing(commit: true)
+    }
+
     override var isFlipped: Bool {
+        true
+    }
+
+    override var acceptsFirstResponder: Bool {
         true
     }
 
@@ -1162,6 +1177,15 @@ private final class IndexBoardSurfaceAppKitDocumentView: NSView, IndexBoardSurfa
             return
         }
         let point = convert(event.locationInWindow, from: nil)
+        if let inlineEditorScrollView,
+           !inlineEditorScrollView.isHidden,
+           inlineEditorScrollView.frame.contains(point),
+           let textView = inlineEditorTextView {
+            window?.makeFirstResponder(textView)
+            textView.mouseDown(with: event)
+            return
+        }
+        endInlineEditing(commit: true)
         let backgroundGridPosition = resolvedHoverGridPositionCandidate(at: point)
         clearHoverIndicator()
         if let parentCardID = editableParentCardID(at: point) {
@@ -1283,8 +1307,21 @@ private final class IndexBoardSurfaceAppKitDocumentView: NSView, IndexBoardSurfa
             if event.clickCount == 2 {
                 configuration.onCardOpen(card)
             } else {
-                configuration.onCardTap(card)
+                let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+                let disallowedModifiers: NSEvent.ModifierFlags = [.command, .shift, .option, .control]
+                let canEnterInlineEdit =
+                    configuration.allowsInlineEditing &&
+                    flags.intersection(disallowedModifiers).isEmpty &&
+                    configuration.activeCardID == card.id &&
+                    configuration.selectedCardIDs == Set([card.id])
+                if canEnterInlineEdit {
+                    beginInlineEditing(cardID: card.id)
+                    return
+                } else {
+                    configuration.onCardTap(card)
+                }
             }
+            window?.makeFirstResponder(self)
             return
         }
         if let pendingGroupClick {
@@ -1313,7 +1350,47 @@ private final class IndexBoardSurfaceAppKitDocumentView: NSView, IndexBoardSurfa
         pendingBackgroundClickPoint = nil
         pendingBackgroundGridPosition = nil
         pendingBackgroundClickCount = 0
+        window?.makeFirstResponder(self)
         refreshHoverIndicatorFromCurrentMouse()
+    }
+
+    override func keyDown(with event: NSEvent) {
+        guard configuration.isInteractionEnabled else {
+            super.keyDown(with: event)
+            return
+        }
+
+        if inlineEditingCardID != nil {
+            super.keyDown(with: event)
+            return
+        }
+
+        guard configuration.allowsInlineEditing,
+              let cardID = resolvedInlineEditableCardID() else {
+            super.keyDown(with: event)
+            return
+        }
+
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        let hasDisallowedModifier = flags.contains(.command) || flags.contains(.control) || flags.contains(.option)
+        if hasDisallowedModifier {
+            super.keyDown(with: event)
+            return
+        }
+
+        if event.keyCode == 36 || event.keyCode == 76 {
+            beginInlineEditing(cardID: cardID)
+            return
+        }
+
+        guard let characters = event.characters,
+              !characters.isEmpty,
+              characters.unicodeScalars.contains(where: { !CharacterSet.controlCharacters.contains($0) }) else {
+            super.keyDown(with: event)
+            return
+        }
+
+        beginInlineEditing(cardID: cardID, seedEvent: event)
     }
 
     override func layout() {
@@ -1325,8 +1402,16 @@ private final class IndexBoardSurfaceAppKitDocumentView: NSView, IndexBoardSurfa
     func updateConfiguration(_ configuration: IndexBoardSurfaceAppKitConfiguration) {
         let nextRenderState = configuration.renderState
         self.configuration = configuration
-        selectionLayer.fillColor = NSColor.controlAccentColor.withAlphaComponent(configuration.theme.usesDarkAppearance ? 0.14 : 0.10).cgColor
-        selectionLayer.strokeColor = NSColor.controlAccentColor.withAlphaComponent(0.82).cgColor
+        selectionLayer.fillColor = indexBoardThemeAccentColor(theme: configuration.theme)
+            .withAlphaComponent(configuration.theme.usesDarkAppearance ? 0.14 : 0.10).cgColor
+        selectionLayer.strokeColor = indexBoardThemeAccentColor(theme: configuration.theme)
+            .withAlphaComponent(0.82).cgColor
+        if !configuration.allowsInlineEditing {
+            endInlineEditing(commit: true)
+        } else if let inlineEditingCardID,
+                  configuration.cardsByID[inlineEditingCardID] == nil {
+            endInlineEditing(commit: false)
+        }
         guard nextRenderState != lastRenderState else { return }
         lastRenderState = nextRenderState
         reconcilePresentationProjection()
@@ -1481,8 +1566,223 @@ private final class IndexBoardSurfaceAppKitDocumentView: NSView, IndexBoardSurfa
         if event.clickCount == 2 {
             configuration.onCardOpen(card)
         } else {
-            configuration.onCardTap(card)
+            let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            let disallowedModifiers: NSEvent.ModifierFlags = [.command, .shift, .option, .control]
+            let canEnterInlineEdit =
+                configuration.allowsInlineEditing &&
+                flags.intersection(disallowedModifiers).isEmpty &&
+                configuration.activeCardID == card.id &&
+                configuration.selectedCardIDs == Set([card.id])
+            if canEnterInlineEdit {
+                beginInlineEditing(cardID: card.id)
+                return
+            } else {
+                configuration.onCardTap(card)
+            }
         }
+        window?.makeFirstResponder(self)
+    }
+
+    func textDidEndEditing(_ notification: Notification) {
+        guard !isEndingInlineEditing else { return }
+        endInlineEditing(commit: true)
+    }
+
+    func textDidChange(_ notification: Notification) {
+        revealInlineEditorSelection()
+    }
+
+    func textViewDidChangeSelection(_ notification: Notification) {
+        revealInlineEditorSelection()
+    }
+
+    func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+        if commandSelector == #selector(NSResponder.insertNewline(_:)) ||
+            commandSelector == #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)) ||
+            commandSelector == #selector(NSResponder.insertLineBreak(_:)) {
+            let flags = NSApp.currentEvent?.modifierFlags.intersection(.deviceIndependentFlagsMask) ?? []
+            if flags.contains(.shift) {
+                textView.insertText("\n", replacementRange: textView.selectedRange())
+                revealInlineEditorSelection()
+            } else {
+                endInlineEditing(commit: true)
+                window?.makeFirstResponder(self)
+            }
+            return true
+        }
+        return false
+    }
+
+    private func resolvedInlineEditableCardID() -> UUID? {
+        guard configuration.selectedCardIDs.count == 1,
+              let cardID = configuration.selectedCardIDs.first,
+              configuration.activeCardID == cardID,
+              configuration.cardsByID[cardID] != nil else {
+            return nil
+        }
+        return cardID
+    }
+
+    private func ensureInlineEditor() -> NSTextView {
+        if let textView = inlineEditorTextView {
+            return textView
+        }
+
+        let scrollView = NSScrollView()
+        scrollView.wantsLayer = true
+        scrollView.drawsBackground = true
+        scrollView.borderType = .noBorder
+        scrollView.hasVerticalScroller = true
+        scrollView.hasHorizontalScroller = false
+        scrollView.autohidesScrollers = true
+        scrollView.scrollerStyle = .overlay
+
+        let textView = IndexBoardSurfaceAppKitInlineTextView()
+        textView.delegate = self
+        textView.onPostInteraction = { [weak self] in
+            self?.revealInlineEditorSelection()
+        }
+        textView.isEditable = true
+        textView.isSelectable = true
+        textView.isRichText = false
+        textView.importsGraphics = false
+        textView.usesFontPanel = false
+        textView.usesFindBar = false
+        textView.allowsUndo = true
+        textView.drawsBackground = false
+        textView.backgroundColor = .clear
+        textView.textContainerInset = NSSize(width: IndexBoardMetrics.cardInnerPadding - 2, height: IndexBoardMetrics.cardInnerPadding - 2)
+        textView.isHorizontallyResizable = false
+        textView.isVerticallyResizable = true
+        textView.minSize = .zero
+        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        textView.autoresizingMask = [.width]
+
+        if let textContainer = textView.textContainer {
+            textContainer.lineFragmentPadding = 0
+            textContainer.lineBreakMode = .byWordWrapping
+            textContainer.maximumNumberOfLines = 0
+            textContainer.widthTracksTextView = true
+            textContainer.heightTracksTextView = false
+            textContainer.containerSize = CGSize(width: 1, height: CGFloat.greatestFiniteMagnitude)
+        }
+
+        let paragraphStyle = NSMutableParagraphStyle()
+        paragraphStyle.lineBreakMode = .byWordWrapping
+        textView.font = NSFont(name: "SansMonoCJKFinalDraft", size: 13) ?? NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+        textView.textColor = indexBoardThemePrimaryTextColor(theme: configuration.theme)
+        textView.insertionPointColor = indexBoardThemePrimaryTextColor(theme: configuration.theme)
+        textView.defaultParagraphStyle = paragraphStyle
+        textView.typingAttributes = [
+            .font: textView.font as Any,
+            .foregroundColor: textView.textColor as Any,
+            .paragraphStyle: paragraphStyle
+        ]
+
+        scrollView.documentView = textView
+        scrollView.isHidden = true
+        addSubview(scrollView)
+        inlineEditorScrollView = scrollView
+        inlineEditorTextView = textView
+        return textView
+    }
+
+    private func updateInlineEditorAppearance(for card: SceneCard) {
+        guard let scrollView = inlineEditorScrollView,
+              let textView = inlineEditorTextView else { return }
+
+        let isSelected = configuration.selectedCardIDs.contains(card.id)
+        let isActive = configuration.activeCardID == card.id
+        let backgroundColor = indexBoardThemeColor(
+            theme: configuration.theme,
+            customHex: card.colorHex,
+            isSelected: isSelected,
+            isActive: isActive
+        )
+        let borderColor = indexBoardThemeBorderColor(
+            theme: configuration.theme,
+            isSelected: isSelected,
+            isActive: isActive
+        )
+        let primaryTextColor = indexBoardThemePrimaryTextColor(theme: configuration.theme)
+
+        scrollView.backgroundColor = backgroundColor
+        scrollView.layer?.backgroundColor = backgroundColor.cgColor
+        scrollView.layer?.cornerRadius = IndexBoardMetrics.cardCornerRadius
+        scrollView.layer?.borderWidth = 1
+        scrollView.layer?.borderColor = borderColor.cgColor
+        scrollView.layer?.masksToBounds = true
+        textView.textColor = primaryTextColor
+        textView.insertionPointColor = primaryTextColor
+        textView.typingAttributes[.foregroundColor] = primaryTextColor
+    }
+
+    private func revealInlineEditorSelection() {
+        guard let textView = inlineEditorTextView else { return }
+        let selectedRange = textView.selectedRange()
+        guard selectedRange.location != NSNotFound else { return }
+        textView.scrollRangeToVisible(selectedRange)
+    }
+
+    private func beginInlineEditing(cardID: UUID, seedEvent: NSEvent? = nil) {
+        guard configuration.allowsInlineEditing,
+              let card = configuration.cardsByID[cardID],
+              let frame = cardFrameByID[cardID] else { return }
+
+        if inlineEditingCardID != cardID {
+            endInlineEditing(commit: true)
+        }
+
+        let textView = ensureInlineEditor()
+        inlineEditingCardID = cardID
+        inlineEditingOriginalContent = card.content
+        inlineEditorScrollView?.frame = frame
+        inlineEditorScrollView?.isHidden = false
+        inlineEditorScrollView?.alphaValue = 1
+        configuration.onInlineEditingChange(true)
+        updateInlineEditorAppearance(for: card)
+
+        if textView.string != card.content {
+            textView.string = card.content
+        }
+        textView.setSelectedRange(NSRange(location: (textView.string as NSString).length, length: 0))
+        window?.makeFirstResponder(textView)
+        revealInlineEditorSelection()
+
+        if let seedEvent {
+            textView.keyDown(with: seedEvent)
+        }
+    }
+
+    private func endInlineEditing(commit: Bool) {
+        guard let cardID = inlineEditingCardID else { return }
+        isEndingInlineEditing = true
+        defer {
+            isEndingInlineEditing = false
+        }
+
+        let originalContent = inlineEditingOriginalContent
+        let committedText = inlineEditorTextView?.string ?? originalContent
+        inlineEditingCardID = nil
+        inlineEditingOriginalContent = ""
+        inlineEditorScrollView?.isHidden = true
+        configuration.onInlineEditingChange(false)
+
+        if commit, committedText != originalContent {
+            configuration.onInlineCardEditCommit(cardID, committedText)
+        }
+    }
+
+    private func layoutInlineEditorIfNeeded() {
+        guard let inlineEditingCardID,
+              let frame = cardFrameByID[inlineEditingCardID],
+              let card = configuration.cardsByID[inlineEditingCardID] else {
+            inlineEditorScrollView?.isHidden = true
+            return
+        }
+        inlineEditorScrollView?.frame = frame
+        inlineEditorScrollView?.isHidden = false
+        updateInlineEditorAppearance(for: card)
     }
 
     func menuForLaneChip(parentCardID: UUID, event: NSEvent, in view: NSView) -> NSMenu? {
@@ -3505,6 +3805,7 @@ private final class IndexBoardSurfaceAppKitDocumentView: NSView, IndexBoardSurfa
         updateIndicatorLayers()
         updateHoverIndicatorLayer()
         updateOverlayLayers()
+        layoutInlineEditorIfNeeded()
 
         NSAnimationContext.runAnimationGroup { context in
             context.duration = animationDuration
@@ -3546,7 +3847,8 @@ private final class IndexBoardSurfaceAppKitDocumentView: NSView, IndexBoardSurfa
             cornerHeight: 13,
             transform: nil
         )
-        let tint = NSColor.controlAccentColor.withAlphaComponent(configuration.theme.usesDarkAppearance ? 0.92 : 0.84)
+        let tint = indexBoardThemeAccentColor(theme: configuration.theme)
+            .withAlphaComponent(configuration.theme.usesDarkAppearance ? 0.92 : 0.84)
         startAnchorLayer.fillColor = tint.withAlphaComponent(configuration.theme.usesDarkAppearance ? 0.18 : 0.12).cgColor
         startAnchorLayer.strokeColor = tint.cgColor
         startAnchorLayer.lineWidth = 1.5
@@ -4072,7 +4374,8 @@ private final class IndexBoardSurfaceAppKitDocumentView: NSView, IndexBoardSurfa
             }
             return NSColor.white.withAlphaComponent(0.58)
         case .detachedSlot:
-            return NSColor.controlAccentColor.withAlphaComponent(configuration.theme.usesDarkAppearance ? 0.20 : 0.18)
+            return indexBoardThemeAccentColor(theme: configuration.theme)
+                .withAlphaComponent(configuration.theme.usesDarkAppearance ? 0.20 : 0.18)
         case .detachedParking:
             return NSColor.white.withAlphaComponent(configuration.theme.usesDarkAppearance ? 0.04 : 0.12)
         }
@@ -4081,7 +4384,7 @@ private final class IndexBoardSurfaceAppKitDocumentView: NSView, IndexBoardSurfa
     private func resolvedPlaceholderStrokeColor(style: IndexBoardSurfaceAppKitPlaceholderStyle) -> NSColor {
         switch style {
         case .flow:
-        let borderRGB = configuration.theme.usesDarkAppearance ? (0.42, 0.45, 0.51) : (0.76, 0.73, 0.67)
+        let borderRGB = configuration.theme.resolvedGroupBorderRGB
         return NSColor(
             calibratedRed: borderRGB.0,
             green: borderRGB.1,
@@ -4089,9 +4392,10 @@ private final class IndexBoardSurfaceAppKitDocumentView: NSView, IndexBoardSurfa
             alpha: configuration.theme.usesDarkAppearance ? 0.54 : 0.72
         )
         case .detachedSlot:
-            return NSColor.controlAccentColor.withAlphaComponent(0.98)
+            return indexBoardThemeAccentColor(theme: configuration.theme).withAlphaComponent(0.98)
         case .detachedParking:
-            return NSColor.controlAccentColor.withAlphaComponent(configuration.theme.usesDarkAppearance ? 0.74 : 0.86)
+            return indexBoardThemeAccentColor(theme: configuration.theme)
+                .withAlphaComponent(configuration.theme.usesDarkAppearance ? 0.74 : 0.86)
         }
     }
 
@@ -5262,6 +5566,9 @@ struct IndexBoardSurfaceAppKitPhaseTwoView: View {
     let onCardDragStart: ([UUID], UUID) -> Void
     let onCardOpen: (SceneCard) -> Void
     let onParentCardOpen: (UUID) -> Void
+    let allowsInlineEditing: Bool
+    let onInlineEditingChange: (Bool) -> Void
+    let onInlineCardEditCommit: (UUID, String) -> Void
     let onCardFaceToggle: (SceneCard) -> Void
     let onZoomScaleChange: (CGFloat) -> Void
     let onZoomStep: (CGFloat) -> Void
@@ -5317,6 +5624,9 @@ struct IndexBoardSurfaceAppKitPhaseTwoView: View {
                         onCardDragStart: onCardDragStart,
                         onCardOpen: onCardOpen,
                         onParentCardOpen: onParentCardOpen,
+                        allowsInlineEditing: allowsInlineEditing,
+                        onInlineEditingChange: onInlineEditingChange,
+                        onInlineCardEditCommit: onInlineCardEditCommit,
                         onCardMove: onCardMove,
                         onCardMoveSelection: onCardMoveSelection,
                         onMarqueeSelectionChange: onMarqueeSelectionChange,

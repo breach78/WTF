@@ -7,7 +7,7 @@
         "key": "요약 없음",
         "location": {
           "startingColumn": 34,
-          "startingLine": 326
+          "startingLine": 593
         }
       },
       {
@@ -15,7 +15,7 @@
         "key": "STALE",
         "location": {
           "startingColumn": 34,
-          "startingLine": 332
+          "startingLine": 599
         }
       },
       {
@@ -23,7 +23,7 @@
         "key": "작업창으로 돌아가기",
         "location": {
           "startingColumn": 20,
-          "startingLine": 648
+          "startingLine": 915
         }
       },
       {
@@ -31,7 +31,7 @@
         "key": "Board View · 그룹 %lld · 카드 %lld",
         "location": {
           "startingColumn": 22,
-          "startingLine": 638
+          "startingLine": 905
         }
       },
       {
@@ -39,7 +39,7 @@
         "key": "Phase 1: group wrapper projection + static render + selection",
         "location": {
           "startingColumn": 22,
-          "startingLine": 641
+          "startingLine": 908
         }
       },
       {
@@ -47,7 +47,7 @@
         "key": "표시할 카드가 없습니다.",
         "location": {
           "startingColumn": 18,
-          "startingLine": 666
+          "startingLine": 933
         }
       },
       {
@@ -55,7 +55,7 @@
         "key": "현재 Phase에서는 source column에 남아 있는 live 카드만 보드로 투영합니다.",
         "location": {
           "startingColumn": 18,
-          "startingLine": 669
+          "startingLine": 936
         }
       }
     ]

@@ -6,7 +6,7 @@
 	<integer>12</integer>
 	<key>logs</key>
 	<dict>
-		<key>1022956A-D30B-4F9F-A16D-D72AB754B43C</key>
+		<key>29190DE8-67EC-4577-A319-806779B62316</key>
 		<dict>
 			<key>className</key>
 			<string>IDECommandLineBuildLog</string>
@@ -15,7 +15,7 @@
 			<key>domainType</key>
 			<string>Xcode.IDEActivityLogDomainType.BuildLog</string>
 			<key>fileName</key>
-			<string>1022956A-D30B-4F9F-A16D-D72AB754B43C.xcactivitylog</string>
+			<string>29190DE8-67EC-4577-A319-806779B62316.xcactivitylog</string>
 			<key>hasPrimaryLog</key>
 			<true/>
 			<key>primaryObservable</key>
@@ -29,7 +29,7 @@
 				<key>totalNumberOfTestFailures</key>
 				<integer>0</integer>
 				<key>totalNumberOfWarnings</key>
-				<integer>2</integer>
+				<integer>3</integer>
 			</dict>
 			<key>schemeIdentifier-containerName</key>
 			<string>wa project</string>
@@ -40,13 +40,55 @@
 			<key>signature</key>
 			<string>Building project wa with scheme wa and configuration Debug</string>
 			<key>timeStartedRecording</key>
-			<real>795961268.225317</real>
+			<real>795970180.32728004</real>
 			<key>timeStoppedRecording</key>
-			<real>795961279.10199404</real>
+			<real>795970200.37234998</real>
 			<key>title</key>
 			<string>Building project wa with scheme wa and configuration Debug</string>
 			<key>uniqueIdentifier</key>
-			<string>1022956A-D30B-4F9F-A16D-D72AB754B43C</string>
+			<string>29190DE8-67EC-4577-A319-806779B62316</string>
+		</dict>
+		<key>6789831C-E692-4D1B-8A13-46A2E03D9E3E</key>
+		<dict>
+			<key>className</key>
+			<string>IDECommandLineBuildLog</string>
+			<key>documentTypeString</key>
+			<string>&lt;nil&gt;</string>
+			<key>domainType</key>
+			<string>Xcode.IDEActivityLogDomainType.BuildLog</string>
+			<key>fileName</key>
+			<string>6789831C-E692-4D1B-8A13-46A2E03D9E3E.xcactivitylog</string>
+			<key>hasPrimaryLog</key>
+			<true/>
+			<key>primaryObservable</key>
+			<dict>
+				<key>highLevelStatus</key>
+				<string>W</string>
+				<key>totalNumberOfAnalyzerIssues</key>
+				<integer>0</integer>
+				<key>totalNumberOfErrors</key>
+				<integer>0</integer>
+				<key>totalNumberOfTestFailures</key>
+				<integer>0</integer>
+				<key>totalNumberOfWarnings</key>
+				<integer>3</integer>
+			</dict>
+			<key>schemeIdentifier-containerName</key>
+			<string>wa project</string>
+			<key>schemeIdentifier-schemeName</key>
+			<string>wa</string>
+			<key>schemeIdentifier-sharedScheme</key>
+			<integer>1</integer>
+			<key>signature</key>
+			<string>Building project wa with scheme wa and configuration Debug</string>
+			<key>timeStartedRecording</key>
+			<real>795969256.18511903</real>
+			<key>timeStoppedRecording</key>
+			<real>795969278.12651205</real>
+			<key>title</key>
+			<string>Building project wa with scheme wa and configuration Debug</string>
+			<key>uniqueIdentifier</key>
+			<string>6789831C-E692-4D1B-8A13-46A2E03D9E3E</string>
 		</dict>
 	</dict>
 </dict>

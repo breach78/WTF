@@ -222,6 +222,7 @@ struct SettingsView: View {
     @AppStorage("darkCardBaseColorHex") private var darkCardBaseColorHex: String = "1A2029"
     @AppStorage("darkCardActiveColorHex") private var darkCardActiveColorHex: String = "2A3A4E"
     @AppStorage("darkCardRelatedColorHex") private var darkCardRelatedColorHex: String = "242F3F"
+    @AppStorage("indexBoardThemePresetID") private var indexBoardThemePresetID: String = IndexBoardThemePreset.currentDefault.rawValue
     @AppStorage("customColorThemePresetsJSON") private var customColorThemePresetsJSON: String = ""
     @AppStorage("autoBackupEnabledOnQuit") private var autoBackupEnabledOnQuit: Bool = true
     @AppStorage("autoBackupDirectoryPath") private var autoBackupDirectoryPath: String = ""
@@ -685,6 +686,9 @@ struct SettingsView: View {
 
     @ViewBuilder
     private var appearanceCards: some View {
+        if cardMatches(title: "보드뷰 테마", keywords: ["보드", "board", "캔버스", "canvas", "테마"]) {
+            indexBoardThemeCard
+        }
         if cardMatches(title: "색상 테마 프리셋", keywords: ["색상", "테마", "프리셋", "palette", "theme"]) {
             colorThemePresetCard
         }
@@ -999,6 +1003,43 @@ struct SettingsView: View {
             }
 
             Text("라이트/다크 모드는 유지하고 카드/배경 팔레트만 교체합니다.")
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .lineLimit(2)
+        }
+    }
+
+    private var indexBoardThemeCard: some View {
+        settingsCard(title: "보드뷰 테마") {
+            Picker("보드 테마", selection: $indexBoardThemePresetID) {
+                ForEach(IndexBoardThemePreset.allCases) { preset in
+                    Text(preset.title)
+                        .tag(preset.rawValue)
+                }
+            }
+            .pickerStyle(.menu)
+
+            if let preset = IndexBoardThemePreset(rawValue: indexBoardThemePresetID) {
+                HStack(spacing: 8) {
+                    ForEach(Array(preset.previewHexes.enumerated()), id: \.offset) { entry in
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(colorFromHex(entry.element) ?? Color.clear)
+                            .frame(width: 34, height: 22)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                    .stroke(Color.black.opacity(0.10), lineWidth: 0.8)
+                            )
+                    }
+                    Spacer(minLength: 0)
+                }
+
+                Text(preset.subtitle)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .lineLimit(2)
+            }
+
+            Text("인덱스 보드 캔버스에만 적용되고, 작업창/포커스 뷰 색은 바꾸지 않습니다.")
                 .font(.caption)
                 .foregroundColor(.secondary)
                 .lineLimit(2)
