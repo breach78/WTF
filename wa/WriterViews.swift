@@ -102,6 +102,7 @@ struct ScenarioWriterView: View {
     @State var selectedCardIDs: Set<UUID> = []
     @State var editingCardID: UUID? = nil
     @State var indexBoardEditorDraft: IndexBoardEditorDraft? = nil
+    @State var pendingIndexBoardCreationPrevStateByCardID: [UUID: ScenarioState] = [:]
     @State var showDeleteAlert: Bool = false
     @State var pendingUpperCardCreationRequest: UpperCardCreationRequest? = nil
     @State var mainArrowRepeatAnimationSuppressedUntil: Date = .distantPast
@@ -408,6 +409,13 @@ struct ScenarioWriterView: View {
         forceSemantic: Bool = false,
         reason: MainCanvasViewState.RestoreRequest.Reason = .generic
     ) {
+        indexBoardRestoreTrace(
+            "main_canvas_schedule_restore_request",
+            "target=\(debugRestoreUUID(targetCardID)) visibleLevel=\(visibleLevel.map(String.init) ?? "nil") " +
+            "forceSemantic=\(forceSemantic) reason=\(reason) active=\(debugRestoreUUID(activeCardID)) " +
+            "editing=\(debugRestoreUUID(editingCardID)) suppressHorizontal=\(suppressHorizontalAutoScroll) " +
+            "currentOffset=\(debugRestoreCGFloat(mainCanvasScrollCoordinator.resolvedMainCanvasHorizontalOffset()))"
+        )
         mainCanvasViewState.scheduleRestoreRequest(
             targetCardID: targetCardID,
             visibleLevel: visibleLevel,
@@ -444,6 +452,14 @@ struct ScenarioWriterView: View {
     var mainCanvasDiagnosticsOwnerKey: String {
         let paneKey = splitModeEnabled ? splitPaneID : 0
         return "scenario:\(scenario.id.uuidString)|pane:\(paneKey)"
+    }
+
+    func resolvedMainCanvasHorizontalViewportSnapshotOffset() -> CGFloat? {
+        if let liveOffset = mainCanvasScrollCoordinator.resolvedMainCanvasHorizontalOffset() {
+            return max(0, liveOffset)
+        }
+        let persistenceKey = mainCanvasHorizontalViewportPersistenceKey()
+        return restoredMainCanvasHorizontalViewportOffsets()[persistenceKey].map { max(0, $0) }
     }
 
     func mainCanvasInteractionFingerprint() -> Int {
@@ -1414,6 +1430,14 @@ struct ScenarioWriterView: View {
             "handleActiveCardIDChange new=\(debugCardIDString(newID)) clearedRequests=\(clearedRequestCount) " +
             "restoreUntil=\(mainColumnViewportRestoreUntil.timeIntervalSince1970) \(debugFocusStateSummary())"
         )
+        indexBoardRestoreTrace(
+            "main_canvas_handle_active_card_change",
+            "newID=\(debugRestoreUUID(newID)) clearedRequests=\(clearedRequestCount) " +
+            "showFocusMode=\(showFocusMode) boardActive=\(isIndexBoardActive) " +
+            "suppressOnce=\(suppressAutoScrollOnce) suppressHorizontal=\(suppressHorizontalAutoScroll) " +
+            "restoreUntil=\(String(format: "%.3f", mainColumnViewportRestoreUntil.timeIntervalSince1970)) " +
+            "offset=\(debugRestoreCGFloat(mainCanvasScrollCoordinator.resolvedMainCanvasHorizontalOffset()))"
+        )
         if let newID, findCard(by: newID) != nil {
             persistLastEditedCard(newID)
             if editingCardID == nil && !showFocusMode {
@@ -1445,6 +1469,15 @@ struct ScenarioWriterView: View {
                 pendingMainEditingBoundaryNavigationTargetID == newID
             )
         if editingCardID != nil && !hasExplicitEditingVerticalTransition {
+            syncMainCanvasInteractionState()
+            return
+        }
+        let clickFocusedTarget = pendingMainClickHorizontalFocusTargetID == newID
+        if mainColumnViewportRestoreUntil > Date(), !clickFocusedTarget {
+            indexBoardRestoreTrace(
+                "main_canvas_handle_active_card_change_preserve_viewport",
+                "newID=\(debugRestoreUUID(newID)) restoreUntil=\(String(format: "%.3f", mainColumnViewportRestoreUntil.timeIntervalSince1970))"
+            )
             syncMainCanvasInteractionState()
             return
         }
@@ -1883,20 +1916,37 @@ struct ScenarioWriterView: View {
 
     // MARK: - Layout
 
+    var showsBottomHistoryUIInCurrentPane: Bool {
+        showHistoryBar && activeBasePaneMode != .focus
+    }
+
+    var showsWorkspaceTopToolbarInCurrentPane: Bool {
+        showWorkspaceTopToolbar && activeBasePaneMode == .main
+    }
+
     @ViewBuilder
     func workspaceLayout(for geometry: GeometryProxy) -> some View {
         let timelinePanelVisible = (showTimeline || showAIChat) && !showHistoryBar && activeBasePaneMode != .focus
         let availableWidth = geometry.size.width - (timelinePanelVisible ? timelineWidth : 0)
+        let indexBoardTopSafeAreaInset = max(0, geometry.safeAreaInsets.top)
 
-        if showHistoryBar && activeBasePaneMode != .focus {
+        if showsBottomHistoryUIInCurrentPane {
             ZStack(alignment: .topTrailing) {
-                primaryWorkspaceColumn(size: geometry.size, availableWidth: geometry.size.width)
+                primaryWorkspaceColumn(
+                    size: geometry.size,
+                    availableWidth: geometry.size.width,
+                    indexBoardTopSafeAreaInset: indexBoardTopSafeAreaInset
+                )
                 historyOverlayHost(containerHeight: geometry.size.height)
                     .transition(.move(edge: .trailing))
             }
         } else {
             HStack(spacing: 0) {
-                primaryWorkspaceColumn(size: geometry.size, availableWidth: availableWidth)
+                primaryWorkspaceColumn(
+                    size: geometry.size,
+                    availableWidth: availableWidth,
+                    indexBoardTopSafeAreaInset: indexBoardTopSafeAreaInset
+                )
                 if activeBasePaneMode != .focus {
                     trailingWorkspacePanelHost
                 }
@@ -1905,21 +1955,31 @@ struct ScenarioWriterView: View {
     }
 
     @ViewBuilder
-    func primaryWorkspaceColumn(size: CGSize, availableWidth: CGFloat) -> some View {
+    func primaryWorkspaceColumn(
+        size: CGSize,
+        availableWidth: CGFloat,
+        indexBoardTopSafeAreaInset: CGFloat
+    ) -> some View {
         VStack(spacing: 0) {
             ZStack {
+                mainCanvasWithOptionalZoom(size: size, availableWidth: availableWidth)
+                    .opacity((showFocusMode || isIndexBoardActive) ? 0 : 1)
+                    .allowsHitTesting(!showFocusMode && !isIndexBoardActive)
+                    .accessibilityHidden(showFocusMode || isIndexBoardActive)
+                    .zIndex(0)
+
                 if activeBasePaneMode == .indexBoard {
-                    indexBoardCanvas(size: size)
-                        .zIndex(0)
-                } else {
-                    mainCanvasWithOptionalZoom(size: size, availableWidth: availableWidth)
-                        .opacity(showFocusMode ? 0 : 1)
-                        .allowsHitTesting(!showFocusMode)
-                        .accessibilityHidden(showFocusMode)
-                        .zIndex(0)
+                    indexBoardCanvas(
+                        size: CGSize(
+                            width: availableWidth,
+                            height: size.height + indexBoardTopSafeAreaInset
+                        )
+                    )
+                    .offset(y: -indexBoardTopSafeAreaInset)
+                    .zIndex(2)
                 }
 
-                if showWorkspaceTopToolbar && activeBasePaneMode == .main {
+                if showsWorkspaceTopToolbarInCurrentPane {
                     workspaceTopToolbarHost
                         .zIndex(5)
                 }
@@ -1933,7 +1993,7 @@ struct ScenarioWriterView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            if showHistoryBar && activeBasePaneMode != .focus {
+            if showsBottomHistoryUIInCurrentPane {
                 bottomHistoryBarHost
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
@@ -2009,6 +2069,8 @@ struct ScenarioWriterView: View {
                 if showsSplitPaneAutoLinkToggle {
                     splitPaneAutoLinkToolbarButton
                 }
+                focusModeToolbarButton
+                indexBoardToolbarButton
                 checkpointToolbarButton
                 historyToolbarButton
                 aiChatToolbarButton
@@ -2017,6 +2079,36 @@ struct ScenarioWriterView: View {
             Spacer()
         }
         .ignoresSafeArea(.container, edges: [.top, .leading, .trailing, .bottom])
+    }
+
+    var focusModeToolbarButton: some View {
+        Button {
+            toggleFocusMode()
+        } label: {
+            Image(systemName: "scope")
+                .padding(8)
+                .background(.ultraThinMaterial)
+                .clipShape(Circle())
+                .foregroundColor(.primary)
+        }
+        .buttonStyle(.plain)
+        .padding(.top, 2)
+        .help("포커스 모드 열기")
+    }
+
+    var indexBoardToolbarButton: some View {
+        Button {
+            handleOpenIndexBoardRequestNotification()
+        } label: {
+            Image(systemName: "square.grid.3x3.fill")
+                .padding(8)
+                .background(.ultraThinMaterial)
+                .clipShape(Circle())
+                .foregroundColor(.primary)
+        }
+        .buttonStyle(.plain)
+        .padding(.top, 2)
+        .help("보드 뷰 열기")
     }
 
     @ViewBuilder
@@ -2032,9 +2124,7 @@ struct ScenarioWriterView: View {
 
     var checkpointToolbarButton: some View {
         Button {
-            newCheckpointName = ""
-            newCheckpointNote = ""
-            showCheckpointDialog = true
+            presentNamedCheckpointDialog()
         } label: {
             Image(systemName: "flag.fill")
                 .padding(8)
@@ -2049,18 +2139,7 @@ struct ScenarioWriterView: View {
 
     var historyToolbarButton: some View {
         Button {
-            withAnimation(quickEaseAnimation) {
-                if showHistoryBar {
-                    exitPreviewMode()
-                    showHistoryBar = false
-                } else {
-                    showTimeline = false
-                    showAIChat = false
-                    showHistoryBar = true
-                    historyIndex = Double(max(0, scenario.sortedSnapshots.count - 1))
-                    isPreviewingHistory = false
-                }
-            }
+            toggleHistoryPanel()
         } label: {
             Image(systemName: "clock.arrow.circlepath")
                 .padding(8)
@@ -2145,16 +2224,7 @@ struct ScenarioWriterView: View {
 
     var timelineToolbarButton: some View {
         Button {
-            if showTimeline {
-                toggleTimeline()
-            } else {
-                withAnimation(quickEaseAnimation) {
-                    showHistoryBar = false
-                    showAIChat = false
-                    exitPreviewMode()
-                    showTimeline = true
-                }
-            }
+            toggleTimeline()
         } label: {
             Image(systemName: showTimeline ? "sidebar.right" : "sidebar.left")
                 .padding(8)
@@ -2168,7 +2238,28 @@ struct ScenarioWriterView: View {
         .padding(.trailing, 20)
         .help("전체 카드 목록 열기")
     }
-    
+
+    func presentNamedCheckpointDialog() {
+        newCheckpointName = ""
+        newCheckpointNote = ""
+        showCheckpointDialog = true
+    }
+
+    func toggleHistoryPanel() {
+        withAnimation(quickEaseAnimation) {
+            if showHistoryBar {
+                exitPreviewMode()
+                showHistoryBar = false
+            } else {
+                showTimeline = false
+                showAIChat = false
+                showHistoryBar = true
+                historyIndex = Double(max(0, scenario.sortedSnapshots.count - 1))
+                isPreviewingHistory = false
+            }
+        }
+    }
+
     func toggleAIChat() {
         withAnimation(quickEaseAnimation) {
             showAIChat.toggle()
@@ -2429,23 +2520,23 @@ struct ScenarioWriterView: View {
                 isMainViewFocused = true
             },
             onHistoryIndexChange: { proxy in
-                guard !showFocusMode else { return }
+                guard !showFocusMode, !isIndexBoardActive else { return }
                 handleMainCanvasHistoryIndexChange(hProxy: proxy)
             },
             onActiveCardChange: { newID, proxy, width in
-                guard !showFocusMode else { return }
+                guard !showFocusMode, !isIndexBoardActive else { return }
                 handleMainCanvasActiveCardChange(newID, hProxy: proxy, availableWidth: width)
             },
             onNavigationSettle: { proxy, width in
-                guard !showFocusMode else { return }
+                guard !showFocusMode, !isIndexBoardActive else { return }
                 handleMainCanvasNavigationSettle(hProxy: proxy, availableWidth: width)
             },
             onRestoreRequest: { proxy, width in
-                guard !showFocusMode else { return }
+                guard !showFocusMode, !isIndexBoardActive else { return }
                 handleMainCanvasRestoreRequest(hProxy: proxy, availableWidth: width)
             },
             onAppear: { proxy, width in
-                guard !showFocusMode else { return }
+                guard !showFocusMode, !isIndexBoardActive else { return }
                 handleMainCanvasAppear(hProxy: proxy, availableWidth: width)
             },
             scrollableContent: {
@@ -2746,13 +2837,29 @@ struct ScenarioWriterView: View {
     func handleMainCanvasActiveCardChange(_ newID: UUID?, hProxy: ScrollViewProxy, availableWidth: CGFloat) {
         guard acceptsKeyboardInput else { return }
         guard let id = newID else { return }
-        if showFocusMode { return }
-        if pendingMainEditingSiblingNavigationTargetID == id { return }
+        if showFocusMode {
+            indexBoardRestoreTrace("main_canvas_auto_scroll_skip", "reason=focusMode target=\(debugRestoreUUID(id))")
+            return
+        }
+        if pendingMainEditingSiblingNavigationTargetID == id {
+            indexBoardRestoreTrace("main_canvas_auto_scroll_skip", "reason=pendingSibling target=\(debugRestoreUUID(id))")
+            return
+        }
         let clickFocusedTarget = pendingMainClickHorizontalFocusTargetID == id
-        if suppressHorizontalAutoScroll && !clickFocusedTarget { return }
+        if suppressHorizontalAutoScroll && !clickFocusedTarget {
+            indexBoardRestoreTrace(
+                "main_canvas_auto_scroll_skip",
+                "reason=suppressHorizontal target=\(debugRestoreUUID(id)) clickFocused=\(clickFocusedTarget)"
+            )
+            return
+        }
         if suppressAutoScrollOnce {
             suppressAutoScrollOnce = false
             if !clickFocusedTarget {
+                indexBoardRestoreTrace(
+                    "main_canvas_auto_scroll_skip",
+                    "reason=suppressOnce target=\(debugRestoreUUID(id)) clickFocused=\(clickFocusedTarget)"
+                )
                 return
             }
         }
@@ -2761,6 +2868,10 @@ struct ScenarioWriterView: View {
             (pendingMainHorizontalScrollAnimation ?? !shouldSuppressMainArrowRepeatAnimation())
         pendingMainHorizontalScrollAnimation = nil
         if clickFocusedTarget {
+            indexBoardRestoreTrace(
+                "main_canvas_auto_scroll_execute",
+                "target=\(debugRestoreUUID(id)) trigger=clickFocused animated=\(animated) availableWidth=\(String(format: "%.2f", availableWidth))"
+            )
             scrollToColumnIfNeeded(
                 targetCardID: id,
                 proxy: hProxy,
@@ -2774,6 +2885,11 @@ struct ScenarioWriterView: View {
             return
         }
         if !isPreviewingHistory {
+            indexBoardRestoreTrace(
+                "main_canvas_auto_scroll_execute",
+                "target=\(debugRestoreUUID(id)) trigger=activeCard animated=\(animated) availableWidth=\(String(format: "%.2f", availableWidth)) " +
+                "clickFocused=\(clickFocusedTarget)"
+            )
             scrollToColumnIfNeeded(
                 targetCardID: id,
                 proxy: hProxy,
@@ -3129,6 +3245,10 @@ struct ScenarioWriterView: View {
 
     func applyStoredMainColumnViewportOffsets(_ offsets: [String: CGFloat]) {
         guard !offsets.isEmpty else { return }
+        indexBoardRestoreTrace(
+            "main_canvas_apply_column_viewport_offsets_begin",
+            "count=\(offsets.count) offsets=\(debugRestoreViewportOffsets(offsets)) active=\(debugRestoreUUID(activeCardID))"
+        )
 
         var didScheduleCaptureSuspension = false
         for (viewportKey, storedOffsetY) in offsets.sorted(by: { $0.key < $1.key }) {
@@ -3155,6 +3275,11 @@ struct ScenarioWriterView: View {
                 maxY: maxY,
                 deadZone: 0.5,
                 snapToPixel: true
+            )
+            indexBoardRestoreTrace(
+                "main_canvas_apply_column_viewport_offsets_applied",
+                "viewportKey=\(viewportKey) targetY=\(String(format: "%.2f", storedOffsetY)) " +
+                "currentY=\(String(format: "%.2f", scrollView.contentView.bounds.origin.y)) maxY=\(String(format: "%.2f", maxY))"
             )
         }
     }
@@ -3245,8 +3370,6 @@ struct ScenarioWriterView: View {
 
         if let resolvedHorizontalOffset {
             horizontalOffsets[persistenceKey] = resolvedHorizontalOffset
-        } else {
-            horizontalOffsets.removeValue(forKey: persistenceKey)
         }
 
         if let data = try? JSONEncoder().encode(horizontalOffsets.reduce(into: [String: Double]()) { partialResult, entry in

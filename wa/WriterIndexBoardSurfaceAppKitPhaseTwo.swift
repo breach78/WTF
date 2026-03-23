@@ -423,6 +423,7 @@ private struct IndexBoardSurfaceAppKitConfiguration {
     let onClearSelection: () -> Void
     let onScrollOffsetChange: (CGPoint) -> Void
     let onZoomScaleChange: (CGFloat) -> Void
+    let onViewportFinalize: (CGFloat, CGPoint) -> Void
     let onParentGroupMove: (IndexBoardParentGroupDropTarget) -> Void
 }
 
@@ -1334,6 +1335,7 @@ private final class IndexBoardSurfaceAppKitDocumentView: NSView, IndexBoardSurfa
 
     func updateConfigurationForViewportOnly(_ configuration: IndexBoardSurfaceAppKitConfiguration) {
         self.configuration = configuration
+        self.lastRenderState = configuration.renderState
     }
 
     func refreshDisplayAfterLiveMagnify() {
@@ -1635,8 +1637,12 @@ private final class IndexBoardSurfaceAppKitDocumentView: NSView, IndexBoardSurfa
         max(IndexBoardMetrics.boardHorizontalPadding, IndexBoardSurfaceAppKitConstants.minimumCanvasLeadInset)
     }
 
-    private var surfaceVerticalInset: CGFloat {
+    private var surfaceTopInset: CGFloat {
         max(IndexBoardMetrics.boardVerticalPadding, IndexBoardSurfaceAppKitConstants.minimumCanvasTopInset)
+    }
+
+    private var surfaceBottomInset: CGFloat {
+        IndexBoardMetrics.boardVerticalPadding
     }
 
     private var logicalGridBounds: IndexBoardSurfaceAppKitGridBounds {
@@ -2026,7 +2032,7 @@ private final class IndexBoardSurfaceAppKitDocumentView: NSView, IndexBoardSurfa
         let normalizedRow = position.row - bounds.minRow
         return CGRect(
             x: surfaceHorizontalInset + (CGFloat(normalizedColumn) * (slotSize.width + IndexBoardMetrics.cardSpacing)),
-            y: surfaceVerticalInset + (CGFloat(normalizedRow) * (slotSize.height + IndexBoardSurfaceAppKitConstants.lineSpacing)),
+            y: surfaceTopInset + (CGFloat(normalizedRow) * (slotSize.height + IndexBoardSurfaceAppKitConstants.lineSpacing)),
             width: slotSize.width,
             height: slotSize.height
         )
@@ -2153,7 +2159,7 @@ private final class IndexBoardSurfaceAppKitDocumentView: NSView, IndexBoardSurfa
         let columnStep = slotSize.width + IndexBoardMetrics.cardSpacing
         let rowStep = slotSize.height + IndexBoardSurfaceAppKitConstants.lineSpacing
         let rawColumn = Int(((point.x - surfaceHorizontalInset - (slotSize.width / 2)) / columnStep).rounded())
-        let rawRow = Int(((point.y - surfaceVerticalInset - (slotSize.height / 2)) / rowStep).rounded())
+        let rawRow = Int(((point.y - surfaceTopInset - (slotSize.height / 2)) / rowStep).rounded())
         let clampedColumn = min(max(0, rawColumn), bounds.columnCount - 1)
         let clampedRow = min(max(0, rawRow), bounds.rowCount - 1)
         return IndexBoardGridPosition(
@@ -2739,6 +2745,7 @@ private final class IndexBoardSurfaceAppKitDocumentView: NSView, IndexBoardSurfa
         if var groupDragState {
             groupDragState.targetOrigin = resolvedGroupDragOrigin(for: groupDragState)
             self.groupDragState = groupDragState
+            updateLocalGroupDragPreview(for: groupDragState)
             presentationSurfaceProjection = resolvedPresentationSurfaceProjection(for: groupDragState)
         }
         applyCurrentLayout(animationDuration: 0)
@@ -2756,6 +2763,7 @@ private final class IndexBoardSurfaceAppKitDocumentView: NSView, IndexBoardSurfa
             presentationSurfaceProjection = nil
         }
         self.groupDragState = nil
+        updateLocalGroupDragPreview(for: nil)
         groupDragSnapshot = nil
         frozenLogicalGridBounds = nil
         applyCurrentLayout(animationDuration: IndexBoardSurfaceAppKitConstants.commitLayoutAnimationDuration)
@@ -3350,25 +3358,16 @@ private final class IndexBoardSurfaceAppKitDocumentView: NSView, IndexBoardSurfa
     private func resolvedPresentationSurfaceProjection(
         for drag: IndexBoardSurfaceAppKitGroupDragState
     ) -> BoardSurfaceProjection {
-        let updatedParentGroups = configuration.surfaceProjection.parentGroups.map { group in
-            guard group.parentCardID == drag.parentCardID else { return group }
-            return BoardSurfaceParentGroupPlacement(
-                id: group.id,
-                parentCardID: group.parentCardID,
-                origin: drag.targetOrigin,
-                cardIDs: group.cardIDs,
-                titleText: group.titleText,
-                subtitleText: group.subtitleText,
-                colorToken: group.colorToken,
-                isMainline: group.isMainline,
-                isTempGroup: group.isTempGroup
-            )
-        }
+        let baseProjection = restingSceneSnapshot?.projection ?? configuration.surfaceProjection
+        let updatedParentGroups = resolvedPreviewParentGroups(
+            for: drag,
+            baseProjection: baseProjection
+        )
 
-        let stationaryDetachedItems = configuration.surfaceProjection.surfaceItems.filter { $0.parentGroupID == nil }
+        let stationaryDetachedItems = baseProjection.surfaceItems.filter { $0.parentGroupID == nil }
         var regroupedItems: [BoardSurfaceItem] = []
         for placement in updatedParentGroups.sorted(by: indexBoardSurfaceAppKitGroupSort) {
-            let laneIndex = configuration.surfaceProjection.lanes.first(where: { $0.parentCardID == placement.parentCardID })?.laneIndex ?? 0
+            let laneIndex = baseProjection.lanes.first(where: { $0.parentCardID == placement.parentCardID })?.laneIndex ?? 0
             let updatedItems = placement.cardIDs.enumerated().map { index, cardID in
                 BoardSurfaceItem(
                     cardID: cardID,
@@ -3388,10 +3387,11 @@ private final class IndexBoardSurfaceAppKitDocumentView: NSView, IndexBoardSurfa
 
         let sortedItems = (regroupedItems + stationaryDetachedItems).sorted(by: indexBoardSurfaceAppKitSort)
         return BoardSurfaceProjection(
-            source: configuration.surfaceProjection.source,
-            startAnchor: configuration.surfaceProjection.startAnchor,
-            lanes: configuration.surfaceProjection.lanes,
+            source: baseProjection.source,
+            startAnchor: baseProjection.startAnchor,
+            lanes: baseProjection.lanes,
             parentGroups: updatedParentGroups.sorted(by: indexBoardSurfaceAppKitGroupSort),
+            tempStrips: baseProjection.tempStrips,
             surfaceItems: sortedItems,
             orderedCardIDs: sortedItems.map(\.cardID)
         )
@@ -3418,6 +3418,7 @@ private final class IndexBoardSurfaceAppKitDocumentView: NSView, IndexBoardSurfa
         previousOrigin: IndexBoardGridPosition
     ) {
         self.groupDragState = updatedState
+        updateLocalGroupDragPreview(for: updatedState)
         let didRetarget = updatedState.targetOrigin != previousOrigin
         if didRetarget {
             presentationSurfaceProjection = resolvedPresentationSurfaceProjection(for: updatedState)
@@ -3427,6 +3428,21 @@ private final class IndexBoardSurfaceAppKitDocumentView: NSView, IndexBoardSurfa
         } else {
             updateOverlayLayers()
         }
+    }
+
+    private func updateLocalGroupDragPreview(
+        for drag: IndexBoardSurfaceAppKitGroupDragState?
+    ) {
+        guard let drag,
+              drag.targetOrigin != drag.initialOrigin,
+              let preview = resolvedLocalGroupDragPreview(for: drag) else {
+            localGroupDragPreviewFramesByID = nil
+            localGroupDragTargetFrame = nil
+            return
+        }
+
+        localGroupDragPreviewFramesByID = preview.cardFramesByID
+        localGroupDragTargetFrame = preview.targetFrame
     }
 
     private func resolvedDetachedSelectionPositions(
@@ -3468,7 +3484,7 @@ private final class IndexBoardSurfaceAppKitDocumentView: NSView, IndexBoardSurfa
             ),
             height: max(
                 configuration.canvasSize.height + IndexBoardSurfaceAppKitConstants.surfaceVerticalOverscan,
-                gridHeight + (surfaceVerticalInset * 2) + IndexBoardSurfaceAppKitConstants.surfaceVerticalOverscan
+                gridHeight + surfaceTopInset + surfaceBottomInset + IndexBoardSurfaceAppKitConstants.surfaceVerticalOverscan
             )
         )
         if frame.size != documentSize {
@@ -4699,20 +4715,31 @@ private final class IndexBoardSurfaceAppKitContainerView: NSView {
     private let backgroundView: IndexBoardSurfaceAppKitBackgroundView
     private let scrollView: NSScrollView
     private let documentView: IndexBoardSurfaceAppKitDocumentView
+    private var lastContainerRenderState: IndexBoardSurfaceAppKitRenderState
     private var scrollObserver: NSObjectProtocol?
+    private var willStartLiveScrollObserver: NSObjectProtocol?
+    private var didEndLiveScrollObserver: NSObjectProtocol?
     private var willStartMagnifyObserver: NSObjectProtocol?
     private var magnifyObserver: NSObjectProtocol?
     private var isApplyingExternalViewport = false
+    private var isLiveScrolling = false
     private var isLiveMagnifying = false
     private var viewportSession: IndexBoardSurfaceAppKitViewportSession?
+    private var viewportCommitTimer: Timer?
     private var pendingLiveMagnification: CGFloat?
     private var pendingLiveScrollOrigin: CGPoint?
     private var hoverResumeTimer: Timer?
+    private var pendingViewportReapplyAttempts = 0
+    private var isRestoringInitialViewport = true
+    private var hasPresentedInitialViewport = false
+    private let viewportDebugID = String(UUID().uuidString.prefix(8))
+    private var viewportDebugLogBudget = 24
 
     init(configuration: IndexBoardSurfaceAppKitConfiguration) {
         backgroundView = IndexBoardSurfaceAppKitBackgroundView(theme: configuration.theme)
         scrollView = NSScrollView(frame: .zero)
         documentView = IndexBoardSurfaceAppKitDocumentView(configuration: configuration)
+        lastContainerRenderState = configuration.renderState
         super.init(frame: .zero)
         wantsLayer = true
 
@@ -4726,14 +4753,28 @@ private final class IndexBoardSurfaceAppKitContainerView: NSView {
         scrollView.hasVerticalScroller = true
         scrollView.autohidesScrollers = true
         scrollView.scrollerStyle = .overlay
+        scrollView.usesPredominantAxisScrolling = false
+        scrollView.automaticallyAdjustsContentInsets = false
+        scrollView.contentInsets = NSEdgeInsetsZero
+        scrollView.scrollerInsets = NSEdgeInsetsZero
         scrollView.allowsMagnification = true
         scrollView.minMagnification = IndexBoardZoom.minScale
         scrollView.maxMagnification = IndexBoardZoom.maxScale
         scrollView.documentView = documentView
+        scrollView.contentView.automaticallyAdjustsContentInsets = false
+        scrollView.contentView.contentInsets = NSEdgeInsetsZero
         scrollView.contentView.postsBoundsChangedNotifications = true
+        scrollView.alphaValue = 0
         documentView.scrollView = scrollView
         addSubview(scrollView)
+        suppressScrollPocketVisuals()
 
+        update(configuration: configuration)
+        installViewportObservers()
+        logViewportDebug("init_complete")
+    }
+
+    private func installViewportObservers() {
         scrollObserver = NotificationCenter.default.addObserver(
             forName: NSView.boundsDidChangeNotification,
             object: scrollView.contentView,
@@ -4741,12 +4782,37 @@ private final class IndexBoardSurfaceAppKitContainerView: NSView {
         ) { [weak self] _ in
             self?.handleViewportChanged()
         }
+        willStartLiveScrollObserver = NotificationCenter.default.addObserver(
+            forName: NSScrollView.willStartLiveScrollNotification,
+            object: scrollView,
+            queue: .main
+        ) { [weak self] _ in
+            self?.isLiveScrolling = true
+            self?.isRestoringInitialViewport = false
+            self?.updateInitialViewportPresentation()
+        }
+        didEndLiveScrollObserver = NotificationCenter.default.addObserver(
+            forName: NSScrollView.didEndLiveScrollNotification,
+            object: scrollView,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            self.isLiveScrolling = false
+            self.viewportSession = nil
+            let origin = self.scrollView.contentView.bounds.origin
+            self.pendingLiveScrollOrigin = CGPoint(
+                x: max(0, origin.x),
+                y: max(0, origin.y)
+            )
+        }
         willStartMagnifyObserver = NotificationCenter.default.addObserver(
             forName: NSScrollView.willStartLiveMagnifyNotification,
             object: scrollView,
             queue: .main
         ) { [weak self] _ in
             self?.isLiveMagnifying = true
+            self?.isRestoringInitialViewport = false
+            self?.updateInitialViewportPresentation()
         }
         magnifyObserver = NotificationCenter.default.addObserver(
             forName: NSScrollView.didEndLiveMagnifyNotification,
@@ -4757,8 +4823,6 @@ private final class IndexBoardSurfaceAppKitContainerView: NSView {
             self?.syncViewportAfterLiveMagnify()
             self?.documentView.refreshDisplayAfterLiveMagnify()
         }
-
-        update(configuration: configuration)
     }
 
     @available(*, unavailable)
@@ -4770,25 +4834,57 @@ private final class IndexBoardSurfaceAppKitContainerView: NSView {
         if let scrollObserver {
             NotificationCenter.default.removeObserver(scrollObserver)
         }
+        if let willStartLiveScrollObserver {
+            NotificationCenter.default.removeObserver(willStartLiveScrollObserver)
+        }
+        if let didEndLiveScrollObserver {
+            NotificationCenter.default.removeObserver(didEndLiveScrollObserver)
+        }
         if let willStartMagnifyObserver {
             NotificationCenter.default.removeObserver(willStartMagnifyObserver)
         }
         if let magnifyObserver {
             NotificationCenter.default.removeObserver(magnifyObserver)
         }
-        hoverResumeTimer?.invalidate()
+        flushViewportPersistenceForTeardown()
     }
 
     override func layout() {
         super.layout()
         backgroundView.frame = bounds
         scrollView.frame = bounds
+        normalizeScrollViewInsets()
+        suppressScrollPocketVisuals()
+        applyConfiguredViewportIfNeeded()
+        scheduleDeferredViewportReapplyIfNeeded()
+        updateInitialViewportPresentation()
+        logViewportDebug("layout")
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        normalizeScrollViewInsets()
+        suppressScrollPocketVisuals()
+        DispatchQueue.main.async { [weak self] in
+            self?.applyConfiguredViewportIfNeeded()
+            self?.scheduleDeferredViewportReapplyIfNeeded()
+            self?.updateInitialViewportPresentation()
+            self?.logViewportDebug("view_did_move_to_window_async")
+        }
     }
 
     func update(configuration: IndexBoardSurfaceAppKitConfiguration) {
+        let nextRenderState = configuration.renderState
+        let requiresFullRenderUpdate =
+            !nextRenderState.equalsIgnoringViewport(lastContainerRenderState)
         backgroundView.theme = configuration.theme
-        documentView.updateConfiguration(configuration)
-        documentView.layoutSubtreeIfNeeded()
+        if requiresFullRenderUpdate {
+            documentView.updateConfiguration(configuration)
+            documentView.layoutSubtreeIfNeeded()
+        } else {
+            documentView.updateConfigurationForViewportOnly(configuration)
+        }
+        lastContainerRenderState = nextRenderState
 
         if let pendingLiveMagnification {
             if abs(configuration.zoomScale - pendingLiveMagnification) <= 0.001 {
@@ -4802,28 +4898,10 @@ private final class IndexBoardSurfaceAppKitContainerView: NSView {
             }
         }
 
-        if !isLiveMagnifying,
-           pendingLiveMagnification == nil,
-           abs(scrollView.magnification - configuration.zoomScale) > 0.001 {
-            isApplyingExternalViewport = true
-            scrollView.setMagnification(
-                configuration.zoomScale,
-                centeredAt: resolvedMagnificationCenter()
-            )
-            isApplyingExternalViewport = false
-        }
-
-        let currentOrigin = scrollView.contentView.bounds.origin
-        if !isLiveMagnifying &&
-            pendingLiveScrollOrigin == nil &&
-            documentView.pendingDropPreservedScrollOrigin == nil &&
-            (abs(currentOrigin.x - configuration.scrollOffset.x) > 0.5 ||
-             abs(currentOrigin.y - configuration.scrollOffset.y) > 0.5) {
-            isApplyingExternalViewport = true
-            scrollView.contentView.setBoundsOrigin(NSPoint(x: max(0, configuration.scrollOffset.x), y: max(0, configuration.scrollOffset.y)))
-            scrollView.reflectScrolledClipView(scrollView.contentView)
-            isApplyingExternalViewport = false
-        }
+        applyConfiguredViewportIfNeeded()
+        scheduleDeferredViewportReapplyIfNeeded()
+        updateInitialViewportPresentation()
+        logViewportDebug("update")
 
         if let preservedOrigin = documentView.pendingDropPreservedScrollOrigin {
             let visibleRect = scrollView.documentVisibleRect
@@ -4849,6 +4927,138 @@ private final class IndexBoardSurfaceAppKitContainerView: NSView {
             documentView.suppressViewportChangeNotifications = false
         }
 
+        suppressScrollPocketVisuals()
+
+    }
+
+    private func applyConfiguredViewportIfNeeded() {
+        if viewportNeedsExternalApply() {
+            logViewportDebug("apply_begin")
+        }
+        let configuration = documentView.configuration
+
+        if !isLiveMagnifying,
+           pendingLiveMagnification == nil,
+           abs(scrollView.magnification - configuration.zoomScale) > 0.001 {
+            isApplyingExternalViewport = true
+            scrollView.setMagnification(
+                configuration.zoomScale,
+                centeredAt: resolvedMagnificationCenter()
+            )
+            isApplyingExternalViewport = false
+        }
+
+        let currentOrigin = scrollView.contentView.bounds.origin
+        if !isLiveMagnifying &&
+            viewportSession == nil &&
+            pendingLiveScrollOrigin == nil &&
+            documentView.pendingDropPreservedScrollOrigin == nil &&
+            (abs(currentOrigin.x - configuration.scrollOffset.x) > 0.5 ||
+             abs(currentOrigin.y - configuration.scrollOffset.y) > 0.5) {
+            isApplyingExternalViewport = true
+            scrollView.contentView.setBoundsOrigin(
+                NSPoint(
+                    x: max(0, configuration.scrollOffset.x),
+                    y: max(0, configuration.scrollOffset.y)
+                )
+            )
+            scrollView.reflectScrolledClipView(scrollView.contentView)
+            isApplyingExternalViewport = false
+        }
+        if viewportNeedsExternalApply() {
+            logViewportDebug("apply_end_needs_more")
+        } else {
+            logViewportDebug("apply_end_resolved")
+        }
+    }
+
+    private func viewportNeedsExternalApply() -> Bool {
+        guard !isLiveMagnifying,
+              viewportSession == nil,
+              pendingLiveScrollOrigin == nil,
+              documentView.pendingDropPreservedScrollOrigin == nil else {
+            return false
+        }
+
+        let configuration = documentView.configuration
+        let currentOrigin = scrollView.contentView.bounds.origin
+        let needsScaleApply = abs(scrollView.magnification - configuration.zoomScale) > 0.001
+        let needsOriginApply =
+            abs(currentOrigin.x - configuration.scrollOffset.x) > 0.5 ||
+            abs(currentOrigin.y - configuration.scrollOffset.y) > 0.5
+        return needsScaleApply || needsOriginApply
+    }
+
+    private func scheduleDeferredViewportReapplyIfNeeded(maxAttempts: Int = 4) {
+        guard viewportNeedsExternalApply() else {
+            pendingViewportReapplyAttempts = 0
+            return
+        }
+        guard pendingViewportReapplyAttempts == 0 else { return }
+        pendingViewportReapplyAttempts = maxAttempts
+        performDeferredViewportReapply()
+    }
+
+    private func performDeferredViewportReapply() {
+        guard pendingViewportReapplyAttempts > 0 else { return }
+        pendingViewportReapplyAttempts -= 1
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.applyConfiguredViewportIfNeeded()
+            self.logViewportDebug("deferred_apply_tick")
+            if self.isRestoringInitialViewport, self.initialViewportRestoreCompleted() {
+                self.isRestoringInitialViewport = false
+            }
+            self.updateInitialViewportPresentation()
+            if self.viewportNeedsExternalApply(), self.pendingViewportReapplyAttempts > 0 {
+                self.performDeferredViewportReapply()
+            } else {
+                self.pendingViewportReapplyAttempts = 0
+            }
+        }
+    }
+
+    private func updateInitialViewportPresentation() {
+        if isRestoringInitialViewport, initialViewportRestoreCompleted() {
+            isRestoringInitialViewport = false
+        }
+
+        let shouldPresent = !isRestoringInitialViewport
+        guard shouldPresent != hasPresentedInitialViewport else { return }
+        hasPresentedInitialViewport = shouldPresent
+        scrollView.alphaValue = shouldPresent ? 1 : 0
+    }
+
+    private func initialViewportRestoreCompleted() -> Bool {
+        let configuration = documentView.configuration
+        let visibleRect = scrollView.documentVisibleRect
+        guard visibleRect.width > 1, visibleRect.height > 1 else { return false }
+        guard documentView.frame.width > 1, documentView.frame.height > 1 else { return false }
+
+        let currentOrigin = scrollView.contentView.bounds.origin
+        let matchesScale = abs(scrollView.magnification - configuration.zoomScale) <= 0.001
+        let matchesOrigin =
+            abs(currentOrigin.x - configuration.scrollOffset.x) <= 0.5 &&
+            abs(currentOrigin.y - configuration.scrollOffset.y) <= 0.5
+        return matchesScale && matchesOrigin
+    }
+
+    private func logViewportDebug(_ event: String) {
+        guard viewportDebugLogBudget > 0 else { return }
+        viewportDebugLogBudget -= 1
+        let configuration = documentView.configuration
+        let currentOrigin = scrollView.contentView.bounds.origin
+        let visibleRect = scrollView.documentVisibleRect
+        indexBoardRestoreTrace(
+            "board_surface_\(event)",
+            "id=\(self.viewportDebugID) desiredScroll=(\(String(format: "%.2f", configuration.scrollOffset.x)),\(String(format: "%.2f", configuration.scrollOffset.y))) " +
+            "currentScroll=(\(String(format: "%.2f", currentOrigin.x)),\(String(format: "%.2f", currentOrigin.y))) " +
+            "desiredZoom=\(String(format: "%.2f", configuration.zoomScale)) currentZoom=\(String(format: "%.2f", self.scrollView.magnification)) " +
+            "docSize=(\(String(format: "%.2f", self.documentView.frame.width)),\(String(format: "%.2f", self.documentView.frame.height))) " +
+            "visibleRect=(\(String(format: "%.2f", visibleRect.width)),\(String(format: "%.2f", visibleRect.height))) " +
+            "containerBounds=(\(String(format: "%.2f", self.bounds.width)),\(String(format: "%.2f", self.bounds.height))) " +
+            "reapplyAttempts=\(self.pendingViewportReapplyAttempts)"
+        )
     }
 
     private func handleViewportChanged() {
@@ -4857,19 +5067,31 @@ private final class IndexBoardSurfaceAppKitContainerView: NSView {
         if documentView.isInteractingLocally {
             return
         }
+        if isRestoringInitialViewport {
+            if initialViewportRestoreCompleted() {
+                isRestoringInitialViewport = false
+            } else {
+                scheduleDeferredViewportReapplyIfNeeded()
+                logViewportDebug("skip_initial_viewport_change")
+                return
+            }
+        }
         if isLiveMagnifying {
             documentView.refreshHoverIndicatorFromCurrentMouse()
             return
         }
         let origin = scrollView.contentView.bounds.origin
         let resolvedOrigin = CGPoint(x: max(0, origin.x), y: max(0, origin.y))
-        guard abs(resolvedOrigin.x - documentView.configuration.scrollOffset.x) > 0.5 ||
-                abs(resolvedOrigin.y - documentView.configuration.scrollOffset.y) > 0.5 else {
+        let referenceOrigin = viewportSession?.liveScrollOrigin ?? documentView.configuration.scrollOffset
+        guard abs(resolvedOrigin.x - referenceOrigin.x) > 0.5 ||
+                abs(resolvedOrigin.y - referenceOrigin.y) > 0.5 else {
             documentView.refreshHoverIndicatorFromCurrentMouse()
             return
         }
+        updateViewportSessionFromScrollView()
+        pendingLiveScrollOrigin = resolvedOrigin
         documentView.configuration.onScrollOffsetChange(resolvedOrigin)
-        documentView.refreshHoverIndicatorFromCurrentMouse()
+        suspendHoverIndicatorForScroll()
     }
 
     private func handleMagnificationChanged() {
@@ -4895,6 +5117,29 @@ private final class IndexBoardSurfaceAppKitContainerView: NSView {
     private func suspendHoverIndicatorForScroll() {
         documentView.setHoverIndicatorSuppressed(true)
         resumeHoverIndicatorAfterScrollDelay()
+    }
+
+    private func scheduleViewportCommit() {
+        viewportCommitTimer?.invalidate()
+        viewportCommitTimer = Timer.scheduledTimer(withTimeInterval: 0.12, repeats: false) { [weak self] _ in
+            self?.commitViewportSessionIfNeeded()
+        }
+    }
+
+    private func commitViewportSessionIfNeeded() {
+        viewportCommitTimer?.invalidate()
+        viewportCommitTimer = nil
+        guard let viewportSession else { return }
+        let resolvedOrigin = CGPoint(
+            x: max(0, viewportSession.liveScrollOrigin.x),
+            y: max(0, viewportSession.liveScrollOrigin.y)
+        )
+        self.viewportSession = nil
+        pendingLiveScrollOrigin = resolvedOrigin
+        if abs(resolvedOrigin.x - documentView.configuration.scrollOffset.x) > 0.5 ||
+            abs(resolvedOrigin.y - documentView.configuration.scrollOffset.y) > 0.5 {
+            documentView.configuration.onScrollOffsetChange(resolvedOrigin)
+        }
     }
 
     private func resumeHoverIndicatorAfterScrollDelay() {
@@ -4923,17 +5168,52 @@ private final class IndexBoardSurfaceAppKitContainerView: NSView {
         }
     }
 
+    func flushViewportPersistenceForTeardown() {
+        viewportCommitTimer?.invalidate()
+        viewportCommitTimer = nil
+        hoverResumeTimer?.invalidate()
+        hoverResumeTimer = nil
+
+        let resolvedScale = min(max(scrollView.magnification, IndexBoardZoom.minScale), IndexBoardZoom.maxScale)
+        let origin = scrollView.contentView.bounds.origin
+        let resolvedOrigin = CGPoint(
+            x: max(0, origin.x),
+            y: max(0, origin.y)
+        )
+        documentView.configuration.onViewportFinalize(resolvedScale, resolvedOrigin)
+    }
+
+    private func normalizeScrollViewInsets() {
+        scrollView.automaticallyAdjustsContentInsets = false
+        scrollView.contentInsets = NSEdgeInsetsZero
+        scrollView.scrollerInsets = NSEdgeInsetsZero
+        scrollView.contentView.automaticallyAdjustsContentInsets = false
+        scrollView.contentView.contentInsets = NSEdgeInsetsZero
+    }
+
+    private func suppressScrollPocketVisuals() {
+        hideScrollPocketSubviews(in: scrollView)
+    }
+
+    private func hideScrollPocketSubviews(in view: NSView) {
+        for subview in view.subviews {
+            let className = NSStringFromClass(type(of: subview))
+            if shouldHideScrollPocketSubview(className: className) {
+                subview.isHidden = true
+                subview.alphaValue = 0
+            } else {
+                hideScrollPocketSubviews(in: subview)
+            }
+        }
+    }
+
+    private func shouldHideScrollPocketSubview(className: String) -> Bool {
+        className.contains("NSScrollPocket")
+    }
+
     private func resolvedMagnificationCenter() -> CGPoint {
         let visibleRect = scrollView.documentVisibleRect
-        let fallback = CGPoint(x: visibleRect.midX, y: visibleRect.midY)
-        guard let window = scrollView.window else { return fallback }
-        let pointerInWindow = window.mouseLocationOutsideOfEventStream
-        let pointerInScrollView = scrollView.convert(pointerInWindow, from: nil)
-        guard scrollView.bounds.contains(pointerInScrollView),
-              let documentView = scrollView.documentView else {
-            return fallback
-        }
-        return documentView.convert(pointerInScrollView, from: scrollView)
+        return CGPoint(x: visibleRect.midX, y: visibleRect.midY)
     }
 }
 
@@ -4946,6 +5226,10 @@ private struct IndexBoardSurfaceAppKitCanvas: NSViewRepresentable {
 
     func updateNSView(_ nsView: IndexBoardSurfaceAppKitContainerView, context: Context) {
         nsView.update(configuration: configuration)
+    }
+
+    static func dismantleNSView(_ nsView: IndexBoardSurfaceAppKitContainerView, coordinator: ()) {
+        nsView.flushViewportPersistenceForTeardown()
     }
 }
 
@@ -4983,6 +5267,14 @@ struct IndexBoardSurfaceAppKitPhaseTwoView: View {
     let onZoomStep: (CGFloat) -> Void
     let onZoomReset: () -> Void
     let onScrollOffsetChange: (CGPoint) -> Void
+    let onViewportFinalize: (CGFloat, CGPoint) -> Void
+    let onShowCheckpoint: () -> Void
+    let onToggleHistory: () -> Void
+    let onToggleAIChat: () -> Void
+    let onToggleTimeline: () -> Void
+    let isHistoryVisible: Bool
+    let isAIChatVisible: Bool
+    let isTimelineVisible: Bool
     let onCardMove: (UUID, IndexBoardCardDropTarget) -> Void
     let onCardMoveSelection: ([UUID], UUID, IndexBoardCardDropTarget) -> Void
     let onMarqueeSelectionChange: (Set<UUID>) -> Void
@@ -5031,6 +5323,7 @@ struct IndexBoardSurfaceAppKitPhaseTwoView: View {
                         onClearSelection: onClearSelection,
                         onScrollOffsetChange: onScrollOffsetChange,
                         onZoomScaleChange: onZoomScaleChange,
+                        onViewportFinalize: onViewportFinalize,
                         onParentGroupMove: onParentGroupMove
                     )
                 )
@@ -5040,7 +5333,7 @@ struct IndexBoardSurfaceAppKitPhaseTwoView: View {
         }
         .frame(width: canvasSize.width, height: canvasSize.height, alignment: .topLeading)
         .background(theme.boardBackground)
-        .ignoresSafeArea(.container, edges: .top)
+        .ignoresSafeArea(.container, edges: [.top, .bottom])
     }
 
     private var topOverlay: some View {
@@ -5066,10 +5359,26 @@ struct IndexBoardSurfaceAppKitPhaseTwoView: View {
                 }
                 .disabled(zoomScale >= IndexBoardZoom.maxScale - 0.001)
 
-                workspaceStyleToolbarButton(systemName: "flag.fill", foregroundColor: .orange) {}
-                workspaceStyleToolbarButton(systemName: "clock.arrow.circlepath") {}
-                workspaceStyleToolbarButton(systemName: "sparkles.tv") {}
-                workspaceStyleToolbarButton(systemName: "sidebar.left") {}
+                workspaceStyleToolbarButton(
+                    systemName: "flag.fill",
+                    foregroundColor: .orange,
+                    action: onShowCheckpoint
+                )
+                workspaceStyleToolbarButton(
+                    systemName: "clock.arrow.circlepath",
+                    isActive: isHistoryVisible,
+                    action: onToggleHistory
+                )
+                workspaceStyleToolbarButton(
+                    systemName: "sparkles.tv",
+                    isActive: isAIChatVisible,
+                    action: onToggleAIChat
+                )
+                workspaceStyleToolbarButton(
+                    systemName: isTimelineVisible ? "sidebar.right" : "sidebar.left",
+                    isActive: isTimelineVisible,
+                    action: onToggleTimeline
+                )
             }
         }
         .padding(.horizontal, 18)
@@ -5090,18 +5399,20 @@ struct IndexBoardSurfaceAppKitPhaseTwoView: View {
     private func workspaceStyleToolbarButton(
         systemName: String,
         fontSize: CGFloat = 14,
+        isActive: Bool = false,
         foregroundColor: Color? = nil,
         action: @escaping () -> Void
     ) -> some View {
-        workspaceStyleToolbarButton(fontSize: fontSize, action: action) {
+        workspaceStyleToolbarButton(fontSize: fontSize, isActive: isActive, action: action) {
             Image(systemName: systemName)
                 .font(.system(size: fontSize, weight: .semibold))
-                .foregroundStyle(foregroundColor ?? theme.primaryTextColor)
+                .foregroundStyle(isActive ? Color.white : (foregroundColor ?? theme.primaryTextColor))
         }
     }
 
     private func workspaceStyleToolbarButton<Content: View>(
         fontSize: CGFloat,
+        isActive: Bool = false,
         action: @escaping () -> Void,
         @ViewBuilder content: () -> Content
     ) -> some View {
@@ -5111,6 +5422,10 @@ struct IndexBoardSurfaceAppKitPhaseTwoView: View {
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
+        .background(
+            Circle()
+                .fill(isActive ? Color.accentColor : Color.clear)
+        )
         .background(
             Circle()
                 .fill(.ultraThinMaterial)

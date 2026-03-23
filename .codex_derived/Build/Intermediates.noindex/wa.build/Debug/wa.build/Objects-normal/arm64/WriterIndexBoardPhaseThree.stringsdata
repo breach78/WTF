@@ -6,24 +6,16 @@
         "comment": "",
         "key": "닫기",
         "location": {
-          "startingColumn": 20,
-          "startingLine": 83
+          "startingColumn": 19,
+          "startingLine": 251
         }
       },
       {
         "comment": "",
-        "key": "Board Editor",
+        "key": "원문을 입력하세요",
         "location": {
-          "startingColumn": 26,
-          "startingLine": 72
-        }
-      },
-      {
-        "comment": "",
-        "key": "요약 · 원문",
-        "location": {
-          "startingColumn": 26,
-          "startingLine": 75
+          "startingColumn": 22,
+          "startingLine": 306
         }
       }
     ]

@@ -6,6 +6,7 @@ extension ScenarioWriterView {
     // --- Key Handling Logic ---
     func handleGlobalKeyPress(_ press: KeyPress) -> KeyPress.Result {
         if let handled = handleSplitPaneCycleShortcut(press) { return handled }
+        if let handled = handleIndexBoardToggleShortcut(press) { return handled }
         if let handled = handleIndexBoardKeyPress(press) { return handled }
         if !acceptsKeyboardInput { return .ignored }
 
@@ -68,6 +69,22 @@ extension ScenarioWriterView {
         if let handled = handlePlainEntryShortcut(press) { return handled }
 
         return .ignored
+    }
+
+    func handleIndexBoardToggleShortcut(_ press: KeyPress) -> KeyPress.Result? {
+        guard press.phase == .down else { return nil }
+        guard press.modifiers.contains(.command) else { return nil }
+        guard !press.modifiers.contains(.option),
+              !press.modifiers.contains(.control),
+              !press.modifiers.contains(.shift) else { return nil }
+
+        let normalized = press.characters.lowercased()
+        guard normalized == "b" || press.characters == "ㅠ" else { return nil }
+
+        DispatchQueue.main.async {
+            handleOpenIndexBoardRequestNotification()
+        }
+        return .handled
     }
 
     func handleSplitPaneCycleShortcut(_ press: KeyPress) -> KeyPress.Result? {

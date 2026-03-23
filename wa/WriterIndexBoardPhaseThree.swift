@@ -11,6 +11,146 @@ struct IndexBoardEditorDraft: Identifiable, Equatable {
 }
 
 @MainActor
+private struct IndexBoardEditorTextView: NSViewRepresentable {
+    final class Coordinator: NSObject, NSTextViewDelegate {
+        var parent: IndexBoardEditorTextView
+        var suppressBindingPropagation = false
+
+        init(_ parent: IndexBoardEditorTextView) {
+            self.parent = parent
+        }
+
+        func textDidBeginEditing(_ notification: Notification) {
+            parent.onFocus()
+        }
+
+        func textDidChange(_ notification: Notification) {
+            guard let textView = notification.object as? NSTextView else { return }
+            guard !suppressBindingPropagation else { return }
+            let updatedText = textView.string
+            if parent.text != updatedText {
+                parent.text = updatedText
+            }
+        }
+    }
+
+    @Binding var text: String
+    let font: NSFont
+    let textColor: NSColor
+    let lineSpacing: CGFloat
+    let isFocused: Bool
+    let textViewBox: WeakTextViewBox?
+    let onFocus: () -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let scrollView = NSScrollView()
+        scrollView.borderType = .noBorder
+        scrollView.drawsBackground = false
+        scrollView.hasVerticalScroller = true
+        scrollView.autohidesScrollers = true
+        scrollView.hasHorizontalScroller = false
+        scrollView.scrollerStyle = .overlay
+
+        let textView = NSTextView()
+        textView.delegate = context.coordinator
+        textView.isEditable = true
+        textView.isSelectable = true
+        textView.isRichText = false
+        textView.importsGraphics = false
+        textView.usesFontPanel = false
+        textView.usesFindBar = false
+        textView.allowsUndo = true
+        textView.drawsBackground = false
+        textView.backgroundColor = .clear
+        textView.textContainerInset = .zero
+        textView.isHorizontallyResizable = false
+        textView.isVerticallyResizable = true
+        textView.minSize = .zero
+        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        textView.autoresizingMask = [.width]
+
+        if let textContainer = textView.textContainer {
+            textContainer.lineFragmentPadding = 0
+            textContainer.lineBreakMode = .byWordWrapping
+            textContainer.maximumNumberOfLines = 0
+            textContainer.widthTracksTextView = true
+            textContainer.heightTracksTextView = false
+            textContainer.containerSize = CGSize(width: 1, height: CGFloat.greatestFiniteMagnitude)
+        }
+
+        textViewBox?.textView = textView
+        scrollView.documentView = textView
+        updateTextView(textView, coordinator: context.coordinator)
+        return scrollView
+    }
+
+    func updateNSView(_ scrollView: NSScrollView, context: Context) {
+        context.coordinator.parent = self
+        guard let textView = scrollView.documentView as? NSTextView else { return }
+        textViewBox?.textView = textView
+        if textView.delegate !== context.coordinator {
+            textView.delegate = context.coordinator
+        }
+        updateTextView(textView, coordinator: context.coordinator)
+    }
+
+    private func updateTextView(_ textView: NSTextView, coordinator: Coordinator) {
+        let paragraphStyle = NSMutableParagraphStyle()
+        paragraphStyle.lineBreakMode = .byWordWrapping
+        paragraphStyle.lineSpacing = lineSpacing
+
+        textView.font = font
+        textView.textColor = textColor
+        textView.insertionPointColor = textColor
+        textView.defaultParagraphStyle = paragraphStyle
+
+        var typingAttributes = textView.typingAttributes
+        typingAttributes[.font] = font
+        typingAttributes[.foregroundColor] = textColor
+        typingAttributes[.paragraphStyle] = paragraphStyle
+        textView.typingAttributes = typingAttributes
+
+        let isComposingMarkedText =
+            textView.hasMarkedText() &&
+            textView.window?.firstResponder === textView
+
+        if textView.string != text && !isComposingMarkedText {
+            let selectedRange = textView.selectedRange()
+            coordinator.suppressBindingPropagation = true
+            textView.string = text
+            if let textStorage = textView.textStorage, textStorage.length > 0 {
+                textStorage.addAttributes(
+                    [
+                        .font: font,
+                        .foregroundColor: textColor,
+                        .paragraphStyle: paragraphStyle
+                    ],
+                    range: NSRange(location: 0, length: textStorage.length)
+                )
+            }
+            let textLength = (text as NSString).length
+            let clampedLocation = min(selectedRange.location, textLength)
+            let clampedLength = min(selectedRange.length, max(0, textLength - clampedLocation))
+            textView.setSelectedRange(NSRange(location: clampedLocation, length: clampedLength))
+            coordinator.suppressBindingPropagation = false
+        }
+
+        if isFocused,
+           let window = textView.window,
+           window.firstResponder !== textView {
+            DispatchQueue.main.async {
+                guard isFocused, let liveWindow = textView.window, liveWindow.firstResponder !== textView else { return }
+                liveWindow.makeFirstResponder(textView)
+            }
+        }
+    }
+}
+
+@MainActor
 private struct IndexBoardPhaseThreeEditorView: View {
     @Binding var draft: IndexBoardEditorDraft
     let card: SceneCard
@@ -25,157 +165,167 @@ private struct IndexBoardPhaseThreeEditorView: View {
     }
 
     @FocusState private var focusedField: EditorField?
+    @State private var summaryTextViewBox = WeakTextViewBox()
+    @State private var contentTextViewBox = WeakTextViewBox()
 
-    private var titleText: String {
+    private let editorCardBackground = Color.white
+    private let editorCardBorder = Color.black.opacity(0.16)
+    private let editorDivider = Color(red: 0.82, green: 0.24, blue: 0.19)
+    private let editorPrimaryText = Color.black.opacity(0.84)
+    private let editorSecondaryText = Color.black.opacity(0.42)
+
+    private var contentPreviewText: String {
         let trimmed = draft.contentText.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let line = trimmed.components(separatedBy: .newlines).first?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !line.isEmpty {
-            return line
+        let normalized = trimmed
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .prefix(2)
+            .joined(separator: "\n")
+        if !normalized.isEmpty {
+            return normalized
         }
         return "내용 없음"
     }
 
-    private var categoryText: String {
-        card.category ?? ScenarioCardCategory.uncategorized
+    private var hasCustomSummary: Bool {
+        !draft.summaryText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var showsSummaryPlaceholder: Bool {
+        !hasCustomSummary && focusedField != .summary
+    }
+
+    private func enforceInitialContentFocus() {
+        focusedField = nil
+        let delays: [TimeInterval] = [0, 0.05, 0.16]
+        for delay in delays {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                focusedField = .content
+                guard let textView = contentTextViewBox.textView,
+                      let window = textView.window else { return }
+                if window.firstResponder !== textView {
+                    window.makeFirstResponder(textView)
+                }
+            }
+        }
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            header
-            editorContent
+        GeometryReader { proxy in
+            let headerHeight = max(76, min(108, proxy.size.height / 9))
+
+            VStack(alignment: .leading, spacing: 0) {
+                header
+                    .frame(height: headerHeight, alignment: .topLeading)
+                editorContent
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            }
         }
         .frame(width: 860, height: 680)
-        .background(theme.groupBackground)
+        .background(editorCardBackground)
         .overlay(
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .stroke(theme.groupBorder.opacity(0.78), lineWidth: 1)
+            Rectangle()
+                .stroke(editorCardBorder, lineWidth: 1)
         )
-        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
         .onAppear {
-            DispatchQueue.main.async {
-                focusedField = .content
-            }
+            enforceInitialContentFocus()
         }
     }
 
     private var header: some View {
-        HStack(alignment: .top, spacing: 16) {
-            VStack(alignment: .leading, spacing: 8) {
-                Text(titleText)
-                    .font(.system(size: 24, weight: .bold, design: .rounded))
-                    .foregroundStyle(theme.primaryTextColor)
-                    .lineLimit(2)
-                HStack(spacing: 10) {
-                    Text(categoryText)
-                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(theme.secondaryTextColor)
-                    Text("Board Editor")
-                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(theme.secondaryTextColor)
-                    Text("요약 · 원문")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(theme.secondaryTextColor)
-                }
-            }
+        ZStack(alignment: .topTrailing) {
+            headerSummaryEditor
 
-            Spacer(minLength: 0)
-
-            Button("닫기") {
+            Button {
                 onSave()
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(editorSecondaryText)
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(.plain)
+            .padding(.top, 13)
+            .padding(.trailing, 4)
+            .offset(x: 60, y: -5)
+            .help("닫기")
         }
-        .padding(.horizontal, 28)
-        .padding(.top, 26)
-        .padding(.bottom, 18)
-        .background(theme.tabBackground)
+        .padding(.leading, 28)
+        .padding(.trailing, 108)
+        .padding(.top, 18)
+        .padding(.bottom, 12)
+        .background(editorCardBackground)
         .overlay(alignment: .bottom) {
             Rectangle()
-                .fill(theme.groupBorder.opacity(0.65))
-                .frame(height: 1)
+                .fill(editorDivider)
+                .frame(height: 2)
+        }
+    }
+
+    private var headerSummaryEditor: some View {
+        ZStack(alignment: .topLeading) {
+            if showsSummaryPlaceholder {
+                Text(contentPreviewText)
+                    .font(.system(size: 20, weight: .semibold, design: .rounded))
+                    .foregroundStyle(editorSecondaryText)
+                    .lineSpacing(3)
+                    .lineLimit(2)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 1)
+                    .offset(y: 17)
+                    .allowsHitTesting(false)
+            }
+
+            IndexBoardEditorTextView(
+                text: $draft.summaryText,
+                font: .systemFont(ofSize: 20, weight: hasCustomSummary ? .bold : .semibold),
+                textColor: NSColor(editorPrimaryText),
+                lineSpacing: 3,
+                isFocused: focusedField == .summary,
+                textViewBox: summaryTextViewBox,
+                onFocus: {
+                    focusedField = .summary
+                }
+            )
+                .padding(.horizontal, -5)
+                .padding(.vertical, -8)
+                .offset(y: 17)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            focusedField = .summary
         }
     }
 
     private var editorContent: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            editorSection(
-                title: "요약",
-                text: $draft.summaryText,
-                placeholder: summaryPlaceholder,
-                focusedField: .summary,
-                minHeight: 168,
-                maxHeight: 220
-            )
+        ZStack(alignment: .topLeading) {
+            editorCardBackground
 
-            editorSection(
-                title: "원문",
-                text: $draft.contentText,
-                placeholder: "원문을 입력하세요",
-                focusedField: .content,
-                minHeight: nil,
-                maxHeight: nil
-            )
-        }
-        .padding(.horizontal, 24)
-        .padding(.top, 18)
-        .padding(.bottom, 18)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-    }
-
-    private var summaryPlaceholder: String {
-        if let summary, summary.hasSummary {
-            return summary.summaryText
-        }
-        return "요약이 없으면 비워둘 수 있습니다."
-    }
-
-    private func editorSection(
-        title: String,
-        text: Binding<String>,
-        placeholder: String,
-        focusedField targetField: EditorField,
-        minHeight: CGFloat?,
-        maxHeight: CGFloat?
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 10) {
-                Text(title)
-                    .font(.system(size: 12, weight: .bold, design: .monospaced))
-                    .foregroundStyle(theme.secondaryTextColor)
-                if title == "요약", let summary {
-                    Text(summary.sourceLabelText)
-                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(theme.secondaryTextColor)
-                }
-            }
-
-            ZStack(alignment: .topLeading) {
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(theme.tabBackground.opacity(theme.usesDarkAppearance ? 0.82 : 0.72))
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(theme.groupBorder.opacity(0.55), lineWidth: 1)
-
-                if text.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Text(placeholder)
-                        .font(.custom("SansMonoCJKFinalDraft", size: 16))
-                        .foregroundStyle(theme.secondaryTextColor)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 14)
-                        .allowsHitTesting(false)
-                }
-
-                TextEditor(text: text)
+            if draft.contentText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Text("원문을 입력하세요")
                     .font(.custom("SansMonoCJKFinalDraft", size: 16))
-                    .foregroundStyle(theme.primaryTextColor)
-                    .scrollContentBackground(.hidden)
-                    .background(Color.clear)
-                    .focused($focusedField, equals: targetField)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 8)
+                    .foregroundStyle(editorSecondaryText)
+                    .padding(.horizontal, 34)
+                    .padding(.vertical, 24)
+                    .allowsHitTesting(false)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .frame(minHeight: minHeight, maxHeight: maxHeight)
+
+            IndexBoardEditorTextView(
+                text: $draft.contentText,
+                font: NSFont(name: "SansMonoCJKFinalDraft", size: 16) ?? .monospacedSystemFont(ofSize: 16, weight: .regular),
+                textColor: NSColor(editorPrimaryText),
+                lineSpacing: 0,
+                isFocused: focusedField == .content,
+                textViewBox: contentTextViewBox,
+                onFocus: {
+                    focusedField = .content
+                }
+            )
+            .padding(.horizontal, 24)
+            .padding(.vertical, 14)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
 }
@@ -196,7 +346,7 @@ struct IndexBoardPhaseThreeView: View {
     let scrollOffset: CGPoint
     let revealCardID: UUID?
     let revealRequestToken: Int
-    let editorDraft: IndexBoardEditorDraft?
+    let editorDraftBinding: Binding<IndexBoardEditorDraft?>
     let editorSummary: IndexBoardResolvedSummary?
     let onClose: () -> Void
     let onCreateTempCard: () -> Void
@@ -215,15 +365,26 @@ struct IndexBoardPhaseThreeView: View {
     let onZoomStep: (CGFloat) -> Void
     let onZoomReset: () -> Void
     let onScrollOffsetChange: (CGPoint) -> Void
+    let onViewportFinalize: (CGFloat, CGPoint) -> Void
+    let onShowCheckpoint: () -> Void
+    let onToggleHistory: () -> Void
+    let onToggleAIChat: () -> Void
+    let onToggleTimeline: () -> Void
+    let isHistoryVisible: Bool
+    let isAIChatVisible: Bool
+    let isTimelineVisible: Bool
     let onCardMove: (UUID, IndexBoardCardDropTarget) -> Void
     let onCardMoveSelection: ([UUID], UUID, IndexBoardCardDropTarget) -> Void
     let onMarqueeSelectionChange: (Set<UUID>) -> Void
     let onClearSelection: () -> Void
     let onGroupMove: (IndexBoardGroupID, Int) -> Void
     let onParentGroupMove: (IndexBoardParentGroupDropTarget) -> Void
-    let onEditorDraftChange: (IndexBoardEditorDraft) -> Void
     let onCancelEditor: () -> Void
     let onSaveEditor: () -> Void
+
+    private var editorDraft: IndexBoardEditorDraft? {
+        editorDraftBinding.wrappedValue
+    }
 
     private var editorCard: SceneCard? {
         guard let editorDraft else { return nil }
@@ -282,6 +443,14 @@ struct IndexBoardPhaseThreeView: View {
                     onZoomStep: onZoomStep,
                     onZoomReset: onZoomReset,
                     onScrollOffsetChange: onScrollOffsetChange,
+                    onViewportFinalize: onViewportFinalize,
+                    onShowCheckpoint: onShowCheckpoint,
+                    onToggleHistory: onToggleHistory,
+                    onToggleAIChat: onToggleAIChat,
+                    onToggleTimeline: onToggleTimeline,
+                    isHistoryVisible: isHistoryVisible,
+                    isAIChatVisible: isAIChatVisible,
+                    isTimelineVisible: isTimelineVisible,
                     onCardMove: onCardMove,
                     onCardMoveSelection: onCardMoveSelection,
                     onMarqueeSelectionChange: onMarqueeSelectionChange,
@@ -323,8 +492,8 @@ struct IndexBoardPhaseThreeView: View {
                let editorCard {
                 IndexBoardPhaseThreeEditorView(
                     draft: Binding(
-                        get: { editorDraft },
-                        set: { onEditorDraftChange($0) }
+                        get: { editorDraftBinding.wrappedValue ?? editorDraft },
+                        set: { editorDraftBinding.wrappedValue = $0 }
                     ),
                     card: editorCard,
                     theme: theme,
@@ -373,10 +542,11 @@ extension ScenarioWriterView {
     func updateIndexBoardEditorDraft(_ draft: IndexBoardEditorDraft) {
         guard isIndexBoardActive else { return }
         indexBoardEditorDraft = draft
-        indexBoardRuntime.updateSession(for: scenario.id, paneID: paneContextID, persist: false) { session in
-            session.showsBackByCardID[draft.cardID] = draft.showsBack
-            session.lastPresentedCardID = draft.cardID
-        }
+    }
+
+    private func discardPendingIndexBoardCreation(cardID: UUID, previousState: ScenarioState) {
+        pendingIndexBoardCreationPrevStateByCardID.removeValue(forKey: cardID)
+        restoreScenarioState(previousState)
     }
 
     func cancelIndexBoardEditor() {
@@ -385,7 +555,9 @@ extension ScenarioWriterView {
 
     func saveIndexBoardEditor() {
         guard let draft = indexBoardEditorDraft else { return }
+        let pendingCreationPreviousState = pendingIndexBoardCreationPrevStateByCardID[draft.cardID]
         guard let card = findCard(by: draft.cardID) else {
+            pendingIndexBoardCreationPrevStateByCardID.removeValue(forKey: draft.cardID)
             indexBoardEditorDraft = nil
             return
         }
@@ -397,13 +569,29 @@ extension ScenarioWriterView {
         }
         let normalizedSummary = draft.summaryText.trimmingCharacters(in: .whitespacesAndNewlines)
         let existingShowsBack = activeIndexBoardSession?.showsBackByCardID[draft.cardID] ?? false
+        let isMeaningfullyEmpty =
+            normalizedContent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+            normalizedSummary.isEmpty
+
+        if let pendingCreationPreviousState, isMeaningfullyEmpty {
+            discardPendingIndexBoardCreation(
+                cardID: draft.cardID,
+                previousState: pendingCreationPreviousState
+            )
+            return
+        }
 
         let contentChanged = normalizedContent != card.content
         let summaryChanged = normalizedSummary != existingSummaryText
         let showsBackChanged = draft.showsBack != existingShowsBack
         let hasMeaningfulChange = contentChanged || summaryChanged || showsBackChanged
 
-        let previousState = hasMeaningfulChange ? captureScenarioState() : nil
+        let previousState: ScenarioState? = {
+            if let pendingCreationPreviousState {
+                return pendingCreationPreviousState
+            }
+            return hasMeaningfulChange ? captureScenarioState() : nil
+        }()
 
         indexBoardRuntime.updateSession(for: scenario.id, paneID: paneContextID, persist: false) { session in
             session.showsBackByCardID[draft.cardID] = draft.showsBack
@@ -425,10 +613,11 @@ extension ScenarioWriterView {
         if let previousState {
             commitCardMutation(
                 previousState: previousState,
-                actionName: "보드 카드 편집"
+                actionName: pendingCreationPreviousState == nil ? "보드 카드 편집" : "보드 Temp 카드 생성"
             )
         }
 
+        pendingIndexBoardCreationPrevStateByCardID.removeValue(forKey: draft.cardID)
         indexBoardEditorDraft = nil
     }
 }

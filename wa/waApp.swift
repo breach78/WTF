@@ -683,7 +683,7 @@ struct waApp: App {
                 .keyboardShortcut("R", modifiers: [.command, .option])
             }
             CommandGroup(after: .textEditing) {
-                Button("인덱스 카드뷰 열기") {
+                Button("인덱스 카드뷰 토글") {
                     NotificationCenter.default.post(name: .waOpenIndexBoardRequested, object: nil)
                 }
                 .keyboardShortcut("b", modifiers: [.command])

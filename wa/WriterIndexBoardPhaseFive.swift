@@ -146,10 +146,7 @@ extension ScenarioWriterView {
             }
         }
         requestIndexBoardReveal(cardID: createdCard.id)
-        commitCardMutation(
-            previousState: previousState,
-            actionName: "보드 Temp 카드 생성"
-        )
+        pendingIndexBoardCreationPrevStateByCardID[createdCard.id] = previousState
         presentIndexBoardEditor(for: createdCard)
         isMainViewFocused = true
         return createdCard

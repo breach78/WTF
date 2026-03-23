@@ -1799,9 +1799,9 @@ extension ScenarioWriterView {
             return
         }
         let previousState = captureScenarioState()
-        updateIndexBoardGroupPosition(parentCardID: target.parentCardID, position: target.origin)
         guard let surfaceProjection = resolvedIndexBoardSurfaceProjection(
-            preferredLeadingParentCardID: target.parentCardID
+            preferredLeadingParentCardID: target.parentCardID,
+            overridingGroupPositionsByParentID: [target.parentCardID: target.origin]
         ) else { return }
         persistIndexBoardSurfacePresentation(surfaceProjection)
         scenario.performBatchedCardMutation {

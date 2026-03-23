@@ -226,6 +226,10 @@ extension ScenarioWriterView {
 
     func restoreMainCanvasHorizontalViewport(to storedOffsetX: CGFloat) {
         guard !showFocusMode else { return }
+        indexBoardRestoreTrace(
+            "main_canvas_restore_horizontal_viewport",
+            "targetOffset=\(debugRestoreCGFloat(storedOffsetX)) currentOffset=\(debugRestoreCGFloat(mainCanvasScrollCoordinator.resolvedMainCanvasHorizontalOffset()))"
+        )
         suppressHorizontalAutoScroll = true
         mainCanvasScrollCoordinator.scheduleMainCanvasHorizontalRestore(offsetX: storedOffsetX)
         scheduleMainCanvasRestoreRetries {
@@ -243,10 +247,19 @@ extension ScenarioWriterView {
                 deadZone: 0.5,
                 snapToPixel: true
             )
+            indexBoardRestoreTrace(
+                "main_canvas_restore_horizontal_viewport_retry",
+                "targetOffset=\(debugRestoreCGFloat(storedOffsetX)) currentOffset=\(debugRestoreCGFloat(scrollView.contentView.bounds.origin.x)) " +
+                "maxX=\(String(format: "%.2f", maxX))"
+            )
         }
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.24) {
             suppressHorizontalAutoScroll = false
+            indexBoardRestoreTrace(
+                "main_canvas_restore_horizontal_viewport_release",
+                "targetOffset=\(debugRestoreCGFloat(storedOffsetX)) suppressHorizontalAutoScroll=\(suppressHorizontalAutoScroll)"
+            )
         }
     }
 
@@ -3075,6 +3088,11 @@ extension ScenarioWriterView {
     ) {
         if !acceptsKeyboardInput && !force { return }
         guard let targetLevel = displayedMainCardLocationByID(targetCardID)?.level else { return }
+        indexBoardRestoreTrace(
+            "main_canvas_scroll_to_column_if_needed",
+            "target=\(debugRestoreUUID(targetCardID)) targetLevel=\(targetLevel) force=\(force) animated=\(animated) " +
+            "lastScrolledLevel=\(lastScrolledLevel) mode=\(mainCanvasHorizontalScrollMode.rawValue)"
+        )
         let resolvedAvailableWidth = max(1, availableWidth)
         let scrollMode = mainCanvasHorizontalScrollMode
         let performScroll: (Int) -> Void = { level in
@@ -3171,6 +3189,10 @@ extension ScenarioWriterView {
         animated: Bool
     ) -> Bool {
         guard let scrollView = mainCanvasScrollCoordinator.resolvedMainCanvasHorizontalScrollView() else {
+            indexBoardRestoreTrace(
+                "main_canvas_perform_horizontal_scroll_skip",
+                "level=\(level) reason=noScrollView animated=\(animated)"
+            )
             return false
         }
 
@@ -3183,6 +3205,11 @@ extension ScenarioWriterView {
             visibleWidth: visibleRect.width
         )
         let targetReachable = maxX + 0.5 >= targetX
+        indexBoardRestoreTrace(
+            "main_canvas_perform_horizontal_scroll_begin",
+            "level=\(level) animated=\(animated) currentX=\(debugRestoreCGFloat(visibleRect.origin.x)) " +
+            "targetX=\(debugRestoreCGFloat(targetX)) maxX=\(String(format: "%.2f", maxX)) targetReachable=\(targetReachable)"
+        )
 
         if animated {
             guard targetReachable || targetX <= 0.5 else { return false }
@@ -3217,6 +3244,11 @@ extension ScenarioWriterView {
                 snapToPixel: true,
                 duration: appliedDuration
             )
+            indexBoardRestoreTrace(
+                "main_canvas_perform_horizontal_scroll_applied",
+                "level=\(level) animated=true resolvedTargetX=\(debugRestoreCGFloat(resolvedTargetX)) " +
+                "currentXAfter=\(debugRestoreCGFloat(scrollView.contentView.bounds.origin.x)) duration=\(String(format: "%.2f", appliedDuration))"
+            )
             bounceDebugLog(
                 "nativeMainCanvasHorizontalScroll level=\(level) " +
                 "targetX=\(debugCGFloat(resolvedTargetX)) visibleX=\(debugCGFloat(visibleRect.origin.x)) " +
@@ -3241,6 +3273,11 @@ extension ScenarioWriterView {
             maxX: maxX,
             deadZone: 0.5,
             snapToPixel: true
+        )
+        indexBoardRestoreTrace(
+            "main_canvas_perform_horizontal_scroll_applied",
+            "level=\(level) animated=false applied=\(applied) targetX=\(debugRestoreCGFloat(targetX)) " +
+            "currentXAfter=\(debugRestoreCGFloat(scrollView.contentView.bounds.origin.x))"
         )
         if applied {
             bounceDebugLog(

@@ -44,7 +44,7 @@
       },
       {
         "comment": "",
-        "key": "인덱스 카드뷰 열기",
+        "key": "인덱스 카드뷰 토글",
         "location": {
           "startingColumn": 24,
           "startingLine": 686

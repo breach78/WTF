@@ -213,12 +213,14 @@ final class IndexBoardRuntime: ObservableObject {
     static let shared = IndexBoardRuntime()
 
     @Published private var activeSessionByScenarioID: [UUID: ActiveSession] = [:]
+    private var liveViewportByDescriptor: [IndexBoardSessionDescriptor: IndexBoardViewportState] = [:]
     private let persistedSessionsKey = "writer.indexboard.persisted-sessions.v1"
 
     private init() {}
 
     func activeSession(for scenarioID: UUID) -> ActiveSession? {
-        activeSessionByScenarioID[scenarioID]
+        guard let active = activeSessionByScenarioID[scenarioID] else { return nil }
+        return resolvedActiveSession(active)
     }
 
     func activeDescriptor(for scenarioID: UUID) -> IndexBoardSessionDescriptor? {
@@ -229,7 +231,7 @@ final class IndexBoardRuntime: ObservableObject {
         guard let active = activeSessionByScenarioID[scenarioID], active.descriptor.paneID == paneID else {
             return nil
         }
-        return active.session
+        return resolvedSession(active.session, descriptor: active.descriptor)
     }
 
     func descriptor(for scenarioID: UUID, paneID: Int) -> IndexBoardSessionDescriptor? {
@@ -253,14 +255,16 @@ final class IndexBoardRuntime: ObservableObject {
     }
 
     func activate(_ session: IndexBoardSessionState, scenarioID: UUID, paneID: Int) {
+        let descriptor = IndexBoardSessionDescriptor(
+            scenarioID: scenarioID,
+            paneID: paneID,
+            source: session.source
+        )
         activeSessionByScenarioID[scenarioID] = ActiveSession(
-            descriptor: IndexBoardSessionDescriptor(
-                scenarioID: scenarioID,
-                paneID: paneID,
-                source: session.source
-            ),
+            descriptor: descriptor,
             session: session
         )
+        liveViewportByDescriptor[descriptor] = session.viewport
         persistSession(session, for: scenarioID)
     }
 
@@ -271,8 +275,10 @@ final class IndexBoardRuntime: ObservableObject {
         _ transform: (inout IndexBoardSessionState) -> Void
     ) {
         guard var active = activeSessionByScenarioID[scenarioID], active.descriptor.paneID == paneID else { return }
+        active.session = resolvedSession(active.session, descriptor: active.descriptor)
         transform(&active.session)
         activeSessionByScenarioID[scenarioID] = active
+        liveViewportByDescriptor[active.descriptor] = active.session.viewport
         if persist {
             persistSession(active.session, for: scenarioID)
         }
@@ -280,8 +286,30 @@ final class IndexBoardRuntime: ObservableObject {
 
     func deactivate(scenarioID: UUID, paneID: Int) {
         guard let active = activeSessionByScenarioID[scenarioID], active.descriptor.paneID == paneID else { return }
-        persistSession(active.session, for: scenarioID)
+        let resolvedSession = resolvedSession(active.session, descriptor: active.descriptor)
+        persistSession(resolvedSession, for: scenarioID)
+        liveViewportByDescriptor.removeValue(forKey: active.descriptor)
         activeSessionByScenarioID.removeValue(forKey: scenarioID)
+    }
+
+    func updateLiveViewport(
+        for scenarioID: UUID,
+        paneID: Int,
+        zoomScale: CGFloat? = nil,
+        scrollOffset: CGPoint? = nil
+    ) {
+        guard let active = activeSessionByScenarioID[scenarioID], active.descriptor.paneID == paneID else { return }
+        var viewport = liveViewportByDescriptor[active.descriptor] ?? active.session.viewport
+        if let zoomScale {
+            viewport.zoomScale = min(max(zoomScale, IndexBoardZoom.minScale), IndexBoardZoom.maxScale)
+        }
+        if let scrollOffset {
+            viewport.scrollOffset = CGPoint(
+                x: max(0, scrollOffset.x),
+                y: max(0, scrollOffset.y)
+            )
+        }
+        liveViewportByDescriptor[active.descriptor] = viewport
     }
 
     func persistedSession(
@@ -313,50 +341,86 @@ final class IndexBoardRuntime: ObservableObject {
     }
 
     func replacePersistedSession(_ session: IndexBoardSessionState?, for scenarioID: UUID) {
-        var records: [String: IndexBoardPersistedSessionRecord] = [:]
-        if let data = UserDefaults.standard.data(forKey: persistedSessionsKey),
-           let decoded = try? JSONDecoder().decode([String: IndexBoardPersistedSessionRecord].self, from: data) {
-            records = decoded
-        }
+        var records = loadPersistedSessionRecords()
 
         if let session {
-            records[scenarioID.uuidString] = IndexBoardPersistedSessionRecord(
-                source: session.source,
-                sourceCardIDs: session.sourceCardIDs,
-                zoomScale: Double(session.zoomScale),
-                scrollOffsetX: Double(session.scrollOffset.x),
-                scrollOffsetY: Double(session.scrollOffset.y),
-                detachedGridPositionByCardID: session.detachedGridPositionByCardID.persistedIndexBoardDictionary,
-                groupGridPositionByParentID: session.groupGridPositionByParentID.persistedIndexBoardDictionary,
-                tempStrips: session.tempStrips,
-                collapsedLaneParentIDs: Array(session.collapsedLaneParentIDs),
-                showsBackByCardID: session.showsBackByCardID.persistedIndexBoardBoolDictionary,
-                lastPresentedCardID: session.lastPresentedCardID
-            )
+            records[scenarioID.uuidString] = makePersistedSessionRecord(from: session)
         } else {
             records.removeValue(forKey: scenarioID.uuidString)
         }
 
-        guard let encoded = try? JSONEncoder().encode(records) else { return }
-        UserDefaults.standard.set(encoded, forKey: persistedSessionsKey)
+        storePersistedSessionRecords(records)
+    }
+
+    func persistViewport(
+        zoomScale: CGFloat,
+        scrollOffset: CGPoint,
+        for scenarioID: UUID,
+        paneID: Int
+    ) {
+        let resolvedScale = min(max(zoomScale, IndexBoardZoom.minScale), IndexBoardZoom.maxScale)
+        let resolvedOffset = CGPoint(
+            x: max(0, scrollOffset.x),
+            y: max(0, scrollOffset.y)
+        )
+
+        if var active = activeSessionByScenarioID[scenarioID],
+           active.descriptor.paneID == paneID {
+            active.session.zoomScale = resolvedScale
+            active.session.scrollOffset = resolvedOffset
+            activeSessionByScenarioID[scenarioID] = active
+            liveViewportByDescriptor[active.descriptor] = active.session.viewport
+            persistSession(active.session, for: scenarioID)
+            return
+        }
+
+        var records = loadPersistedSessionRecords()
+        guard let existingRecord = records[scenarioID.uuidString] else { return }
+        records[scenarioID.uuidString] = IndexBoardPersistedSessionRecord(
+            source: existingRecord.source,
+            sourceCardIDs: existingRecord.sourceCardIDs,
+            zoomScale: Double(resolvedScale),
+            scrollOffsetX: Double(resolvedOffset.x),
+            scrollOffsetY: Double(resolvedOffset.y),
+            detachedGridPositionByCardID: existingRecord.detachedGridPositionByCardID,
+            groupGridPositionByParentID: existingRecord.groupGridPositionByParentID,
+            tempStrips: existingRecord.tempStrips,
+            collapsedLaneParentIDs: existingRecord.collapsedLaneParentIDs,
+            showsBackByCardID: existingRecord.showsBackByCardID,
+            lastPresentedCardID: existingRecord.lastPresentedCardID
+        )
+        storePersistedSessionRecords(records)
     }
 
     private func persistedSessionRecord(for scenarioID: UUID) -> IndexBoardPersistedSessionRecord? {
-        guard let data = UserDefaults.standard.data(forKey: persistedSessionsKey),
-              let records = try? JSONDecoder().decode([String: IndexBoardPersistedSessionRecord].self, from: data) else {
-            return nil
-        }
-        return records[scenarioID.uuidString]
+        loadPersistedSessionRecords()[scenarioID.uuidString]
+    }
+
+    private func resolvedActiveSession(_ active: ActiveSession) -> ActiveSession {
+        ActiveSession(
+            descriptor: active.descriptor,
+            session: resolvedSession(active.session, descriptor: active.descriptor)
+        )
+    }
+
+    private func resolvedSession(
+        _ session: IndexBoardSessionState,
+        descriptor: IndexBoardSessionDescriptor
+    ) -> IndexBoardSessionState {
+        guard let liveViewport = liveViewportByDescriptor[descriptor] else { return session }
+        var resolvedSession = session
+        resolvedSession.viewport = liveViewport
+        return resolvedSession
     }
 
     private func persistSession(_ session: IndexBoardSessionState, for scenarioID: UUID) {
-        var records: [String: IndexBoardPersistedSessionRecord] = [:]
-        if let data = UserDefaults.standard.data(forKey: persistedSessionsKey),
-           let decoded = try? JSONDecoder().decode([String: IndexBoardPersistedSessionRecord].self, from: data) {
-            records = decoded
-        }
+        var records = loadPersistedSessionRecords()
+        records[scenarioID.uuidString] = makePersistedSessionRecord(from: session)
+        storePersistedSessionRecords(records)
+    }
 
-        records[scenarioID.uuidString] = IndexBoardPersistedSessionRecord(
+    private func makePersistedSessionRecord(from session: IndexBoardSessionState) -> IndexBoardPersistedSessionRecord {
+        IndexBoardPersistedSessionRecord(
             source: session.source,
             sourceCardIDs: session.sourceCardIDs,
             zoomScale: Double(session.zoomScale),
@@ -369,7 +433,17 @@ final class IndexBoardRuntime: ObservableObject {
             showsBackByCardID: session.showsBackByCardID.persistedIndexBoardBoolDictionary,
             lastPresentedCardID: session.lastPresentedCardID
         )
+    }
 
+    private func loadPersistedSessionRecords() -> [String: IndexBoardPersistedSessionRecord] {
+        guard let data = UserDefaults.standard.data(forKey: persistedSessionsKey),
+              let records = try? JSONDecoder().decode([String: IndexBoardPersistedSessionRecord].self, from: data) else {
+            return [:]
+        }
+        return records
+    }
+
+    private func storePersistedSessionRecords(_ records: [String: IndexBoardPersistedSessionRecord]) {
         guard let encoded = try? JSONEncoder().encode(records) else { return }
         UserDefaults.standard.set(encoded, forKey: persistedSessionsKey)
     }
