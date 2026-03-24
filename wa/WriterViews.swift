@@ -42,6 +42,7 @@ struct ScenarioWriterView: View {
     @StateObject private var aiFeatureState = WriterAIFeatureState()
     @StateObject private var editEndAutoBackupState = WriterEditEndAutoBackupState()
     @StateObject private var scenarioObservedState: ScenarioWriterObservedState
+    @StateObject var indexBoardCanvasDerivedCache = IndexBoardCanvasDerivedCache()
     @ObservedObject var indexBoardRuntime = IndexBoardRuntime.shared
 
     init(

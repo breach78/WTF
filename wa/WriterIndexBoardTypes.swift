@@ -47,6 +47,9 @@ struct IndexBoardPresentationState: Equatable {
     var collapsedLaneParentIDs: Set<UUID> = []
     var showsBackByCardID: [UUID: Bool] = [:]
     var lastPresentedCardID: UUID? = nil
+}
+
+struct IndexBoardLogicalState: Equatable {
     var detachedGridPositionByCardID: [UUID: IndexBoardGridPosition] = [:]
     var groupGridPositionByParentID: [UUID: IndexBoardGridPosition] = [:]
     var tempStrips: [IndexBoardTempStripState] = []
@@ -141,6 +144,7 @@ struct IndexBoardSessionState: Equatable {
     var sourceCardIDs: [UUID]
     let entrySnapshot: IndexBoardEntrySnapshot
     var viewport = IndexBoardViewportState()
+    var logical = IndexBoardLogicalState()
     var presentation = IndexBoardPresentationState()
     var navigation = IndexBoardNavigationState()
 
@@ -178,18 +182,18 @@ struct IndexBoardSessionState: Equatable {
     }
 
     var detachedGridPositionByCardID: [UUID: IndexBoardGridPosition] {
-        get { presentation.detachedGridPositionByCardID }
-        set { presentation.detachedGridPositionByCardID = newValue }
+        get { logical.detachedGridPositionByCardID }
+        set { logical.detachedGridPositionByCardID = newValue }
     }
 
     var groupGridPositionByParentID: [UUID: IndexBoardGridPosition] {
-        get { presentation.groupGridPositionByParentID }
-        set { presentation.groupGridPositionByParentID = newValue }
+        get { logical.groupGridPositionByParentID }
+        set { logical.groupGridPositionByParentID = newValue }
     }
 
     var tempStrips: [IndexBoardTempStripState] {
-        get { presentation.tempStrips }
-        set { presentation.tempStrips = newValue }
+        get { logical.tempStrips }
+        set { logical.tempStrips = newValue }
     }
 
     var pendingRevealCardID: UUID? {
@@ -215,6 +219,12 @@ final class IndexBoardRuntime: ObservableObject {
     @Published private var activeSessionByScenarioID: [UUID: ActiveSession] = [:]
     private var liveViewportByDescriptor: [IndexBoardSessionDescriptor: IndexBoardViewportState] = [:]
     private let persistedSessionsKey = "writer.indexboard.persisted-sessions.v1"
+    private let deferredPersistQueue = DispatchQueue(
+        label: "writer.indexboard.persisted-session-write",
+        qos: .utility
+    )
+    private var deferredPersistWorkItemByScenarioID: [UUID: DispatchWorkItem] = [:]
+    private let deferredPersistDelay: TimeInterval = 0.25
 
     private init() {}
 
@@ -284,9 +294,27 @@ final class IndexBoardRuntime: ObservableObject {
         }
     }
 
+    func schedulePersistCurrentSession(for scenarioID: UUID, paneID: Int) {
+        guard let active = activeSessionByScenarioID[scenarioID], active.descriptor.paneID == paneID else { return }
+        let resolvedSession = resolvedSession(active.session, descriptor: active.descriptor)
+        scheduleDeferredPersist(resolvedSession, for: scenarioID)
+    }
+
+    func schedulePersistCurrentLogicalState(for scenarioID: UUID, paneID: Int) {
+        guard let active = activeSessionByScenarioID[scenarioID], active.descriptor.paneID == paneID else { return }
+        let resolvedSession = resolvedSession(active.session, descriptor: active.descriptor)
+        let fallbackRecord = makePersistedSessionRecord(from: resolvedSession)
+        let record = updatedPersistedRecord(
+            loadPersistedSessionRecords()[scenarioID.uuidString] ?? fallbackRecord,
+            logicalState: resolvedSession.logical
+        )
+        scheduleDeferredPersistRecord(record, for: scenarioID)
+    }
+
     func deactivate(scenarioID: UUID, paneID: Int) {
         guard let active = activeSessionByScenarioID[scenarioID], active.descriptor.paneID == paneID else { return }
         let resolvedSession = resolvedSession(active.session, descriptor: active.descriptor)
+        cancelDeferredPersist(for: scenarioID)
         persistSession(resolvedSession, for: scenarioID)
         liveViewportByDescriptor.removeValue(forKey: active.descriptor)
         activeSessionByScenarioID.removeValue(forKey: scenarioID)
@@ -328,19 +356,22 @@ final class IndexBoardRuntime: ObservableObject {
                     y: record.scrollOffsetY
                 )
             ),
-            presentation: IndexBoardPresentationState(
-                collapsedLaneParentIDs: Set(record.collapsedLaneParentIDs),
-                showsBackByCardID: record.showsBackByCardID.restoredIndexBoardBoolDictionary,
-                lastPresentedCardID: record.lastPresentedCardID,
+            logical: IndexBoardLogicalState(
                 detachedGridPositionByCardID: record.detachedGridPositionByCardID.restoredIndexBoardDictionary,
                 groupGridPositionByParentID: record.groupGridPositionByParentID.restoredIndexBoardDictionary,
                 tempStrips: record.tempStrips ?? []
+            ),
+            presentation: IndexBoardPresentationState(
+                collapsedLaneParentIDs: Set(record.collapsedLaneParentIDs),
+                showsBackByCardID: record.showsBackByCardID.restoredIndexBoardBoolDictionary,
+                lastPresentedCardID: record.lastPresentedCardID
             ),
             navigation: IndexBoardNavigationState()
         )
     }
 
     func replacePersistedSession(_ session: IndexBoardSessionState?, for scenarioID: UUID) {
+        cancelDeferredPersist(for: scenarioID)
         var records = loadPersistedSessionRecords()
 
         if let session {
@@ -349,6 +380,14 @@ final class IndexBoardRuntime: ObservableObject {
             records.removeValue(forKey: scenarioID.uuidString)
         }
 
+        storePersistedSessionRecords(records)
+    }
+
+    func replacePersistedLogicalState(_ logicalState: IndexBoardLogicalState, for scenarioID: UUID) {
+        cancelDeferredPersist(for: scenarioID)
+        var records = loadPersistedSessionRecords()
+        guard let existingRecord = records[scenarioID.uuidString] else { return }
+        records[scenarioID.uuidString] = updatedPersistedRecord(existingRecord, logicalState: logicalState)
         storePersistedSessionRecords(records)
     }
 
@@ -370,6 +409,7 @@ final class IndexBoardRuntime: ObservableObject {
             active.session.scrollOffset = resolvedOffset
             activeSessionByScenarioID[scenarioID] = active
             liveViewportByDescriptor[active.descriptor] = active.session.viewport
+            cancelDeferredPersist(for: scenarioID)
             persistSession(active.session, for: scenarioID)
             return
         }
@@ -414,9 +454,59 @@ final class IndexBoardRuntime: ObservableObject {
     }
 
     private func persistSession(_ session: IndexBoardSessionState, for scenarioID: UUID) {
+        cancelDeferredPersist(for: scenarioID)
         var records = loadPersistedSessionRecords()
         records[scenarioID.uuidString] = makePersistedSessionRecord(from: session)
         storePersistedSessionRecords(records)
+    }
+
+    private func cancelDeferredPersist(for scenarioID: UUID) {
+        deferredPersistWorkItemByScenarioID[scenarioID]?.cancel()
+        deferredPersistWorkItemByScenarioID.removeValue(forKey: scenarioID)
+    }
+
+    private func scheduleDeferredPersistRecord(
+        _ record: IndexBoardPersistedSessionRecord,
+        for scenarioID: UUID
+    ) {
+        cancelDeferredPersist(for: scenarioID)
+        let scenarioKey = scenarioID.uuidString
+        let persistedSessionsKey = self.persistedSessionsKey
+        let workItem = DispatchWorkItem {
+            var records: [String: IndexBoardPersistedSessionRecord] = [:]
+            if let data = UserDefaults.standard.data(forKey: persistedSessionsKey),
+               let decoded = try? JSONDecoder().decode([String: IndexBoardPersistedSessionRecord].self, from: data) {
+                records = decoded
+            }
+            records[scenarioKey] = record
+            guard let encoded = try? JSONEncoder().encode(records) else { return }
+            UserDefaults.standard.set(encoded, forKey: persistedSessionsKey)
+        }
+        deferredPersistWorkItemByScenarioID[scenarioID] = workItem
+        deferredPersistQueue.asyncAfter(deadline: .now() + deferredPersistDelay, execute: workItem)
+    }
+
+    private func scheduleDeferredPersist(_ session: IndexBoardSessionState, for scenarioID: UUID) {
+        scheduleDeferredPersistRecord(makePersistedSessionRecord(from: session), for: scenarioID)
+    }
+
+    private func updatedPersistedRecord(
+        _ record: IndexBoardPersistedSessionRecord,
+        logicalState: IndexBoardLogicalState
+    ) -> IndexBoardPersistedSessionRecord {
+        IndexBoardPersistedSessionRecord(
+            source: record.source,
+            sourceCardIDs: record.sourceCardIDs,
+            zoomScale: record.zoomScale,
+            scrollOffsetX: record.scrollOffsetX,
+            scrollOffsetY: record.scrollOffsetY,
+            detachedGridPositionByCardID: logicalState.detachedGridPositionByCardID.persistedIndexBoardDictionary,
+            groupGridPositionByParentID: logicalState.groupGridPositionByParentID.persistedIndexBoardDictionary,
+            tempStrips: logicalState.tempStrips,
+            collapsedLaneParentIDs: record.collapsedLaneParentIDs,
+            showsBackByCardID: record.showsBackByCardID,
+            lastPresentedCardID: record.lastPresentedCardID
+        )
     }
 
     private func makePersistedSessionRecord(from session: IndexBoardSessionState) -> IndexBoardPersistedSessionRecord {

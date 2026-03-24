@@ -12,6 +12,7 @@ struct IndexBoardCardDropTarget: Equatable {
     let nextTempMember: IndexBoardTempStripMember?
     let detachedGridPosition: IndexBoardGridPosition?
     let preferredColumnCount: Int?
+    let groupBlockParentID: UUID?
 
     init(
         groupID: IndexBoardGroupID,
@@ -22,7 +23,8 @@ struct IndexBoardCardDropTarget: Equatable {
         previousTempMember: IndexBoardTempStripMember? = nil,
         nextTempMember: IndexBoardTempStripMember? = nil,
         detachedGridPosition: IndexBoardGridPosition? = nil,
-        preferredColumnCount: Int? = nil
+        preferredColumnCount: Int? = nil,
+        groupBlockParentID: UUID? = nil
     ) {
         self.groupID = groupID
         self.insertionIndex = insertionIndex
@@ -33,11 +35,37 @@ struct IndexBoardCardDropTarget: Equatable {
         self.nextTempMember = nextTempMember
         self.detachedGridPosition = detachedGridPosition
         self.preferredColumnCount = preferredColumnCount
+        self.groupBlockParentID = groupBlockParentID
     }
 
     var isTempStripTarget: Bool {
         detachedGridPosition != nil || previousTempMember != nil || nextTempMember != nil
     }
+
+    var holdsGroupBlock: Bool {
+        groupBlockParentID != nil
+    }
+}
+
+enum IndexBoardGroupHoverTargetMode: String {
+    case groupSlot
+    case groupBlock
+    case detached
+}
+
+func resolvedIndexBoardGroupHoverTargetMode(
+    point: CGPoint,
+    slotEntryFrame: CGRect?,
+    activationFrame: CGRect?
+) -> IndexBoardGroupHoverTargetMode {
+    guard let activationFrame,
+          activationFrame.contains(point) else {
+        return .detached
+    }
+    guard let slotEntryFrame else {
+        return .groupBlock
+    }
+    return slotEntryFrame.contains(point) ? .groupSlot : .groupBlock
 }
 
 private struct IndexBoardResolvedGroupMoveContext {
@@ -1455,12 +1483,35 @@ private struct IndexBoardOptionalGestureModifier<G: Gesture>: ViewModifier {
 }
 
 extension ScenarioWriterView {
+    private func scheduleIndexBoardCommitCardMutation(
+        previousState: ScenarioState,
+        actionName: String
+    ) {
+        let scheduledAt = CFAbsoluteTimeGetCurrent()
+        DispatchQueue.main.async {
+            indexBoardDropPerformanceLog(
+                "deferred_commit_start",
+                "action=\(actionName) queue_ms=\(String(format: "%.3f", (CFAbsoluteTimeGetCurrent() - scheduledAt) * 1000))"
+            )
+            let startedAt = CFAbsoluteTimeGetCurrent()
+            self.commitCardMutation(
+                previousState: previousState,
+                actionName: actionName
+            )
+            indexBoardDropPerformanceLog(
+                "deferred_commit_end",
+                "action=\(actionName) ms=\(String(format: "%.3f", (CFAbsoluteTimeGetCurrent() - startedAt) * 1000))"
+            )
+        }
+    }
+
     func commitIndexBoardCardMoveSelection(
         cardIDs: [UUID],
         draggedCardID: UUID,
         target: IndexBoardCardDropTarget,
         projection: IndexBoardProjection
     ) {
+        let enterStartedAt = CFAbsoluteTimeGetCurrent()
         let liveProjection = resolvedIndexBoardProjection() ?? projection
         let referenceSurfaceProjection = resolvedIndexBoardSurfaceProjection()
         let movingCards = resolvedIndexBoardMovingCards(
@@ -1484,9 +1535,19 @@ extension ScenarioWriterView {
         guard let targetGroup = liveProjection.groups.first(where: { $0.id == target.groupID }) else { return }
         let visibleCards = targetGroup.childCards.filter { !movingIDs.contains($0.id) }
         let safeInsertionIndex = min(max(0, target.insertionIndex), visibleCards.count)
+        indexBoardDropPerformanceLog(
+            "commit_selection_enter",
+            "cards=\(movingCards.count) enter_ms=\(String(format: "%.3f", (CFAbsoluteTimeGetCurrent() - enterStartedAt) * 1000))"
+        )
+        let captureStartedAt = CFAbsoluteTimeGetCurrent()
         let previousState = captureScenarioState()
-
-        movingCards.forEach { updateIndexBoardDetachedPosition(cardID: $0.id, position: nil) }
+        indexBoardDropPerformanceLog(
+            "commit_selection_capture_state",
+            "ms=\(String(format: "%.3f", (CFAbsoluteTimeGetCurrent() - captureStartedAt) * 1000))"
+        )
+        let updatedDetachedPositionsByCardID = resolvedIndexBoardDetachedPositionsAfterRemovingCards(
+            movingIDs
+        )
 
         let destination = resolvedIndexBoardCardDestination(
             movingCard: draggedCard,
@@ -1516,6 +1577,7 @@ extension ScenarioWriterView {
         }
 
         let oldParents = movingCards.map(\.parent)
+        let mutationStartedAt = CFAbsoluteTimeGetCurrent()
         scenario.performBatchedCardMutation {
             let destinationSiblings = liveOrderedSiblings(parent: destinationParent)
             for sibling in destinationSiblings where !movingIDs.contains(sibling.id) && sibling.orderIndex >= resolvedInsertionIndex {
@@ -1539,16 +1601,31 @@ extension ScenarioWriterView {
 
             normalizeAffectedParents(oldParents: oldParents, destinationParent: destinationParent)
         }
+        indexBoardDropPerformanceLog(
+            "commit_selection_model_mutation",
+            "ms=\(String(format: "%.3f", (CFAbsoluteTimeGetCurrent() - mutationStartedAt) * 1000))"
+        )
 
+        let surfaceStartedAt = CFAbsoluteTimeGetCurrent()
         if let normalizedSurfaceProjection = resolvedIndexBoardSurfaceProjection(
-            referenceSurfaceProjection: referenceSurfaceProjection
+            referenceSurfaceProjection: referenceSurfaceProjection,
+            overridingDetachedPositionsByCardID: updatedDetachedPositionsByCardID
         ) {
             persistIndexBoardSurfacePresentation(normalizedSurfaceProjection)
         }
+        indexBoardDropPerformanceLog(
+            "commit_selection_surface_persist",
+            "ms=\(String(format: "%.3f", (CFAbsoluteTimeGetCurrent() - surfaceStartedAt) * 1000))"
+        )
 
+        let uiStateStartedAt = CFAbsoluteTimeGetCurrent()
         selectedCardIDs = movingIDs
         changeActiveCard(to: draggedCard, shouldFocusMain: false, deferToMainAsync: false, force: true)
-        commitCardMutation(
+        indexBoardDropPerformanceLog(
+            "commit_selection_ui_state",
+            "ms=\(String(format: "%.3f", (CFAbsoluteTimeGetCurrent() - uiStateStartedAt) * 1000))"
+        )
+        scheduleIndexBoardCommitCardMutation(
             previousState: previousState,
             actionName: "보드 카드 이동"
         )
@@ -1559,6 +1636,7 @@ extension ScenarioWriterView {
         target: IndexBoardCardDropTarget,
         projection: IndexBoardProjection
     ) {
+        let enterStartedAt = CFAbsoluteTimeGetCurrent()
         let liveProjection = resolvedIndexBoardProjection() ?? projection
         let referenceSurfaceProjection = resolvedIndexBoardSurfaceProjection()
         guard let movingCard = findCard(by: cardID) else { return }
@@ -1586,8 +1664,17 @@ extension ScenarioWriterView {
             return
         }
 
+        indexBoardDropPerformanceLog(
+            "commit_single_enter",
+            "card=\(cardID.uuidString) enter_ms=\(String(format: "%.3f", (CFAbsoluteTimeGetCurrent() - enterStartedAt) * 1000))"
+        )
+        let captureStartedAt = CFAbsoluteTimeGetCurrent()
         let previousState = captureScenarioState()
-        updateIndexBoardDetachedPosition(cardID: movingCard.id, position: nil)
+        indexBoardDropPerformanceLog(
+            "commit_single_capture_state",
+            "ms=\(String(format: "%.3f", (CFAbsoluteTimeGetCurrent() - captureStartedAt) * 1000))"
+        )
+        let updatedDetachedPositionsByCardID = resolvedIndexBoardDetachedPositionsAfterRemovingCards([movingCard.id])
 
         let destination = resolvedIndexBoardCardDestination(
             movingCard: movingCard,
@@ -1598,52 +1685,39 @@ extension ScenarioWriterView {
             projection: liveProjection
         )
 
+        let mutationStartedAt = CFAbsoluteTimeGetCurrent()
         scenario.performBatchedCardMutation {
-            if movingCard.isArchived {
-                movingCard.isArchived = false
-            }
-
-            let oldParent = movingCard.parent
-            normalizeIndices(parent: oldParent)
-
-            let destinationParent = destination.parent
-            var insertionIndex = destination.index
-            if oldParent?.id == destinationParent?.id,
-               movingCard.orderIndex < insertionIndex {
-                insertionIndex -= 1
-            }
-            insertionIndex = max(0, insertionIndex)
-
-            let destinationSiblings = liveOrderedSiblings(parent: destinationParent)
-            for sibling in destinationSiblings where sibling.id != movingCard.id && sibling.orderIndex >= insertionIndex {
-                sibling.orderIndex += 1
-            }
-
-            movingCard.parent = destinationParent
-            movingCard.orderIndex = insertionIndex
-            movingCard.isFloating = false
-
-            normalizeIndices(parent: movingCard.parent)
-            if oldParent?.id != movingCard.parent?.id {
-                normalizeIndices(parent: oldParent)
-            }
-
-            synchronizeMovedSubtreeCategoryIfNeeded(
-                for: movingCard,
-                oldParent: oldParent,
-                newParent: movingCard.parent
+            applyIndexBoardParentPlacement(
+                movingCard: movingCard,
+                destinationParent: destination.parent,
+                destinationIndex: destination.index
             )
         }
+        indexBoardDropPerformanceLog(
+            "commit_single_model_mutation",
+            "ms=\(String(format: "%.3f", (CFAbsoluteTimeGetCurrent() - mutationStartedAt) * 1000))"
+        )
 
+        let surfaceStartedAt = CFAbsoluteTimeGetCurrent()
         if let normalizedSurfaceProjection = resolvedIndexBoardSurfaceProjection(
-            referenceSurfaceProjection: referenceSurfaceProjection
+            referenceSurfaceProjection: referenceSurfaceProjection,
+            overridingDetachedPositionsByCardID: updatedDetachedPositionsByCardID
         ) {
             persistIndexBoardSurfacePresentation(normalizedSurfaceProjection)
         }
+        indexBoardDropPerformanceLog(
+            "commit_single_surface_persist",
+            "ms=\(String(format: "%.3f", (CFAbsoluteTimeGetCurrent() - surfaceStartedAt) * 1000))"
+        )
 
+        let uiStateStartedAt = CFAbsoluteTimeGetCurrent()
         selectedCardIDs = [movingCard.id]
         changeActiveCard(to: movingCard, shouldFocusMain: false, deferToMainAsync: false, force: true)
-        commitCardMutation(
+        indexBoardDropPerformanceLog(
+            "commit_single_ui_state",
+            "ms=\(String(format: "%.3f", (CFAbsoluteTimeGetCurrent() - uiStateStartedAt) * 1000))"
+        )
+        scheduleIndexBoardCommitCardMutation(
             previousState: previousState,
             actionName: "보드 카드 이동"
         )
@@ -1653,14 +1727,21 @@ extension ScenarioWriterView {
         movingCard: SceneCard,
         target: IndexBoardCardDropTarget
     ) {
+        let enterStartedAt = CFAbsoluteTimeGetCurrent()
         let referenceSurfaceProjection = resolvedIndexBoardSurfaceProjection()
+        let captureStartedAt = CFAbsoluteTimeGetCurrent()
         let previousState = captureScenarioState()
+        indexBoardDropPerformanceLog(
+            "commit_detached_capture_state",
+            "card=\(movingCard.id.uuidString) enter_ms=\(String(format: "%.3f", (captureStartedAt - enterStartedAt) * 1000)) ms=\(String(format: "%.3f", (CFAbsoluteTimeGetCurrent() - captureStartedAt) * 1000))"
+        )
         let updatedTempStrips = resolvedUpdatedIndexBoardTempStrips(
             referenceSurfaceProjection: referenceSurfaceProjection,
             movingMembers: [IndexBoardTempStripMember(kind: .card, id: movingCard.id)],
             target: target
         )
 
+        let mutationStartedAt = CFAbsoluteTimeGetCurrent()
         scenario.performBatchedCardMutation {
             let tempContainer = ensureIndexBoardTempContainer()
             applyIndexBoardParentPlacement(
@@ -1670,20 +1751,31 @@ extension ScenarioWriterView {
             )
             applyIndexBoardTempStripOrdering(updatedTempStrips)
         }
-        applyIndexBoardTempStripPresentation(
-            updatedTempStrips,
-            referenceSurfaceProjection: referenceSurfaceProjection
+        indexBoardDropPerformanceLog(
+            "commit_detached_model_mutation",
+            "ms=\(String(format: "%.3f", (CFAbsoluteTimeGetCurrent() - mutationStartedAt) * 1000))"
         )
 
+        let surfaceStartedAt = CFAbsoluteTimeGetCurrent()
         if let normalizedSurfaceProjection = resolvedIndexBoardSurfaceProjection(
-            referenceSurfaceProjection: referenceSurfaceProjection
+            referenceSurfaceProjection: referenceSurfaceProjection,
+            overridingTempStrips: updatedTempStrips
         ) {
             persistIndexBoardSurfacePresentation(normalizedSurfaceProjection)
         }
+        indexBoardDropPerformanceLog(
+            "commit_detached_surface_persist",
+            "ms=\(String(format: "%.3f", (CFAbsoluteTimeGetCurrent() - surfaceStartedAt) * 1000))"
+        )
 
+        let uiStateStartedAt = CFAbsoluteTimeGetCurrent()
         selectedCardIDs = [movingCard.id]
         changeActiveCard(to: movingCard, shouldFocusMain: false, deferToMainAsync: false, force: true)
-        commitCardMutation(
+        indexBoardDropPerformanceLog(
+            "commit_detached_ui_state",
+            "ms=\(String(format: "%.3f", (CFAbsoluteTimeGetCurrent() - uiStateStartedAt) * 1000))"
+        )
+        scheduleIndexBoardCommitCardMutation(
             previousState: previousState,
             actionName: "보드 카드 이동"
         )
@@ -1694,15 +1786,22 @@ extension ScenarioWriterView {
         draggedCard: SceneCard,
         target: IndexBoardCardDropTarget
     ) {
+        let enterStartedAt = CFAbsoluteTimeGetCurrent()
         let movingIDs = Set(movingCards.map(\.id))
         let referenceSurfaceProjection = resolvedIndexBoardSurfaceProjection()
+        let captureStartedAt = CFAbsoluteTimeGetCurrent()
         let previousState = captureScenarioState()
+        indexBoardDropPerformanceLog(
+            "commit_detached_selection_capture_state",
+            "cards=\(movingCards.count) enter_ms=\(String(format: "%.3f", (captureStartedAt - enterStartedAt) * 1000)) ms=\(String(format: "%.3f", (CFAbsoluteTimeGetCurrent() - captureStartedAt) * 1000))"
+        )
         let updatedTempStrips = resolvedUpdatedIndexBoardTempStrips(
             referenceSurfaceProjection: referenceSurfaceProjection,
             movingMembers: movingCards.map { IndexBoardTempStripMember(kind: .card, id: $0.id) },
             target: target
         )
 
+        let mutationStartedAt = CFAbsoluteTimeGetCurrent()
         scenario.performBatchedCardMutation {
             let tempContainer = ensureIndexBoardTempContainer()
             for card in movingCards {
@@ -1714,20 +1813,31 @@ extension ScenarioWriterView {
             }
             applyIndexBoardTempStripOrdering(updatedTempStrips)
         }
-        applyIndexBoardTempStripPresentation(
-            updatedTempStrips,
-            referenceSurfaceProjection: referenceSurfaceProjection
+        indexBoardDropPerformanceLog(
+            "commit_detached_selection_model_mutation",
+            "ms=\(String(format: "%.3f", (CFAbsoluteTimeGetCurrent() - mutationStartedAt) * 1000))"
         )
 
+        let surfaceStartedAt = CFAbsoluteTimeGetCurrent()
         if let normalizedSurfaceProjection = resolvedIndexBoardSurfaceProjection(
-            referenceSurfaceProjection: referenceSurfaceProjection
+            referenceSurfaceProjection: referenceSurfaceProjection,
+            overridingTempStrips: updatedTempStrips
         ) {
             persistIndexBoardSurfacePresentation(normalizedSurfaceProjection)
         }
+        indexBoardDropPerformanceLog(
+            "commit_detached_selection_surface_persist",
+            "ms=\(String(format: "%.3f", (CFAbsoluteTimeGetCurrent() - surfaceStartedAt) * 1000))"
+        )
 
+        let uiStateStartedAt = CFAbsoluteTimeGetCurrent()
         selectedCardIDs = movingIDs
         changeActiveCard(to: draggedCard, shouldFocusMain: false, deferToMainAsync: false, force: true)
-        commitCardMutation(
+        indexBoardDropPerformanceLog(
+            "commit_detached_selection_ui_state",
+            "ms=\(String(format: "%.3f", (CFAbsoluteTimeGetCurrent() - uiStateStartedAt) * 1000))"
+        )
+        scheduleIndexBoardCommitCardMutation(
             previousState: previousState,
             actionName: "보드 카드 이동"
         )
@@ -1762,7 +1872,7 @@ extension ScenarioWriterView {
             )
         }
 
-        commitCardMutation(
+        scheduleIndexBoardCommitCardMutation(
             previousState: previousState,
             actionName: "보드 그룹 이동"
         )
@@ -1788,11 +1898,13 @@ extension ScenarioWriterView {
             scenario.performBatchedCardMutation {
                 applyIndexBoardTempStripOrdering(updatedTempStrips)
             }
-            applyIndexBoardTempStripPresentation(
-                updatedTempStrips,
-                referenceSurfaceProjection: surfaceProjection
-            )
-            commitCardMutation(
+            if let normalizedSurfaceProjection = resolvedIndexBoardSurfaceProjection(
+                referenceSurfaceProjection: surfaceProjection,
+                overridingTempStrips: updatedTempStrips
+            ) {
+                persistIndexBoardSurfacePresentation(normalizedSurfaceProjection)
+            }
+            scheduleIndexBoardCommitCardMutation(
                 previousState: previousState,
                 actionName: "보드 부모 그룹 이동"
             )
@@ -1811,7 +1923,7 @@ extension ScenarioWriterView {
             )
         }
 
-        commitCardMutation(
+        scheduleIndexBoardCommitCardMutation(
             previousState: previousState,
             actionName: "보드 부모 그룹 이동"
         )
@@ -1852,7 +1964,7 @@ extension ScenarioWriterView {
             }
         }
 
-        commitCardMutation(
+        scheduleIndexBoardCommitCardMutation(
             previousState: previousState,
             actionName: isTemp ? "보드 그룹 Temp 이동" : "보드 그룹 Temp 복귀"
         )
@@ -1945,12 +2057,36 @@ extension ScenarioWriterView {
         let oldParent = movingCard.parent
         normalizeIndices(parent: oldParent)
 
-        var insertionIndex = destinationIndex
-        if oldParent?.id == destinationParent?.id,
-           movingCard.orderIndex < insertionIndex {
-            insertionIndex -= 1
+        let safeDestinationIndex = max(0, destinationIndex)
+        if oldParent?.id == destinationParent?.id {
+            var siblings = liveOrderedSiblings(parent: destinationParent)
+            if let currentIndex = siblings.firstIndex(where: { $0.id == movingCard.id }) {
+                siblings.remove(at: currentIndex)
+                let insertionIndex = min(
+                    max(
+                        0,
+                        safeDestinationIndex - (currentIndex < safeDestinationIndex ? 1 : 0)
+                    ),
+                    siblings.count
+                )
+                siblings.insert(movingCard, at: insertionIndex)
+
+                for (index, sibling) in siblings.enumerated() {
+                    sibling.parent = destinationParent
+                    sibling.orderIndex = index
+                }
+                movingCard.isFloating = false
+
+                synchronizeMovedSubtreeCategoryIfNeeded(
+                    for: movingCard,
+                    oldParent: oldParent,
+                    newParent: movingCard.parent
+                )
+                return
+            }
         }
-        insertionIndex = max(0, insertionIndex)
+
+        let insertionIndex = min(safeDestinationIndex, liveOrderedSiblings(parent: destinationParent).count)
 
         let destinationSiblings = liveOrderedSiblings(parent: destinationParent)
         for sibling in destinationSiblings where sibling.id != movingCard.id && sibling.orderIndex >= insertionIndex {
@@ -2081,14 +2217,14 @@ extension ScenarioWriterView {
         return nil
     }
 
-    private func updateIndexBoardDetachedPosition(cardID: UUID, position: IndexBoardGridPosition?) {
-        indexBoardRuntime.updateSession(for: scenario.id, paneID: paneContextID) { session in
-            if let position {
-                session.detachedGridPositionByCardID[cardID] = position
-            } else {
-                session.detachedGridPositionByCardID.removeValue(forKey: cardID)
-            }
+    private func resolvedIndexBoardDetachedPositionsAfterRemovingCards(
+        _ cardIDs: some Sequence<UUID>
+    ) -> [UUID: IndexBoardGridPosition] {
+        var detachedPositionsByCardID = activeIndexBoardSession?.detachedGridPositionByCardID ?? [:]
+        for cardID in cardIDs {
+            detachedPositionsByCardID.removeValue(forKey: cardID)
         }
+        return detachedPositionsByCardID
     }
 
     private func resolvedIndexBoardTempGroupWidths(
@@ -2117,33 +2253,6 @@ extension ScenarioWriterView {
             nextMember: target.nextTempMember,
             parkingPosition: target.detachedGridPosition
         )
-    }
-
-    private func applyIndexBoardTempStripPresentation(
-        _ strips: [IndexBoardTempStripState],
-        referenceSurfaceProjection: BoardSurfaceProjection?
-    ) {
-        let layout = resolvedIndexBoardTempStripSurfaceLayout(
-            strips: strips,
-            tempGroupWidthsByParentID: resolvedIndexBoardTempGroupWidths(
-                surfaceProjection: referenceSurfaceProjection
-            )
-        )
-        let tempGroupIDs = Set(
-            strips.flatMap(\.members).compactMap { member in
-                member.kind == .group ? member.id : nil
-            }
-        )
-
-        indexBoardRuntime.updateSession(for: scenario.id, paneID: paneContextID) { session in
-            session.tempStrips = strips
-            session.detachedGridPositionByCardID = layout.detachedPositionsByCardID
-            for parentCardID in tempGroupIDs {
-                if let position = layout.groupOriginByParentID[parentCardID] {
-                    session.groupGridPositionByParentID[parentCardID] = position
-                }
-            }
-        }
     }
 
     private func applyIndexBoardTempStripOrdering(

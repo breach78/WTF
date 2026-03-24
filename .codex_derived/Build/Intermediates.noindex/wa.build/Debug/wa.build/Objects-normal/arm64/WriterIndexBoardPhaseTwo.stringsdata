@@ -7,7 +7,7 @@
         "key": "+ Temp 카드",
         "location": {
           "startingColumn": 20,
-          "startingLine": 917
+          "startingLine": 945
         }
       },
       {
@@ -15,7 +15,7 @@
         "key": "작업창으로 돌아가기",
         "location": {
           "startingColumn": 20,
-          "startingLine": 923
+          "startingLine": 951
         }
       },
       {
@@ -23,7 +23,7 @@
         "key": "Board View · 그룹 %lld · 카드 %lld",
         "location": {
           "startingColumn": 22,
-          "startingLine": 871
+          "startingLine": 899
         }
       },
       {
@@ -31,7 +31,7 @@
         "key": "핀치 또는 Cmd +/- / Cmd 0",
         "location": {
           "startingColumn": 22,
-          "startingLine": 874
+          "startingLine": 902
         }
       },
       {
@@ -39,7 +39,7 @@
         "key": "100%",
         "location": {
           "startingColumn": 24,
-          "startingLine": 891
+          "startingLine": 919
         }
       },
       {
@@ -47,7 +47,7 @@
         "key": "표시할 카드가 없습니다.",
         "location": {
           "startingColumn": 18,
-          "startingLine": 941
+          "startingLine": 969
         }
       },
       {
@@ -55,7 +55,7 @@
         "key": "빈 배경 더블클릭, N, 또는 + Temp 카드로 임시 카드를 만들 수 있습니다.",
         "location": {
           "startingColumn": 18,
-          "startingLine": 944
+          "startingLine": 972
         }
       }
     ]

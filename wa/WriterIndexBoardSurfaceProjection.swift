@@ -816,6 +816,7 @@ func indexBoardDetachedGridPositionsByCardID(
 
 private func resolvedIndexBoardNonOverlappingParentGroups(
     _ parentGroups: [BoardSurfaceParentGroupPlacement],
+    detachedPositionsByCardID: [UUID: IndexBoardGridPosition] = [:],
     preferredLeadingParentCardID: UUID? = nil
 ) -> [BoardSurfaceParentGroupPlacement] {
     let nonTempGroups = parentGroups.filter { !$0.isTempGroup }
@@ -832,30 +833,71 @@ private func resolvedIndexBoardNonOverlappingParentGroups(
     }
 
     let groupsByRow = Dictionary(grouping: nonTempGroups, by: { $0.origin.row })
+    let detachedColumnsByRow = Dictionary(grouping: detachedPositionsByCardID.values, by: \.row)
+        .mapValues { positions in
+            positions.map(\.column).sorted()
+        }
     var resolvedOriginByID: [BoardSurfaceParentGroupID: IndexBoardGridPosition] = [:]
+
+    func resolvedColumnAvoidingDetachedOccupancy(
+        startingAt proposedColumn: Int,
+        width: Int,
+        detachedColumns: [Int]
+    ) -> Int {
+        guard !detachedColumns.isEmpty else { return proposedColumn }
+
+        var resolvedColumn = proposedColumn
+        while let overlappingColumn = detachedColumns.first(where: { column in
+            column >= resolvedColumn && column <= resolvedColumn + max(0, width - 1)
+        }) {
+            resolvedColumn = overlappingColumn + 1
+        }
+        return resolvedColumn
+    }
 
     for (row, rowGroups) in groupsByRow {
         let sortedGroups = rowGroups.sorted(by: sortGroups)
+        let detachedColumns = detachedColumnsByRow[row] ?? []
 
         if let preferredLeadingParentCardID,
            let preferredGroup = sortedGroups.first(where: { $0.parentCardID == preferredLeadingParentCardID }) {
             let preferredStartColumn = preferredGroup.origin.column
-            resolvedOriginByID[preferredGroup.id] = preferredGroup.origin
+            let resolvedPreferredColumn = resolvedColumnAvoidingDetachedOccupancy(
+                startingAt: preferredGroup.origin.column,
+                width: preferredGroup.width,
+                detachedColumns: detachedColumns
+            )
+            resolvedOriginByID[preferredGroup.id] = IndexBoardGridPosition(
+                column: resolvedPreferredColumn,
+                row: row
+            )
 
             let unaffectedLeadingGroups = sortedGroups.filter {
                 $0.id != preferredGroup.id && $0.occupiedColumns.upperBound < preferredStartColumn
             }
             for group in unaffectedLeadingGroups {
-                resolvedOriginByID[group.id] = group.origin
+                let resolvedColumn = resolvedColumnAvoidingDetachedOccupancy(
+                    startingAt: group.origin.column,
+                    width: group.width,
+                    detachedColumns: detachedColumns
+                )
+                resolvedOriginByID[group.id] = IndexBoardGridPosition(
+                    column: resolvedColumn,
+                    row: row
+                )
             }
 
-            var cursor = preferredGroup.origin.column + preferredGroup.width
+            var cursor = resolvedPreferredColumn + preferredGroup.width
             let trailingGroups = sortedGroups.filter {
                 $0.id != preferredGroup.id && $0.occupiedColumns.upperBound >= preferredStartColumn
             }
 
             for group in trailingGroups {
-                let resolvedColumn = max(group.origin.column, cursor)
+                let resolvedColumn = resolvedColumnAvoidingDetachedOccupancy(
+                    startingAt: max(group.origin.column, cursor),
+                    width: group.width,
+                    detachedColumns: detachedColumns
+                )
                 resolvedOriginByID[group.id] = IndexBoardGridPosition(
                     column: resolvedColumn,
                     row: row
@@ -867,7 +909,11 @@ private func resolvedIndexBoardNonOverlappingParentGroups(
 
         var cursor: Int?
         for group in sortedGroups {
-            let resolvedColumn = max(group.origin.column, cursor ?? group.origin.column)
+            let resolvedColumn = resolvedColumnAvoidingDetachedOccupancy(
+                startingAt: max(group.origin.column, cursor ?? group.origin.column),
+                width: group.width,
+                detachedColumns: detachedColumns
+            )
             resolvedOriginByID[group.id] = IndexBoardGridPosition(
                 column: resolvedColumn,
                 row: row
@@ -906,6 +952,7 @@ func normalizedIndexBoardSurfaceLayout(
         return (
             parentGroups: resolvedIndexBoardNonOverlappingParentGroups(
                 parentGroups,
+                detachedPositionsByCardID: detachedPositionsByCardID,
                 preferredLeadingParentCardID: preferredLeadingParentCardID
             ),
             detachedPositionsByCardID: detachedPositionsByCardID
@@ -1003,12 +1050,12 @@ func normalizedIndexBoardSurfaceLayout(
 
     let rowElements = resolvedRowElements(
         parentGroups: mainlineParentGroups,
-        detachedPositionsByCardID: [:]
+        detachedPositionsByCardID: detachedPositionsByCardID
     )
     let referenceAnchorsByRow = resolvedRowClusterAnchors(
         elements: resolvedRowElements(
             parentGroups: referenceMainlineParentGroups,
-            detachedPositionsByCardID: [:]
+            detachedPositionsByCardID: referenceDetachedPositionsByCardID ?? detachedPositionsByCardID
         )
     )
     let elementsByRow = Dictionary(grouping: rowElements, by: \.row)
@@ -1057,12 +1104,13 @@ func normalizedIndexBoardSurfaceLayout(
                 }
                 let anchorColumn = remainingReferenceAnchors[bestMatch.index].anchorColumn
                 remainingReferenceAnchors.remove(at: bestMatch.index)
-                return anchorColumn
+                return min(anchorColumn, currentStartColumn)
             }()
             var cursor = clusterStartColumn
 
             for index in blockStartIndex...endIndex {
                 let element = sortedElements[index]
+                cursor = max(cursor, element.startColumn)
                 switch element.kind {
                 case .group(let groupID):
                     normalizedGroupOriginByID[groupID] = IndexBoardGridPosition(
@@ -1101,6 +1149,7 @@ func normalizedIndexBoardSurfaceLayout(
     }
     let resolvedParentGroups = resolvedIndexBoardNonOverlappingParentGroups(
         normalizedParentGroups,
+        detachedPositionsByCardID: detachedPositionsByCardID,
         preferredLeadingParentCardID: preferredLeadingParentCardID
     )
 

@@ -582,6 +582,12 @@ struct waApp: App {
 
     init() {
         UserDefaults.standard.set(false, forKey: "TSMLanguageIndicatorEnabled")
+#if DEBUG
+        if ProcessInfo.processInfo.environment["WA_RUN_GROUP_ACTIVATION_HARNESS"] == "1" {
+            IndexBoardGroupActivationHarness.run()
+            exit(0)
+        }
+#endif
     }
     
     var body: some Scene {

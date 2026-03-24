@@ -27,7 +27,7 @@ extension ScenarioWriterView {
     }
 
     struct IndexBoardUndoState {
-        let session: IndexBoardSessionState
+        let logicalState: IndexBoardLogicalState
         let editorDraft: IndexBoardEditorDraft?
         let summaryRecordsByCardID: [UUID: IndexBoardCardSummaryRecord]
     }
@@ -139,7 +139,7 @@ extension ScenarioWriterView {
     func captureIndexBoardUndoState() -> IndexBoardUndoState? {
         guard let session = activeIndexBoardSession else { return nil }
         return IndexBoardUndoState(
-            session: session,
+            logicalState: session.logical,
             editorDraft: indexBoardEditorDraft,
             summaryRecordsByCardID: store.indexBoardSummaryRecordsByScenarioID[scenario.id] ?? [:]
         )
@@ -152,11 +152,11 @@ extension ScenarioWriterView {
 
         if isIndexBoardActive {
             indexBoardRuntime.updateSession(for: scenario.id, paneID: paneContextID) { restoredSession in
-                restoredSession = state.session
+                restoredSession.logical = state.logicalState
             }
             indexBoardEditorDraft = state.editorDraft
         } else {
-            indexBoardRuntime.replacePersistedSession(state.session, for: scenario.id)
+            indexBoardRuntime.replacePersistedLogicalState(state.logicalState, for: scenario.id)
             indexBoardEditorDraft = nil
         }
     }

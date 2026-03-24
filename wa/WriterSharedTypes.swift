@@ -229,6 +229,72 @@ final class AppWindowState: ObservableObject {
     @Published var focusModeWindowBackgroundActive: Bool = false
 }
 
+struct IndexBoardCanvasDigestSnapshot: Equatable {
+    let contentHash: Int
+    let shortSummary: String
+    let updatedAt: Date
+}
+
+struct IndexBoardCanvasDerivedPayload {
+    let surfaceProjection: BoardSurfaceProjection
+    let projection: IndexBoardProjection
+    let cardsByID: [UUID: SceneCard]
+    let summaryByCardID: [UUID: IndexBoardResolvedSummary]
+}
+
+@MainActor
+final class IndexBoardCanvasDerivedCache: ObservableObject {
+    private var cachedProjectionSurfaceProjection: BoardSurfaceProjection?
+    private var cachedProjection: IndexBoardProjection?
+    private var cachedReferencedCardIDs: [UUID] = []
+    private var cachedCardsVersion: Int = -1
+    private var cachedSummaryRecordsByCardID: [UUID: IndexBoardCardSummaryRecord] = [:]
+    private var cachedDigestSnapshotsByCardID: [UUID: IndexBoardCanvasDigestSnapshot] = [:]
+    private var cachedCardsByID: [UUID: SceneCard] = [:]
+    private var cachedSummaryByCardID: [UUID: IndexBoardResolvedSummary] = [:]
+
+    func resolve(
+        surfaceProjection: BoardSurfaceProjection,
+        referencedCardIDs: [UUID],
+        cardsVersion: Int,
+        summaryRecordsByCardID: [UUID: IndexBoardCardSummaryRecord],
+        digestSnapshotsByCardID: [UUID: IndexBoardCanvasDigestSnapshot],
+        buildProjection: () -> IndexBoardProjection,
+        buildContent: () -> (
+            cardsByID: [UUID: SceneCard],
+            summaryByCardID: [UUID: IndexBoardResolvedSummary]
+        )
+    ) -> IndexBoardCanvasDerivedPayload {
+        if cachedProjectionSurfaceProjection != surfaceProjection || cachedProjection == nil {
+            cachedProjectionSurfaceProjection = surfaceProjection
+            cachedProjection = buildProjection()
+        }
+
+        let shouldRefreshContent =
+            cachedReferencedCardIDs != referencedCardIDs ||
+            cachedCardsVersion != cardsVersion ||
+            cachedSummaryRecordsByCardID != summaryRecordsByCardID ||
+            cachedDigestSnapshotsByCardID != digestSnapshotsByCardID
+
+        if shouldRefreshContent {
+            let nextContent = buildContent()
+            cachedReferencedCardIDs = referencedCardIDs
+            cachedCardsVersion = cardsVersion
+            cachedSummaryRecordsByCardID = summaryRecordsByCardID
+            cachedDigestSnapshotsByCardID = digestSnapshotsByCardID
+            cachedCardsByID = nextContent.cardsByID
+            cachedSummaryByCardID = nextContent.summaryByCardID
+        }
+
+        return IndexBoardCanvasDerivedPayload(
+            surfaceProjection: surfaceProjection,
+            projection: cachedProjection ?? buildProjection(),
+            cardsByID: cachedCardsByID,
+            summaryByCardID: cachedSummaryByCardID
+        )
+    }
+}
+
 struct MainCardRenderSettings: Equatable {
     let fontSize: CGFloat
     let appearance: String

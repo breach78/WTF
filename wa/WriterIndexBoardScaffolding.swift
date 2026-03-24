@@ -383,6 +383,7 @@ extension ScenarioWriterView {
                 sourceCardIDs: mergedIndexBoardSourceCardIDs(sourceCardIDs, persistedIDs: persistedSession.sourceCardIDs),
                 entrySnapshot: entrySnapshot,
                 viewport: persistedSession.viewport,
+                logical: persistedSession.logical,
                 presentation: persistedSession.presentation,
                 navigation: IndexBoardNavigationState()
             )
@@ -680,7 +681,9 @@ extension ScenarioWriterView {
     func resolvedIndexBoardSurfaceProjection(
         referenceSurfaceProjection: BoardSurfaceProjection? = nil,
         preferredLeadingParentCardID: UUID? = nil,
-        overridingGroupPositionsByParentID: [UUID: IndexBoardGridPosition] = [:]
+        overridingGroupPositionsByParentID: [UUID: IndexBoardGridPosition] = [:],
+        overridingDetachedPositionsByCardID: [UUID: IndexBoardGridPosition]? = nil,
+        overridingTempStrips: [IndexBoardTempStripState]? = nil
     ) -> BoardSurfaceProjection? {
         guard let session = activeIndexBoardSession else { return nil }
         let tempContainer = resolvedIndexBoardTempContainer()
@@ -800,7 +803,10 @@ extension ScenarioWriterView {
 
         let tempProvisionalParentGroups = provisionalParentGroups.filter(\.isTempGroup)
         let mainlineProvisionalParentGroups = provisionalParentGroups.filter { !$0.isTempGroup }
-        let detachedGridPositionByCardID = activeIndexBoardSession?.detachedGridPositionByCardID ?? [:]
+        let detachedGridPositionByCardID =
+            overridingDetachedPositionsByCardID
+            ?? activeIndexBoardSession?.detachedGridPositionByCardID
+            ?? [:]
         let maxGroupRow = provisionalParentGroups.map(\.origin.row).max() ?? 0
         let parkingRow = maxGroupRow + 2
         var nextParkingColumn = 0
@@ -814,7 +820,7 @@ extension ScenarioWriterView {
         }
 
         let resolvedTempStrips = resolvedIndexBoardTempStrips(
-            persistedStrips: session.tempStrips,
+            persistedStrips: overridingTempStrips ?? session.tempStrips,
             tempGroups: tempProvisionalParentGroups,
             detachedPositionsByCardID: rawDetachedPositionByCardID
         )
@@ -959,9 +965,9 @@ extension ScenarioWriterView {
         )
     }
 
-    func persistIndexBoardSurfacePresentation(_ surfaceProjection: BoardSurfaceProjection) {
-        guard isIndexBoardActive else { return }
-
+    func resolvedIndexBoardLogicalState(
+        from surfaceProjection: BoardSurfaceProjection
+    ) -> IndexBoardLogicalState {
         let groupPositions = Dictionary(
             uniqueKeysWithValues: surfaceProjection.parentGroups.compactMap { placement in
                 placement.parentCardID.map { ($0, placement.origin) }
@@ -973,11 +979,33 @@ extension ScenarioWriterView {
             detachedPositionsByCardID: detachedPositions
         )
 
-        indexBoardRuntime.updateSession(for: scenario.id, paneID: paneContextID) { session in
-            session.groupGridPositionByParentID = groupPositions
-            session.detachedGridPositionByCardID = detachedPositions
-            session.tempStrips = canonicalTempStrips
+        return IndexBoardLogicalState(
+            detachedGridPositionByCardID: detachedPositions,
+            groupGridPositionByParentID: groupPositions,
+            tempStrips: canonicalTempStrips
+        )
+    }
+
+    func applyIndexBoardLogicalState(
+        _ logicalState: IndexBoardLogicalState,
+        persist: Bool
+    ) {
+        guard isIndexBoardActive else { return }
+
+        indexBoardRuntime.updateSession(for: scenario.id, paneID: paneContextID, persist: false) { session in
+            session.logical = logicalState
         }
+
+        if persist {
+            indexBoardRuntime.schedulePersistCurrentLogicalState(for: scenario.id, paneID: paneContextID)
+        }
+    }
+
+    func persistIndexBoardSurfacePresentation(_ surfaceProjection: BoardSurfaceProjection) {
+        applyIndexBoardLogicalState(
+            resolvedIndexBoardLogicalState(from: surfaceProjection),
+            persist: true
+        )
     }
 
     private func resolvedLiveIndexBoardSourceCards(for session: IndexBoardSessionState) -> [SceneCard] {
@@ -1778,20 +1806,50 @@ extension ScenarioWriterView {
     @ViewBuilder
     func indexBoardCanvas(size: CGSize) -> some View {
         if let surfaceProjection = resolvedIndexBoardSurfaceProjection() {
-            let projection = resolvedIndexBoardProjection(from: surfaceProjection)
             let referencedCardIDs = Array(
                 Set(surfaceProjection.orderedCardIDs + surfaceProjection.parentGroups.compactMap(\.parentCardID))
-            )
-            let cardsByID = Dictionary(
+            ).sorted { $0.uuidString < $1.uuidString }
+            let storedSummaryRecords = store.indexBoardSummaryRecordsByScenarioID[scenario.id] ?? [:]
+            let referencedSummaryRecordsByCardID = Dictionary(
                 uniqueKeysWithValues: referencedCardIDs.compactMap { cardID in
-                    findCard(by: cardID).map { (cardID, $0) }
+                    storedSummaryRecords[cardID]?.sanitizedForStorage.map { (cardID, $0) }
                 }
             )
-            let summaryByCardID = Dictionary(
-                uniqueKeysWithValues: referencedCardIDs.compactMap { cardID in
-                    resolvedIndexBoardSummary(for: cardID).map { (cardID, $0) }
-                }
-            )
+            let referencedDigestSnapshotsByCardID = referencedCardIDs.reduce(
+                into: [UUID: IndexBoardCanvasDigestSnapshot]()
+            ) { partialResult, cardID in
+                guard let digest = aiCardDigestCache[cardID] else { return }
+                partialResult[cardID] = IndexBoardCanvasDigestSnapshot(
+                    contentHash: digest.contentHash,
+                    shortSummary: digest.shortSummary,
+                    updatedAt: digest.updatedAt
+                )
+            }
+            let derivedPayload = indexBoardCanvasDerivedCache.resolve(
+                surfaceProjection: surfaceProjection,
+                referencedCardIDs: referencedCardIDs,
+                cardsVersion: scenarioCardsVersion,
+                summaryRecordsByCardID: referencedSummaryRecordsByCardID,
+                digestSnapshotsByCardID: referencedDigestSnapshotsByCardID
+            ) {
+                resolvedIndexBoardProjection(from: surfaceProjection)
+            } buildContent: {
+                let cardsByID = Dictionary(
+                    uniqueKeysWithValues: referencedCardIDs.compactMap { cardID in
+                        findCard(by: cardID).map { (cardID, $0) }
+                    }
+                )
+                let summaryByCardID = Dictionary(
+                    uniqueKeysWithValues: referencedCardIDs.compactMap { cardID in
+                        resolvedIndexBoardSummary(for: cardID).map { (cardID, $0) }
+                    }
+                )
+                return (
+                    cardsByID: cardsByID,
+                    summaryByCardID: summaryByCardID
+                )
+            }
+            let projection = derivedPayload.projection
             let boardThemePreset = IndexBoardThemePreset(rawValue: indexBoardThemePresetID) ?? .currentDefault
             let zoomScale = clampedIndexBoardZoomScale
             let scrollOffset = activeIndexBoardSession?.scrollOffset ?? .zero
@@ -1799,9 +1857,9 @@ extension ScenarioWriterView {
             let revealCardID = activeIndexBoardSession?.pendingRevealCardID
             let revealRequestToken = activeIndexBoardSession?.revealRequestToken ?? 0
             IndexBoardPhaseThreeView(
-                surfaceProjection: surfaceProjection,
-                projection: projection,
-                sourceTitle: indexBoardSourceTitle(for: surfaceProjection.source.parentID),
+                surfaceProjection: derivedPayload.surfaceProjection,
+                projection: derivedPayload.projection,
+                sourceTitle: indexBoardSourceTitle(for: derivedPayload.surfaceProjection.source.parentID),
                 canvasSize: size,
                 theme: IndexBoardRenderTheme(
                     usesDarkAppearance: isDarkAppearanceActive,
@@ -1824,10 +1882,10 @@ extension ScenarioWriterView {
                     accentHex: boardThemePreset.lightAccentHex(fallback: cardActiveColorHex),
                     darkAccentHex: boardThemePreset.darkAccentHex(fallback: darkCardActiveColorHex)
                 ),
-                cardsByID: cardsByID,
+                cardsByID: derivedPayload.cardsByID,
                 activeCardID: activeCardID,
                 selectedCardIDs: selectedCardIDs,
-                summaryByCardID: summaryByCardID,
+                summaryByCardID: derivedPayload.summaryByCardID,
                 showsBackByCardID: showsBackByCardID,
                 zoomScale: zoomScale,
                 scrollOffset: scrollOffset,
@@ -1858,7 +1916,7 @@ extension ScenarioWriterView {
                     setIndexBoardParentGroupTemp(
                         parentCardID: parentCardID,
                         isTemp: isTemp,
-                        projection: projection
+                        projection: derivedPayload.projection
                     )
                 },
                 onSetCardColor: { cardID, hex in
