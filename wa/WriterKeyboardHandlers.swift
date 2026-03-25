@@ -10,10 +10,85 @@ extension ScenarioWriterView {
         let card: SceneCard
     }
 
+    private func orderedMainSiblingSearchIDs(
+        in level: [SceneCard],
+        around index: Int
+    ) -> [UUID] {
+        level.enumerated()
+            .filter { $0.offset != index }
+            .sorted { lhs, rhs in
+                let lhsDistance = abs(lhs.offset - index)
+                let rhsDistance = abs(rhs.offset - index)
+                if lhsDistance != rhsDistance {
+                    return lhsDistance < rhsDistance
+                }
+
+                let lhsBias = lhs.offset > index ? 0 : 1
+                let rhsBias = rhs.offset > index ? 0 : 1
+                if lhsBias != rhsBias {
+                    return lhsBias < rhsBias
+                }
+
+                return lhs.offset < rhs.offset
+            }
+            .map(\.element.id)
+    }
+
+    private func resolvedMainNavigationGraph() -> MainNavigationGraphSnapshot {
+        let cacheKey = MainNavigationGraphCacheKey(cardsVersion: scenario.cardsVersion)
+        if let cached = mainNavigationGraphCache,
+           cached.key == cacheKey {
+            return cached
+        }
+
+        let levels = resolvedLevelsWithParents().map(\.cards)
+        var locationByCardID: [UUID: (level: Int, index: Int)] = [:]
+        var upByCardID: [UUID: UUID] = [:]
+        var downByCardID: [UUID: UUID] = [:]
+        var leftByCardID: [UUID: UUID] = [:]
+        var siblingSearchOrderByCardID: [UUID: [UUID]] = [:]
+
+        for (levelIndex, cards) in levels.enumerated() {
+            for (index, card) in cards.enumerated() {
+                locationByCardID[card.id] = (levelIndex, index)
+                if index > 0 {
+                    upByCardID[card.id] = cards[index - 1].id
+                }
+                if index < cards.count - 1 {
+                    downByCardID[card.id] = cards[index + 1].id
+                }
+                if let parentID = card.parent?.id {
+                    leftByCardID[card.id] = parentID
+                }
+                siblingSearchOrderByCardID[card.id] = orderedMainSiblingSearchIDs(
+                    in: cards,
+                    around: index
+                )
+            }
+        }
+
+        let snapshot = MainNavigationGraphSnapshot(
+            key: cacheKey,
+            levels: levels,
+            locationByCardID: locationByCardID,
+            upByCardID: upByCardID,
+            downByCardID: downByCardID,
+            leftByCardID: leftByCardID,
+            siblingSearchOrderByCardID: siblingSearchOrderByCardID
+        )
+        mainNavigationGraphCache = snapshot
+        return snapshot
+    }
+
     private func resolvedMainNavigationContext(for cardID: UUID) -> MainNavigationContext? {
-        guard let location = scenario.cardLocationByID(cardID),
-              let currentLevel = resolvedMainUnfilteredLevel(at: location.level),
-              currentLevel.indices.contains(location.index) else {
+        let graph = resolvedMainNavigationGraph()
+        guard let location = graph.locationByCardID[cardID],
+              graph.levels.indices.contains(location.level) else {
+            return nil
+        }
+
+        let currentLevel = graph.levels[location.level]
+        guard currentLevel.indices.contains(location.index) else {
             return nil
         }
 
@@ -24,7 +99,7 @@ extension ScenarioWriterView {
             levelIndex: location.level,
             cardIndex: location.index,
             currentLevel: currentLevel,
-            nextLevel: resolvedMainUnfilteredLevel(at: location.level + 1) ?? [],
+            nextLevel: graph.levels.indices.contains(location.level + 1) ? graph.levels[location.level + 1] : [],
             card: card
         )
     }
@@ -782,6 +857,11 @@ extension ScenarioWriterView {
         clearMainBoundaryChildRightArm()
         clearMainNoChildRightArm()
         if isShiftSelection && press.phase == .down {
+            MainWorkspaceNavigationDiagnostics.shared.beginFocusIntent(
+                source: "mainBoundary",
+                direction: "up",
+                isRepeat: isRepeat
+            )
             applyMainBoundaryShiftSelection(
                 from: editingCard,
                 to: target,
@@ -794,6 +874,11 @@ extension ScenarioWriterView {
             )
             return true
         }
+        MainWorkspaceNavigationDiagnostics.shared.beginFocusIntent(
+            source: "mainBoundary",
+            direction: "up",
+            isRepeat: isRepeat
+        )
         let targetLength = (target.content as NSString).length
         switchMainEditingTarget(
             to: target,
@@ -848,6 +933,11 @@ extension ScenarioWriterView {
         clearMainBoundaryChildRightArm()
         clearMainNoChildRightArm()
         if isShiftSelection && press.phase == .down {
+            MainWorkspaceNavigationDiagnostics.shared.beginFocusIntent(
+                source: "mainBoundary",
+                direction: "down",
+                isRepeat: isRepeat
+            )
             applyMainBoundaryShiftSelection(
                 from: editingCard,
                 to: target,
@@ -860,6 +950,11 @@ extension ScenarioWriterView {
             )
             return true
         }
+        MainWorkspaceNavigationDiagnostics.shared.beginFocusIntent(
+            source: "mainBoundary",
+            direction: "down",
+            isRepeat: isRepeat
+        )
         switchMainEditingTarget(
             to: target,
             caretLocation: 0,
@@ -894,12 +989,22 @@ extension ScenarioWriterView {
         clearMainBoundaryChildRightArm()
         clearMainNoChildRightArm()
         if isShiftSelection {
+            MainWorkspaceNavigationDiagnostics.shared.beginFocusIntent(
+                source: "mainBoundary",
+                direction: "left",
+                isRepeat: press.phase == .repeat
+            )
             applyMainBoundaryShiftSelection(from: editingCard, to: parentCard, in: currentLevel)
             return true
         }
         if isMainBoundaryParentLeftArmed(for: editingCard.id) {
             clearMainBoundaryParentLeftArm()
             let parentLength = (parentCard.content as NSString).length
+            MainWorkspaceNavigationDiagnostics.shared.beginFocusIntent(
+                source: "mainBoundary",
+                direction: "left",
+                isRepeat: press.phase == .repeat
+            )
             switchMainEditingTarget(
                 to: parentCard,
                 caretLocation: parentLength,
@@ -947,6 +1052,11 @@ extension ScenarioWriterView {
                 allowDoublePressFallback: true
             )
             if case .target(let target) = result {
+                MainWorkspaceNavigationDiagnostics.shared.beginFocusIntent(
+                    source: "mainBoundary",
+                    direction: "right",
+                    isRepeat: press.phase == .repeat
+                )
                 applyMainBoundaryShiftSelection(from: editingCard, to: target, in: currentLevel)
             }
             return true
@@ -962,6 +1072,11 @@ extension ScenarioWriterView {
                 allowDoublePressFallback: true
             )
             if case .target(let target) = result {
+                MainWorkspaceNavigationDiagnostics.shared.beginFocusIntent(
+                    source: "mainBoundary",
+                    direction: "right",
+                    isRepeat: press.phase == .repeat
+                )
                 switchMainEditingTarget(
                     to: target,
                     caretLocation: 0,
@@ -1232,10 +1347,27 @@ extension ScenarioWriterView {
     }
 
     func preferredMainNavigationChild(for card: SceneCard, matching category: String?) -> SceneCard? {
-        if let matched = preferredChild(for: card, matching: category) {
-            return matched
+        let cacheKey = MainPreferredNavigationChildCacheKey(
+            cardsVersion: scenario.cardsVersion,
+            cardID: card.id,
+            rememberedChildID: card.lastSelectedChildID,
+            category: category
+        )
+        if let cached = mainPreferredNavigationChildCache[cacheKey] {
+            return cached.cardID.flatMap { findCard(by: $0) }
         }
-        return preferredChild(for: card)
+
+        let resolvedID: UUID?
+        if let matched = preferredChild(for: card, matching: category) {
+            resolvedID = matched.id
+        } else {
+            resolvedID = preferredChild(for: card)?.id
+        }
+        if mainPreferredNavigationChildCache.count >= 2048 {
+            mainPreferredNavigationChildCache.removeAll(keepingCapacity: true)
+        }
+        mainPreferredNavigationChildCache[cacheKey] = MainPreferredNavigationChildCacheEntry(cardID: resolvedID)
+        return resolvedID.flatMap { findCard(by: $0) }
     }
 
     func resolvedMainUnfilteredLevel(at levelIndex: Int) -> [SceneCard]? {
@@ -1301,6 +1433,26 @@ extension ScenarioWriterView {
     ) -> SceneCard? {
         guard level.indices.contains(index) else { return nil }
         guard level.count > 1 else { return nil }
+
+        if activeIndexBoardSession == nil {
+            let sourceCard = level[index]
+            let graph = resolvedMainNavigationGraph()
+            let nextLevelIDs = Set(nextLevel.map(\.id))
+            if let orderedSiblingIDs = graph.siblingSearchOrderByCardID[sourceCard.id] {
+                for siblingID in orderedSiblingIDs {
+                    guard let sibling = findCard(by: siblingID) else { continue }
+                    if let category, sibling.category != category {
+                        continue
+                    }
+                    guard let preferred = preferredMainNavigationChild(for: sibling, matching: category),
+                          nextLevelIDs.contains(preferred.id) else {
+                        continue
+                    }
+                    return preferred
+                }
+                return nil
+            }
+        }
 
         let rankedLevel = level.enumerated().filter { _, item in
             category == nil || item.category == category
@@ -1370,6 +1522,19 @@ extension ScenarioWriterView {
         case down
         case left
         case right
+
+        var diagnosticsLabel: String {
+            switch self {
+            case .up:
+                return "up"
+            case .down:
+                return "down"
+            case .left:
+                return "left"
+            case .right:
+                return "right"
+            }
+        }
     }
 
     func resolvedMainRightTarget(
@@ -1422,6 +1587,11 @@ extension ScenarioWriterView {
         guard let id = activeCardID else {
             if let first = scenario.rootCards.first {
                 clearMainBoundaryFeedbackGate()
+                MainWorkspaceNavigationDiagnostics.shared.beginFocusIntent(
+                    source: "mainArrow",
+                    direction: direction.diagnosticsLabel,
+                    isRepeat: isRepeat
+                )
                 changeActiveCard(to: first, deferToMainAsync: false)
                 selectedCardIDs = [first.id]
                 if seedRangeAnchorWhenNoActive && isShiftPressed {
@@ -1473,6 +1643,11 @@ extension ScenarioWriterView {
                 return true
             }
             clearMainBoundaryFeedbackGate()
+            MainWorkspaceNavigationDiagnostics.shared.beginFocusIntent(
+                source: "mainArrow",
+                direction: direction.diagnosticsLabel,
+                isRepeat: isRepeat
+            )
             changeActiveCard(to: target, deferToMainAsync: false)
             if isShiftPressed {
                 updateKeyboardRangeSelection(
@@ -1507,6 +1682,11 @@ extension ScenarioWriterView {
                     return true
                 }
                 clearMainBoundaryFeedbackGate()
+                MainWorkspaceNavigationDiagnostics.shared.beginFocusIntent(
+                    source: "mainArrow",
+                    direction: direction.diagnosticsLabel,
+                    isRepeat: isRepeat
+                )
                 changeActiveCard(to: target, deferToMainAsync: false)
                 if isShiftPressed {
                     updateKeyboardRangeSelection(from: card, to: target, in: currentLevel)
@@ -1536,13 +1716,18 @@ extension ScenarioWriterView {
                 keyCode: 125,
                 isRepeat: isRepeat,
                 isRapidBurst: isRapidBurst
-            ) {
-                return true
-            }
-            clearMainBoundaryFeedbackGate()
-            changeActiveCard(to: target, deferToMainAsync: false)
-            if isShiftPressed {
-                updateKeyboardRangeSelection(
+                ) {
+                    return true
+                }
+                clearMainBoundaryFeedbackGate()
+                MainWorkspaceNavigationDiagnostics.shared.beginFocusIntent(
+                    source: "mainArrow",
+                    direction: direction.diagnosticsLabel,
+                    isRepeat: isRepeat
+                )
+                changeActiveCard(to: target, deferToMainAsync: false)
+                if isShiftPressed {
+                    updateKeyboardRangeSelection(
                     from: card,
                     to: target,
                     in: resolvedMainSelectionLevel(
@@ -1569,6 +1754,11 @@ extension ScenarioWriterView {
             )
             if case .target(let target) = result {
                 clearMainBoundaryFeedbackGate()
+                MainWorkspaceNavigationDiagnostics.shared.beginFocusIntent(
+                    source: "mainArrow",
+                    direction: direction.diagnosticsLabel,
+                    isRepeat: isRepeat
+                )
                 changeActiveCard(to: target, deferToMainAsync: false)
                 selectedCardIDs = [target.id]
                 clearKeyboardRangeSelectionAnchor()
@@ -1583,6 +1773,11 @@ extension ScenarioWriterView {
             clearMainNoChildRightArm()
             guard let parent = card.parent else { return false }
             clearMainBoundaryFeedbackGate()
+            MainWorkspaceNavigationDiagnostics.shared.beginFocusIntent(
+                source: "mainArrow",
+                direction: direction.diagnosticsLabel,
+                isRepeat: isRepeat
+            )
             changeActiveCard(to: parent, deferToMainAsync: false)
             selectedCardIDs = [parent.id]
             clearKeyboardRangeSelectionAnchor()
@@ -1611,6 +1806,7 @@ extension ScenarioWriterView {
             seedRangeAnchorWhenNoActive: seedRangeAnchorWhenNoActive
         )
         if handled {
+            noteMainArrowNavigationActivity()
             registerHandledMainArrowNavigation(
                 direction: direction,
                 previousActiveID: previousActiveID,

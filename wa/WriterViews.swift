@@ -501,6 +501,16 @@ struct ScenarioWriterView: View {
         nonmutating set { interactionRuntime.resolvedLevelsWithParentsCache = newValue }
     }
 
+    var mainNavigationGraphCache: MainNavigationGraphSnapshot? {
+        get { interactionRuntime.mainNavigationGraphCache }
+        nonmutating set { interactionRuntime.mainNavigationGraphCache = newValue }
+    }
+
+    var mainPreferredNavigationChildCache: [MainPreferredNavigationChildCacheKey: MainPreferredNavigationChildCacheEntry] {
+        get { interactionRuntime.mainPreferredNavigationChildCache }
+        nonmutating set { interactionRuntime.mainPreferredNavigationChildCache = newValue }
+    }
+
     var displayedMainLevelsCacheKey: DisplayedMainLevelsCacheKey? {
         get { interactionRuntime.displayedMainLevelsCacheKey }
         nonmutating set { interactionRuntime.displayedMainLevelsCacheKey = newValue }
@@ -559,6 +569,21 @@ struct ScenarioWriterView: View {
     var mainArrowNavigationSettleWorkItem: DispatchWorkItem? {
         get { interactionRuntime.mainArrowNavigationSettleWorkItem }
         nonmutating set { interactionRuntime.mainArrowNavigationSettleWorkItem = newValue }
+    }
+
+    var mainLastArrowNavigationAt: Date {
+        get { interactionRuntime.mainLastArrowNavigationAt }
+        nonmutating set { interactionRuntime.mainLastArrowNavigationAt = newValue }
+    }
+
+    var pendingCommittedMainActiveCardID: UUID? {
+        get { interactionRuntime.pendingCommittedMainActiveCardID }
+        nonmutating set { interactionRuntime.pendingCommittedMainActiveCardID = newValue }
+    }
+
+    var deferredMainActiveSideEffectsWorkItem: DispatchWorkItem? {
+        get { interactionRuntime.deferredMainActiveSideEffectsWorkItem }
+        nonmutating set { interactionRuntime.deferredMainActiveSideEffectsWorkItem = newValue }
     }
 
     var mainCaretLocationByCardID: [UUID: Int] {
@@ -1086,6 +1111,10 @@ struct ScenarioWriterView: View {
         return scenario.rootCards.contains { $0.id == id }
     }
 
+    var mainArrowNavigationQuietWindow: TimeInterval {
+        0.08
+    }
+
     // MARK: - Body
 
     var body: some View {
@@ -1332,6 +1361,10 @@ struct ScenarioWriterView: View {
     }
 
     func handleWorkspaceAppear() {
+        MainWorkspaceNavigationDiagnostics.shared.reset(
+            scenarioID: scenario.id,
+            cardsVersion: scenario.cardsVersion
+        )
         mainCanvasScrollCoordinator.reset()
         syncMainCanvasInteractionState()
         syncScenarioObservedState()
@@ -1405,18 +1438,83 @@ struct ScenarioWriterView: View {
         }
     }
 
+    func isMainArrowNavigationBurstActive() -> Bool {
+        Date().timeIntervalSince(mainLastArrowNavigationAt) < mainArrowNavigationQuietWindow
+    }
+
+    func cancelDeferredMainActiveSideEffects() {
+        deferredMainActiveSideEffectsWorkItem?.cancel()
+        deferredMainActiveSideEffectsWorkItem = nil
+        pendingCommittedMainActiveCardID = nil
+    }
+
+    func applyCommittedMainActiveSideEffects(for cardID: UUID?) {
+        pendingCommittedMainActiveCardID = nil
+        deferredMainActiveSideEffectsWorkItem?.cancel()
+        deferredMainActiveSideEffectsWorkItem = nil
+
+        if let cardID, findCard(by: cardID) != nil {
+            if editingCardID == nil && !showFocusMode {
+                persistLastFocusSnapshot(cardID: cardID, isEditing: false, inFocusMode: false)
+            }
+        }
+
+        if trailingWorkspacePanelMode() == .hidden,
+           linkedCardsFilterEnabled,
+           let cardID,
+           findCard(by: cardID) != nil {
+            linkedCardAnchorID = cardID
+        }
+    }
+
+    func scheduleDeferredMainActiveSideEffects(for cardID: UUID?) {
+        pendingCommittedMainActiveCardID = cardID
+        guard deferredMainActiveSideEffectsWorkItem == nil else { return }
+
+        let workItem = DispatchWorkItem {
+            defer { deferredMainActiveSideEffectsWorkItem = nil }
+            guard isMainArrowNavigationBurstActive() else {
+                applyCommittedMainActiveSideEffects(for: pendingCommittedMainActiveCardID)
+                return
+            }
+            let quietTime = Date().timeIntervalSince(mainLastArrowNavigationAt)
+            let remainingDelay = max(0.01, mainArrowNavigationQuietWindow - quietTime)
+            scheduleDeferredMainActiveSideEffectsCheck(after: remainingDelay)
+        }
+        deferredMainActiveSideEffectsWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + mainArrowNavigationQuietWindow, execute: workItem)
+    }
+
+    func scheduleDeferredMainActiveSideEffectsCheck(after delay: TimeInterval) {
+        let workItem = DispatchWorkItem {
+            defer { deferredMainActiveSideEffectsWorkItem = nil }
+            guard isMainArrowNavigationBurstActive() else {
+                applyCommittedMainActiveSideEffects(for: pendingCommittedMainActiveCardID)
+                return
+            }
+            let quietTime = Date().timeIntervalSince(mainLastArrowNavigationAt)
+            let remainingDelay = max(0.01, mainArrowNavigationQuietWindow - quietTime)
+            scheduleDeferredMainActiveSideEffectsCheck(after: remainingDelay)
+        }
+        deferredMainActiveSideEffectsWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: workItem)
+    }
+
     func handleActiveCardIDChange(_ newID: UUID?) {
         mainColumnLastFocusRequestByKey = [:]
         if let newID, scenario.rootCards.contains(where: { $0.id == newID }) {
             mainColumnViewportRestoreUntil = Date().addingTimeInterval(0.35)
         }
-        if let newID, findCard(by: newID) != nil {
-            if editingCardID == nil && !showFocusMode {
-                persistLastFocusSnapshot(cardID: newID, isEditing: false, inFocusMode: false)
-            }
+        if isMainArrowNavigationBurstActive() && editingCardID == nil && !showFocusMode {
+            scheduleDeferredMainActiveSideEffects(for: newID)
+        } else {
+            applyCommittedMainActiveSideEffects(for: newID)
         }
         syncSplitPaneActiveCardState(newID)
-        if linkedCardsFilterEnabled, let newID, findCard(by: newID) != nil {
+        if trailingWorkspacePanelMode() != .hidden,
+           linkedCardsFilterEnabled,
+           let newID,
+           findCard(by: newID) != nil {
             linkedCardAnchorID = newID
         }
         guard acceptsKeyboardInput else { return }
@@ -1503,6 +1601,12 @@ struct ScenarioWriterView: View {
     }
 
     func handleWorkspaceDisappear() {
+        cancelDeferredMainActiveSideEffects()
+        MainWorkspaceNavigationDiagnostics.shared.emitSummary(
+            reason: "workspaceDisappear",
+            activeCardID: activeCardID,
+            cardsVersion: scenario.cardsVersion
+        )
         teardownIndexBoardIfNeeded(restoreEntryState: false)
         persistCurrentFocusSnapshotIfPossible()
         persistCurrentViewportSnapshotIfPossible()

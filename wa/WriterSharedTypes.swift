@@ -2,6 +2,7 @@ import SwiftUI
 import AppKit
 import AVFoundation
 import Combine
+import OSLog
 import QuartzCore
 
 let focusModeBodySafetyInset: CGFloat = 8
@@ -162,6 +163,31 @@ struct DisplayedMainLevelsCacheKey: Equatable {
     let isActiveCardRoot: Bool
 }
 
+struct MainNavigationGraphCacheKey: Equatable {
+    let cardsVersion: Int
+}
+
+struct MainNavigationGraphSnapshot {
+    let key: MainNavigationGraphCacheKey
+    let levels: [[SceneCard]]
+    let locationByCardID: [UUID: (level: Int, index: Int)]
+    let upByCardID: [UUID: UUID]
+    let downByCardID: [UUID: UUID]
+    let leftByCardID: [UUID: UUID]
+    let siblingSearchOrderByCardID: [UUID: [UUID]]
+}
+
+struct MainPreferredNavigationChildCacheKey: Hashable {
+    let cardsVersion: Int
+    let cardID: UUID
+    let rememberedChildID: UUID?
+    let category: String?
+}
+
+struct MainPreferredNavigationChildCacheEntry {
+    let cardID: UUID?
+}
+
 struct MainColumnFocusRequest: Equatable {
     let targetID: UUID
     let prefersTopAnchor: Bool
@@ -265,6 +291,8 @@ final class WriterInteractionRuntime {
     var mainVerticalScrollAuthorityByViewportKey: [String: MainVerticalScrollAuthority] = [:]
     var resolvedLevelsWithParentsVersion: Int = -1
     var resolvedLevelsWithParentsCache: [LevelData] = []
+    var mainNavigationGraphCache: MainNavigationGraphSnapshot? = nil
+    var mainPreferredNavigationChildCache: [MainPreferredNavigationChildCacheKey: MainPreferredNavigationChildCacheEntry] = [:]
     var displayedMainLevelsCacheKey: DisplayedMainLevelsCacheKey? = nil
     var displayedMainLevelsCache: [LevelData] = []
     var displayedMainCardLocationByIDCache: [UUID: (level: Int, index: Int)] = [:]
@@ -277,6 +305,9 @@ final class WriterInteractionRuntime {
     var mainColumnViewportCaptureSuspendedUntil: Date = .distantPast
     var mainColumnViewportRestoreUntil: Date = .distantPast
     var mainArrowNavigationSettleWorkItem: DispatchWorkItem? = nil
+    var mainLastArrowNavigationAt: Date = .distantPast
+    var pendingCommittedMainActiveCardID: UUID? = nil
+    var deferredMainActiveSideEffectsWorkItem: DispatchWorkItem? = nil
     var mainCaretLocationByCardID: [UUID: Int] = [:]
     var mainLineSpacingAppliedCardID: UUID? = nil
     var mainLineSpacingAppliedValue: CGFloat = -1
@@ -438,6 +469,236 @@ final class MainCanvasViewState: ObservableObject {
             visibleLevel: visibleLevel,
             forceSemantic: forceSemantic,
             reason: reason
+        )
+    }
+}
+
+private struct MainWorkspaceNavigationTimingMetric {
+    var count = 0
+    var totalDuration: CFTimeInterval = 0
+    var maxDuration: CFTimeInterval = 0
+
+    mutating func record(_ duration: CFTimeInterval) {
+        let clampedDuration = max(0, duration)
+        count += 1
+        totalDuration += clampedDuration
+        maxDuration = max(maxDuration, clampedDuration)
+    }
+
+    var averageMilliseconds: Double {
+        guard count > 0 else { return 0 }
+        return (totalDuration / Double(count)) * 1000
+    }
+
+    var maxMilliseconds: Double {
+        maxDuration * 1000
+    }
+}
+
+@MainActor
+final class MainWorkspaceNavigationDiagnostics {
+    private struct Session {
+        let scenarioID: UUID
+        let cardsVersionAtStart: Int
+        let startedAt: Date
+        let startedTimestamp: CFTimeInterval
+        var focusIntentCount = 0
+        var repeatFocusIntentCount = 0
+        var boundaryFocusIntentCount = 0
+        var focusIntentToRelationTiming = MainWorkspaceNavigationTimingMetric()
+        var relationSyncTiming = MainWorkspaceNavigationTimingMetric()
+        var relationSyncCacheHitCount = 0
+        var relationResetCount = 0
+        var layoutResolveTiming = MainWorkspaceNavigationTimingMetric()
+        var layoutResolveCacheHitCount = 0
+        var layoutResolveCacheMissCount = 0
+        var layoutResolveCardCountTotal = 0
+        var scrollTargetResolveTiming = MainWorkspaceNavigationTimingMetric()
+        var scrollTargetObservedCount = 0
+        var scrollTargetPredictedCount = 0
+        var scrollTargetMissCount = 0
+        var verticalScrollCount = 0
+        var verticalAnimatedScrollCount = 0
+        var verticalScrollFailureCount = 0
+        var horizontalScrollCount = 0
+        var horizontalAnimatedScrollCount = 0
+        var horizontalScrollFailureCount = 0
+        var bottomRevealCount = 0
+        var lastFocusIntentStartedAt: CFTimeInterval? = nil
+    }
+
+    static let shared = MainWorkspaceNavigationDiagnostics()
+
+    private let logger = Logger(
+        subsystem: Bundle.main.bundleIdentifier ?? "com.riwoong.wa",
+        category: "MainWorkspaceNavigation"
+    )
+
+    private var session: Session? = nil
+
+    private init() {}
+
+    private var isEnabled: Bool {
+#if DEBUG
+        true
+#else
+        ProcessInfo.processInfo.environment["WA_MAIN_WORKSPACE_DIAGNOSTICS"] == "1"
+#endif
+    }
+
+    func reset(scenarioID: UUID, cardsVersion: Int) {
+        guard isEnabled else { return }
+        session = Session(
+            scenarioID: scenarioID,
+            cardsVersionAtStart: cardsVersion,
+            startedAt: Date(),
+            startedTimestamp: CACurrentMediaTime()
+        )
+        logger.notice(
+            "session_start scenario=\(scenarioID.uuidString, privacy: .public) cards_version=\(cardsVersion)"
+        )
+    }
+
+    func beginFocusIntent(
+        source: String,
+        direction: String,
+        isRepeat: Bool
+    ) {
+        guard isEnabled, var session else { return }
+        session.focusIntentCount += 1
+        if isRepeat {
+            session.repeatFocusIntentCount += 1
+        }
+        if source == "mainBoundary" {
+            session.boundaryFocusIntentCount += 1
+        }
+        session.lastFocusIntentStartedAt = CACurrentMediaTime()
+        self.session = session
+        logger.debug(
+            "focus_intent source=\(source, privacy: .public) direction=\(direction, privacy: .public) repeat=\(isRepeat)"
+        )
+    }
+
+    func recordRelationSync(
+        duration: CFTimeInterval,
+        cacheHit: Bool,
+        resetToEmpty: Bool
+    ) {
+        guard isEnabled, var session else { return }
+        session.relationSyncTiming.record(duration)
+        if cacheHit {
+            session.relationSyncCacheHitCount += 1
+        }
+        if resetToEmpty {
+            session.relationResetCount += 1
+        }
+        if let intentStartedAt = session.lastFocusIntentStartedAt {
+            session.focusIntentToRelationTiming.record(CACurrentMediaTime() - intentStartedAt)
+            session.lastFocusIntentStartedAt = nil
+        }
+        self.session = session
+    }
+
+    func recordLayoutResolve(
+        duration: CFTimeInterval,
+        cacheHit: Bool,
+        cardCount: Int
+    ) {
+        guard isEnabled, var session else { return }
+        session.layoutResolveTiming.record(duration)
+        session.layoutResolveCardCountTotal += max(0, cardCount)
+        if cacheHit {
+            session.layoutResolveCacheHitCount += 1
+        } else {
+            session.layoutResolveCacheMissCount += 1
+        }
+        self.session = session
+    }
+
+    func recordScrollTargetResolve(
+        duration: CFTimeInterval,
+        usedObservedFrame: Bool,
+        resolved: Bool
+    ) {
+        guard isEnabled, var session else { return }
+        session.scrollTargetResolveTiming.record(duration)
+        if resolved {
+            if usedObservedFrame {
+                session.scrollTargetObservedCount += 1
+            } else {
+                session.scrollTargetPredictedCount += 1
+            }
+        } else {
+            session.scrollTargetMissCount += 1
+        }
+        self.session = session
+    }
+
+    func recordVerticalFocusScroll(animated: Bool, success: Bool) {
+        guard isEnabled, var session else { return }
+        session.verticalScrollCount += 1
+        if animated {
+            session.verticalAnimatedScrollCount += 1
+        }
+        if !success {
+            session.verticalScrollFailureCount += 1
+        }
+        self.session = session
+    }
+
+    func recordHorizontalScroll(animated: Bool, success: Bool) {
+        guard isEnabled, var session else { return }
+        session.horizontalScrollCount += 1
+        if animated {
+            session.horizontalAnimatedScrollCount += 1
+        }
+        if !success {
+            session.horizontalScrollFailureCount += 1
+        }
+        self.session = session
+    }
+
+    func recordBottomReveal() {
+        guard isEnabled, var session else { return }
+        session.bottomRevealCount += 1
+        self.session = session
+    }
+
+    func emitSummary(
+        reason: String,
+        activeCardID: UUID?,
+        cardsVersion: Int
+    ) {
+        guard isEnabled, let session else { return }
+        let duration = max(0.001, CACurrentMediaTime() - session.startedTimestamp)
+        let focusRate = Double(session.focusIntentCount) / duration
+        let averageLayoutCardCount: Double
+        if session.layoutResolveTiming.count > 0 {
+            averageLayoutCardCount = Double(session.layoutResolveCardCountTotal) / Double(session.layoutResolveTiming.count)
+        } else {
+            averageLayoutCardCount = 0
+        }
+
+        logger.notice(
+            """
+            session_summary reason=\(reason, privacy: .public) scenario=\(session.scenarioID.uuidString, privacy: .public) \
+            active_card=\(activeCardID?.uuidString ?? "nil", privacy: .public) cards_version_start=\(session.cardsVersionAtStart) \
+            cards_version_end=\(cardsVersion) duration_s=\(String(format: "%.3f", duration), privacy: .public) \
+            focus_count=\(session.focusIntentCount) repeat_focus_count=\(session.repeatFocusIntentCount) boundary_focus_count=\(session.boundaryFocusIntentCount) \
+            focus_rate_per_s=\(String(format: "%.2f", focusRate), privacy: .public) focus_to_relation_avg_ms=\(String(format: "%.3f", session.focusIntentToRelationTiming.averageMilliseconds), privacy: .public) \
+            focus_to_relation_max_ms=\(String(format: "%.3f", session.focusIntentToRelationTiming.maxMilliseconds), privacy: .public) \
+            relation_count=\(session.relationSyncTiming.count) relation_avg_ms=\(String(format: "%.3f", session.relationSyncTiming.averageMilliseconds), privacy: .public) \
+            relation_max_ms=\(String(format: "%.3f", session.relationSyncTiming.maxMilliseconds), privacy: .public) relation_cache_hits=\(session.relationSyncCacheHitCount) \
+            relation_resets=\(session.relationResetCount) layout_count=\(session.layoutResolveTiming.count) layout_cache_hits=\(session.layoutResolveCacheHitCount) \
+            layout_cache_misses=\(session.layoutResolveCacheMissCount) layout_avg_ms=\(String(format: "%.3f", session.layoutResolveTiming.averageMilliseconds), privacy: .public) \
+            layout_max_ms=\(String(format: "%.3f", session.layoutResolveTiming.maxMilliseconds), privacy: .public) layout_avg_cards=\(String(format: "%.2f", averageLayoutCardCount), privacy: .public) \
+            target_resolve_count=\(session.scrollTargetResolveTiming.count) target_observed=\(session.scrollTargetObservedCount) target_predicted=\(session.scrollTargetPredictedCount) \
+            target_miss=\(session.scrollTargetMissCount) target_avg_ms=\(String(format: "%.3f", session.scrollTargetResolveTiming.averageMilliseconds), privacy: .public) \
+            target_max_ms=\(String(format: "%.3f", session.scrollTargetResolveTiming.maxMilliseconds), privacy: .public) vertical_scroll_count=\(session.verticalScrollCount) \
+            vertical_animated_count=\(session.verticalAnimatedScrollCount) vertical_scroll_failures=\(session.verticalScrollFailureCount) \
+            horizontal_scroll_count=\(session.horizontalScrollCount) horizontal_animated_count=\(session.horizontalAnimatedScrollCount) \
+            horizontal_scroll_failures=\(session.horizontalScrollFailureCount) bottom_reveal_count=\(session.bottomRevealCount)
+            """
         )
     }
 }

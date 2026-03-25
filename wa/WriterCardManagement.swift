@@ -268,10 +268,20 @@ extension ScenarioWriterView {
         mainArrowNavigationSettleWorkItem = nil
     }
 
-    func scheduleMainArrowNavigationSettle() {
-        cancelMainArrowNavigationSettle()
+    func noteMainArrowNavigationActivity() {
+        mainLastArrowNavigationAt = Date()
+    }
+
+    private func scheduleMainArrowNavigationSettleCheck(after delay: TimeInterval) {
         let workItem = DispatchWorkItem {
             defer { mainArrowNavigationSettleWorkItem = nil }
+            let quietInterval = Date().timeIntervalSince(mainLastArrowNavigationAt)
+            if quietInterval < mainArrowNavigationQuietWindow {
+                let remainingDelay = max(0.01, mainArrowNavigationQuietWindow - quietInterval)
+                scheduleMainArrowNavigationSettleCheck(after: remainingDelay)
+                return
+            }
+
             guard acceptsKeyboardInput else { return }
             guard !showFocusMode else { return }
             guard !isPreviewingHistory else { return }
@@ -288,7 +298,14 @@ extension ScenarioWriterView {
             mainNavigationSettleTick += 1
         }
         mainArrowNavigationSettleWorkItem = workItem
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08, execute: workItem)
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: workItem)
+    }
+
+    func scheduleMainArrowNavigationSettle() {
+        if mainArrowNavigationSettleWorkItem != nil {
+            return
+        }
+        scheduleMainArrowNavigationSettleCheck(after: mainArrowNavigationQuietWindow)
     }
 
     @discardableResult
@@ -1281,22 +1298,34 @@ extension ScenarioWriterView {
         viewportHeight: CGFloat,
         anchorY: CGFloat
     ) -> CGFloat? {
+        let measurementStart = CACurrentMediaTime()
+        let observedFrame = observedMainColumnTargetFrame(
+            viewportKey: viewportKey,
+            targetID: targetID
+        )
         let frame =
-            observedMainColumnTargetFrame(
-                viewportKey: viewportKey,
-                targetID: targetID
-            ) ??
+            observedFrame ??
             predictedMainColumnTargetFrame(
                 cards: cards,
                 targetID: targetID,
                 viewportHeight: viewportHeight
             )
         guard let frame else {
+            MainWorkspaceNavigationDiagnostics.shared.recordScrollTargetResolve(
+                duration: CACurrentMediaTime() - measurementStart,
+                usedObservedFrame: observedFrame != nil,
+                resolved: false
+            )
             return nil
         }
 
         let clampedAnchorY = min(max(0, anchorY), 1)
         let targetAnchorY = frame.minY + (frame.height * clampedAnchorY)
+        MainWorkspaceNavigationDiagnostics.shared.recordScrollTargetResolve(
+            duration: CACurrentMediaTime() - measurementStart,
+            usedObservedFrame: observedFrame != nil,
+            resolved: true
+        )
         return targetAnchorY - (viewportHeight * clampedAnchorY)
     }
 
@@ -1410,9 +1439,17 @@ extension ScenarioWriterView {
             viewportKey: viewportKey,
             targetID: targetID
         ) != nil else {
+            MainWorkspaceNavigationDiagnostics.shared.recordVerticalFocusScroll(
+                animated: animated,
+                success: false
+            )
             return false
         }
         guard let scrollView = mainCanvasScrollCoordinator.scrollView(for: viewportKey) else {
+            MainWorkspaceNavigationDiagnostics.shared.recordVerticalFocusScroll(
+                animated: animated,
+                success: false
+            )
             return false
         }
         let visible = scrollView.documentVisibleRect
@@ -1424,6 +1461,10 @@ extension ScenarioWriterView {
             viewportHeight: resolvedViewportHeight,
             anchorY: anchorY
         ) else {
+            MainWorkspaceNavigationDiagnostics.shared.recordVerticalFocusScroll(
+                animated: animated,
+                success: false
+            )
             return false
         }
 
@@ -1432,7 +1473,13 @@ extension ScenarioWriterView {
         let targetReachable = maxY + 0.5 >= targetOffsetY
 
         if animated {
-            guard targetReachable || targetOffsetY <= 0.5 else { return false }
+            guard targetReachable || targetOffsetY <= 0.5 else {
+                MainWorkspaceNavigationDiagnostics.shared.recordVerticalFocusScroll(
+                    animated: true,
+                    success: false
+                )
+                return false
+            }
             let resolvedTargetY = CaretScrollCoordinator.resolvedVerticalTargetY(
                 visibleRect: visible,
                 targetY: targetOffsetY,
@@ -1440,7 +1487,13 @@ extension ScenarioWriterView {
                 maxY: maxY,
                 snapToPixel: true
             )
-            guard abs(resolvedTargetY - visible.origin.y) > 0.5 else { return true }
+            guard abs(resolvedTargetY - visible.origin.y) > 0.5 else {
+                MainWorkspaceNavigationDiagnostics.shared.recordVerticalFocusScroll(
+                    animated: true,
+                    success: true
+                )
+                return true
+            }
             let appliedDuration = CaretScrollCoordinator.resolvedVerticalAnimationDuration(
                 currentY: visible.origin.y,
                 targetY: resolvedTargetY,
@@ -1456,6 +1509,10 @@ extension ScenarioWriterView {
                 deadZone: 0.5,
                 snapToPixel: true,
                 duration: appliedDuration
+            )
+            MainWorkspaceNavigationDiagnostics.shared.recordVerticalFocusScroll(
+                animated: true,
+                success: true
             )
             return true
         }
@@ -1478,7 +1535,12 @@ extension ScenarioWriterView {
             snapToPixel: true
         )
         let currentY = scrollView.contentView.bounds.origin.y
-        return targetReachable && abs(resolvedTargetY - currentY) <= 0.5
+        let success = targetReachable && abs(resolvedTargetY - currentY) <= 0.5
+        MainWorkspaceNavigationDiagnostics.shared.recordVerticalFocusScroll(
+            animated: false,
+            success: success
+        )
+        return success
     }
 
     func shouldSkipMainColumnFocusScroll(
@@ -1523,6 +1585,7 @@ extension ScenarioWriterView {
         in cards: [SceneCard],
         viewportHeight: CGFloat
     ) -> MainColumnLayoutSnapshot {
+        let measurementStart = CACurrentMediaTime()
         let cardIDs = cards.map(\.id)
         let editingCardInColumn = editingCardID.flatMap { editingID in
             cards.first(where: { $0.id == editingID })
@@ -1542,6 +1605,11 @@ extension ScenarioWriterView {
             cardIDs: cardIDs
         )
         if let cached = mainColumnLayoutSnapshotByKey[layoutKey] {
+            MainWorkspaceNavigationDiagnostics.shared.recordLayoutResolve(
+                duration: CACurrentMediaTime() - measurementStart,
+                cacheHit: true,
+                cardCount: cards.count
+            )
             return cached
         }
 
@@ -1577,6 +1645,11 @@ extension ScenarioWriterView {
             contentBottomY: cursorY
         )
         mainColumnLayoutSnapshotByKey[layoutKey] = snapshot
+        MainWorkspaceNavigationDiagnostics.shared.recordLayoutResolve(
+            duration: CACurrentMediaTime() - measurementStart,
+            cacheHit: false,
+            cardCount: cards.count
+        )
         return snapshot
     }
 
@@ -2188,6 +2261,7 @@ extension ScenarioWriterView {
         guard activeCardID == card.id else { return false }
         mainBottomRevealCardID = card.id
         mainBottomRevealTick += 1
+        MainWorkspaceNavigationDiagnostics.shared.recordBottomReveal()
         return true
     }
 
@@ -2934,6 +3008,10 @@ extension ScenarioWriterView {
         animated: Bool
     ) -> Bool {
         guard let scrollView = mainCanvasScrollCoordinator.resolvedMainCanvasHorizontalScrollView() else {
+            MainWorkspaceNavigationDiagnostics.shared.recordHorizontalScroll(
+                animated: animated,
+                success: false
+            )
             return false
         }
 
@@ -2948,7 +3026,13 @@ extension ScenarioWriterView {
         let targetReachable = maxX + 0.5 >= targetX
 
         if animated {
-            guard targetReachable || targetX <= 0.5 else { return false }
+            guard targetReachable || targetX <= 0.5 else {
+                MainWorkspaceNavigationDiagnostics.shared.recordHorizontalScroll(
+                    animated: true,
+                    success: false
+                )
+                return false
+            }
             let resolvedTargetX = CaretScrollCoordinator.resolvedHorizontalTargetX(
                 visibleRect: visibleRect,
                 targetX: targetX,
@@ -2956,7 +3040,13 @@ extension ScenarioWriterView {
                 maxX: maxX,
                 snapToPixel: true
             )
-            guard abs(resolvedTargetX - visibleRect.origin.x) > 0.5 else { return true }
+            guard abs(resolvedTargetX - visibleRect.origin.x) > 0.5 else {
+                MainWorkspaceNavigationDiagnostics.shared.recordHorizontalScroll(
+                    animated: true,
+                    success: true
+                )
+                return true
+            }
             let appliedDuration = CaretScrollCoordinator.resolvedHorizontalAnimationDuration(
                 currentX: visibleRect.origin.x,
                 targetX: resolvedTargetX,
@@ -2971,6 +3061,10 @@ extension ScenarioWriterView {
                 deadZone: 0.5,
                 snapToPixel: true,
                 duration: appliedDuration
+            )
+            MainWorkspaceNavigationDiagnostics.shared.recordHorizontalScroll(
+                animated: true,
+                success: true
             )
             return true
         }
@@ -2992,7 +3086,12 @@ extension ScenarioWriterView {
             snapToPixel: true
         )
         let currentX = scrollView.contentView.bounds.origin.x
-        return targetReachable && abs(resolvedTargetX - currentX) <= 0.5
+        let success = targetReachable && abs(resolvedTargetX - currentX) <= 0.5
+        MainWorkspaceNavigationDiagnostics.shared.recordHorizontalScroll(
+            animated: false,
+            success: success
+        )
+        return success
     }
 
     // MARK: - Card Lookup & Active State
@@ -3040,13 +3139,24 @@ extension ScenarioWriterView {
     }
 
     func synchronizeActiveRelationState(for activeID: UUID?) {
+        let measurementStart = CACurrentMediaTime()
         if activeRelationSourceCardID == activeID,
            activeRelationSourceCardsVersion == scenario.cardsVersion {
+            MainWorkspaceNavigationDiagnostics.shared.recordRelationSync(
+                duration: CACurrentMediaTime() - measurementStart,
+                cacheHit: true,
+                resetToEmpty: false
+            )
             return
         }
 
         guard let activeID, let card = findCard(by: activeID) else {
             resetActiveRelationStateCache()
+            MainWorkspaceNavigationDiagnostics.shared.recordRelationSync(
+                duration: CACurrentMediaTime() - measurementStart,
+                cacheHit: false,
+                resetToEmpty: true
+            )
             return
         }
 
@@ -3072,6 +3182,11 @@ extension ScenarioWriterView {
             ancestors: ancestors,
             siblings: siblingIDs,
             descendants: descendantIDs
+        )
+        MainWorkspaceNavigationDiagnostics.shared.recordRelationSync(
+            duration: CACurrentMediaTime() - measurementStart,
+            cacheHit: false,
+            resetToEmpty: false
         )
     }
 

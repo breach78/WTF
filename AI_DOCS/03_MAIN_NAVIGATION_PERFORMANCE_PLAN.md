@@ -1,242 +1,309 @@
 # Main Navigation Performance Plan
 
-작성일: 2026-03-17
+작성일: 2026-03-25
 
-## 목표
+## 작업 범위
 
-현재 메인 작업창의 모양, 카드 정렬 방식, 부모 카드 자동 정렬, 포커스 UX, 포커스 모드 분리 구조를 유지한 채, 화살표 키 기반 포커스 이동의 버벅임을 구조적으로 줄인다.
+메인 작업창(main workspace)의 카드 간 화살표 이동, 편집 중 boundary 이동, 포커스 카드 변경에 따른 부모/자식 체인 정렬, 관련 스크롤 hot path만 성능 개선 대상으로 다룬다.
 
-이번 계획의 전제는 다음과 같다.
+## 절대 고정 조건
 
-- 카드의 시각적 구성과 자동 정렬 감각은 유지
-- 최근에 정리한 native scroll animation은 유지
-- 기능 삭제로 성능을 얻지 않음
-- 데이터 포맷과 undo/redo 의미는 유지
+- 포커스 카드가 바뀔 때 부모/자식이 체인의 끝까지 재정렬되는 현재 동작은 유지한다.
+- Focus View의 기능은 절대로 바꾸지 않는다.
+- Index View의 기능은 절대로 바꾸지 않는다.
+- 메인 작업창의 카드 의미, 정렬 규칙, undo/redo 의미, split/history/focus mode 의미는 유지한다.
+- 성능 개선은 기능 삭제가 아니라 hot path 경량화로만 얻는다.
+- 각 phase는 독립적으로 실행 가능해야 하고, phase 종료 시점마다 사용자가 앱을 직접 평가한 뒤 멈출 수 있어야 한다.
 
-## 현재 판단
+## 왜 이 순서로 가는가
 
-현재 버벅임의 주원인은 그래픽 렌더링보다 `포커스 이동 1회에 묶여 있는 계산/레이아웃/스크롤 파이프라인`이다.
+현재 병목의 본질은 "포커스 이동 1회가 너무 많은 계산과 상태 전파를 한 번에 일으킨다"는 점이다.
 
-포커스가 한 칸 이동할 때 현재 구조에서는 대략 아래 비용이 함께 발생한다.
+즉, 성능 개선은 아래 순서가 가장 안전하다.
 
-1. 활성 카드 변경
-2. 조상/형제/자손 관계 집합 재계산
-3. 표시 열 데이터 재구성
-4. 카드 높이 계산 및 레이아웃 추론
-5. 관측 프레임 갱신
-6. 부모 열 자동 정렬 판단 및 스크롤 애니메이션
-7. 그 결과로 큰 범위의 SwiftUI invalidation
+1. 입력 핫패스를 가볍게 만든다.
+2. 포커스 변경에 따른 projection/layout 재사용 범위를 늘린다.
+3. 렌더 invalidation 범위를 줄인다.
+4. 그래도 부족할 때만 메인 캔버스 엔진 교체를 검토한다.
 
-즉, 문제는 “카드가 텍스트라서 무겁다”가 아니라 “포커스 이동이 렌더/측정/스크롤을 한 트랜잭션으로 몰아친다”에 가깝다.
+이 순서를 지키면 핵심 UX를 보존한 채 체감 성능을 단계적으로 끌어올릴 수 있다.
 
-## 현재 병목이 걸린 코드 지점
+## 공통 운영 규칙
 
-### 1. 포커스 관계 상태 계산
+- 각 phase는 "빌드 가능 + 실행 가능 + 기존 기능 유지" 상태로 끝낸다.
+- 각 phase가 끝나면 기존 앱을 종료하고 수정된 앱을 다시 실행한 뒤 사용자 평가를 받는다.
+- 사용자가 만족하면 그 phase에서 중단한다.
+- 사용자가 부족하다고 판단하면 다음 phase로 넘어간다.
+- 다음 phase는 이전 phase의 결과를 전제로 하지만, Focus View와 Index View 기능 변화는 여전히 금지다.
 
-- `WriterCardManagement.swift`
-- `synchronizeActiveRelationState(for:)`
+## 공통 검증 체크리스트
 
-이 함수는 활성 카드가 바뀔 때마다 조상, 형제, 자손 집합을 다시 만든다. 현재는 결과 캐시가 있더라도 계산의 소유권이 UI 쪽에 가까워서, 포커스 이동과 뷰 invalidation이 강하게 결합돼 있다.
+모든 phase 종료 뒤 아래를 같은 순서로 확인한다.
 
-### 2. 표시 열 데이터 재구성
+1. 메인 작업창에서 `up/down/left/right` 반복 입력이 더 가벼워졌는지 확인
+2. 포커스 카드 변경 시 부모/자식 체인 정렬 감각이 그대로인지 확인
+3. 편집 중 경계 이동(`up/down/left/right` boundary)이 기존과 같은지 확인
+4. Focus View 진입/이탈과 기본 조작이 기존과 같은지 확인
+5. Index View 진입/이탈과 기본 조작이 기존과 같은지 확인
 
-- `WriterViews.swift`
-- `displayedLevelsData()`
-- `WriterCardManagement.swift`
-- `displayedMainLevelsData(from:)`
+위 다섯 항목 중 기능 변화가 하나라도 보이면 그 phase는 실패로 간주한다.
 
-현재 열 데이터는 포커스 상태, split 상태, active category 등에 영향을 받는다. 이 계층이 `ScenarioWriterView`의 큰 상태 허브 안에 묶여 있어서, 작은 포커스 이동에도 상위 뷰가 넓게 다시 평가될 여지가 크다.
-
-### 3. 카드 높이 계산과 열 레이아웃 추론
-
-- `WriterCardManagement.swift`
-- `resolvedMainCardHeight(for:)`
-- `resolvedMainColumnTargetLayout(...)`
-
-자동 정렬과 visible 추론은 카드 높이 계산에 의존한다. 텍스트 높이 측정 캐시는 이미 들어가 있지만, 현재는 포커스 이동 경로에서 “열 전체 레이아웃”이 별도 캐시 없이 반복 추론된다.
-
-### 4. 관측 프레임과 자동 정렬
-
-- `WriterCardManagement.swift`
-- `scrollToFocus(...)`
-- `performMainColumnNativeFocusScroll(...)`
-- `WriterSharedTypes.swift`
-- `MainColumnScrollRegistry`
-
-최근 개선으로 애니메이션 품질은 좋아졌지만, 여전히 포커스 이동이 곧 스크롤 판단/실행으로 바로 이어진다. 즉, navigation state와 scroll state가 아직 느슨하게 분리되지 않았다.
-
-## 근본 해결 방향
-
-핵심 방향은 하나다.
-
-`포커스 이동을 "데이터/레이아웃 갱신 사건"이 아니라 "런타임 네비게이션 이벤트"로 분리한다.`
-
-이를 위해 다음 세 축으로 나눈다.
-
-1. 포커스 상태를 별도 경량 런타임 모델로 분리
-2. 카드 높이와 열 레이아웃을 캐시된 구조체로 분리
-3. 자동 정렬을 그 캐시만 읽는 scroll coordinator로 분리
-
-이 셋이 되면, 포커스 한 번 이동할 때 모든 카드 뷰를 다시 해석하지 않고도 필요한 정렬과 강조만 갱신할 수 있다.
-
-## 제안하는 단계별 실행 계획
-
-## Phase 1. Navigation Runtime 분리
+## Phase 0. 기준선 고정
 
 ### 목적
 
-포커스 이동 시 가장 먼저 바뀌는 정보를 `activeCardID` 외의 대형 SwiftUI 상태와 분리한다.
+이후 phase의 체감 개선 여부를 비교할 수 있도록 메인 작업창 네비게이션의 현재 기준선을 고정한다.
 
-### 구현 방향
+### 변경 범위
 
-- `WriterInteractionRuntime`에 navigation 전용 상태 묶음을 만든다.
-- 포함 항목:
-  - `activeCardID`
-  - `ancestorIDs`
-  - `siblingIDs`
-  - `descendantIDs`
-  - 현재 포커스 경로의 parent chain
-  - 포커스 이동 source metadata
-- `synchronizeActiveRelationState(for:)`는 UI 보조 함수가 아니라 navigation runtime 갱신 함수로 옮긴다.
-- 가능한 한 `scenario.cardsVersion`이 바뀌지 않은 동안에는 precomputed parent/child index를 재사용한다.
+- 계측, 로그, signpost, lightweight counter
+- 회귀 방지용 문서화
 
-### 기대 효과
+### 금지
 
-- 포커스 이동의 첫 단계에서 SwiftUI 상위 상태 churn 감소
-- 관계 계산과 화면 갱신의 결합 약화
+- 실제 포커스 이동 규칙 변경
+- 레이아웃 규칙 변경
+- Focus View / Index View 동작 변경
 
-### 리스크
+### 실행 내용
 
-- undo/redo, split pane, focus mode가 모두 active card state를 쓰므로 동기화 소유권을 잘 정해야 한다.
+- 메인 작업창 네비게이션 핫패스의 측정 지점을 정리한다.
+- 최소한 아래 항목은 비교 가능하게 만든다.
+  - 화살표 1회 처리 시간
+  - key repeat 동안 처리 빈도
+  - 포커스 변경 1회당 projection/layout 재계산 횟수
+  - 포커스 변경 1회당 scroll target 재계산 횟수
+- 측정은 파일 I/O가 아니라 필요 시 켜는 lightweight 방식으로 둔다.
 
-## Phase 2. Main Column Layout Cache 도입
+### 완료 기준
 
-### 목적
+- 이후 phase에서 "무엇이 빨라졌는지"를 같은 기준으로 비교할 수 있다.
+- 계측 자체가 체감 성능을 해치지 않는다.
 
-포커스 이동 때마다 카드 높이와 열 내 y-position을 다시 추론하지 않도록 한다.
+### 사용자 평가 포인트
 
-### 구현 방향
+- 아직 체감 개선이 없어도 괜찮다.
+- 기준선과 비교 방식이 명확하면 통과다.
 
-- 열 단위 레이아웃 캐시 구조를 도입한다.
-- key 예시:
-  - `viewportKey`
-  - `cardsVersion`
-  - `fontSize`
-  - `lineSpacing`
-  - `columnWidth`
-  - `zoomScale`
-- value 예시:
-  - 카드별 `height`
-  - 카드별 `minY/maxY`
-  - 마지막 카드 bottom
-  - group separator 위치
-- 카드 내용이 실제로 바뀐 카드만 부분 무효화한다.
-- 포커스 이동만 일어났을 때는 레이아웃 캐시를 재계산하지 않는다.
+### stop / go
 
-### 기대 효과
+- 기준선만 확보한 뒤 바로 Phase 1로 진행한다.
 
-- `resolvedMainCardHeight(for:)`와 `resolvedMainColumnTargetLayout(...)` 호출량 감소
-- 부모 열 자동 정렬 계산의 fast path 확보
-
-### 리스크
-
-- 편집 중 live height와 cached height가 다를 수 있으므로, 편집 카드에 한해 live override 경로는 유지해야 한다.
-
-## Phase 3. Scroll Coordinator 완전 분리
+## Phase 1. 입력 핫패스 경량화
 
 ### 목적
 
-자동 정렬이 SwiftUI body 재평가 타이밍에 덜 의존하게 만든다.
+레이아웃 의미는 그대로 두고, 화살표 이동 목표 계산과 반복 입력 처리 비용부터 줄인다.
 
-### 구현 방향
+### 변경 범위
 
-- `performMainColumnNativeFocusScroll(...)`가 뷰 계층을 다시 해석하지 않고, navigation runtime + layout cache + observed scroll view만 읽도록 단순화한다.
-- 스크롤 판단을 다음 두 경로로 분리한다.
-  - fast path: cached frame/offset만으로 바로 target 계산
-  - fallback path: 관측 프레임이 아직 없을 때만 기존 추론 경로 사용
-- 연속 화살표 이동 중에는 이전 animation completion을 기다리지 않고 target만 최신 값으로 갱신할 수 있게 만든다.
-- 동일 target에 대한 dead-zone 정책을 명시적으로 분리한다.
+- `NavigationGraph` 또는 동등한 인접 이동 캐시
+- repeat 입력 전용 루프 또는 coalescing
+- `visualFocusedCardID`와 `committedActiveCardID` 분리
+  - 단, 레이아웃은 `visualFocusedCardID`를 즉시 따라가야 한다.
+  - 지연 가능한 것은 히스토리/부가 패널/부수효과뿐이다.
+
+### 금지
+
+- 포커스 카드 변경 타이밍 변경
+- 부모/자식 체인 재정렬 지연
+- Focus View / Index View 입력 규칙 변경
+
+### 실행 내용
+
+- `up/down/left/right` 목표 카드를 이동 시점마다 다시 찾지 않도록 인접 이동 캐시를 둔다.
+- OS key repeat 이벤트를 그대로 다 처리하지 않고, 최신 방향만 반영하는 repeat loop 또는 coalescing 경로를 둔다.
+- 반복 입력 중 지연 가능한 부수효과를 메인 포커스 변경과 분리한다.
 
 ### 기대 효과
 
-- 포커스 이동 도중 “상태 재계산 -> 스크롤 -> 다시 상태 재계산” 루프 약화
-- 이번에 얻은 부드러운 애니메이션 품질 유지
+- 반복 입력 중 target 계산 비용 감소
+- key repeat burst 시 이벤트 폭주 감소
+- 메인 작업창에서 "방향키를 길게 눌렀을 때" 첫 체감 개선 발생
 
-### 리스크
+### 완료 기준
 
-- top reveal, long card 예외, 부모 정렬 유지 규칙을 coordinator 내부에서 정확히 재현해야 한다.
+- 동일 데이터에서 반복 화살표 이동이 이전보다 가볍다.
+- 포커스 카드 변경 순간의 체인 재정렬 감각은 동일하다.
+- Focus View / Index View 기능 차이는 없다.
 
-## Phase 4. Main Canvas Invalidation 범위 축소
+### 사용자 평가 포인트
+
+- 카드 수가 많은 구간에서 `up/down` 길게 누르기
+- 깊은 체인에서 `left/right` 반복 이동
+- 편집 상태 진입 전후 plain arrow 감각 비교
+
+### stop / go
+
+- 이 단계에서 충분히 만족하면 중단한다.
+- 아직 버벅임이 남으면 Phase 2로 진행한다.
+
+## Phase 2. Projection / Layout 재사용
 
 ### 목적
 
-포커스 이동이 상위 뷰 전체를 흔들지 않게 한다.
+포커스 카드가 매번 바뀌더라도, 부모/자식 체인 재정렬에 필요한 projection과 column layout을 가능한 한 재사용한다.
 
-### 구현 방향
+### 변경 범위
 
-- 열 단위 view model 또는 render snapshot을 도입한다.
-- `displayedLevelsData()` 결과를 포커스 이동과 분리 가능한 부분에서 memoize한다.
-- `ScenarioWriterView`의 대형 state 허브에서 포커스와 무관한 state를 하위 객체로 내린다.
-- 카드 row는 가능한 한 `active/ancestor/descendant/selected/editing` 변화만 반영하도록 좁힌다.
+- 메인 작업창 전용 projection cache
+- column layout cache
+- 편집 카드와 비편집 카드의 height/layout 처리 분리
+- scroll 판단용 fast path
+
+### 금지
+
+- 카드 정렬 규칙 변경
+- 부모 열 자동 정렬 의미 변경
+- Focus View / Index View projection 공유 경로에 기능 회귀 유발
+
+### 실행 내용
+
+- `cardsVersion`과 viewport 조건이 같으면 projection의 큰 부분을 재사용한다.
+- column 단위로 카드 frame, y-position, visible range를 캐시한다.
+- 편집 중인 카드만 live override로 처리하고, 나머지는 cache를 우선 사용한다.
+- 스크롤 판단은 먼저 cache만 읽고, 정보가 없을 때만 fallback 경로로 내려간다.
 
 ### 기대 효과
 
-- 카드가 많아질수록 체감 차이가 커짐
-- split pane / history / AI 상태가 메인 네비게이션 렌더에 덜 전파됨
+- 포커스 이동 1회당 projection/layout 재계산 횟수 감소
+- 부모/자식 체인 재정렬을 유지하면서도 계산 경로가 짧아짐
+- 긴 카드와 깊은 체인에서 차이가 커짐
 
-### 리스크
+### 완료 기준
 
-- 이 단계는 구조 변경 폭이 커서, 앞 단계가 안정화된 뒤 들어가는 것이 안전하다.
+- key repeat 시 projection/layout recompute가 눈에 띄게 줄어든다.
+- 부모/자식 체인 정렬 모양과 타이밍은 기존과 같다.
+- 편집 카드의 live height 동작이 유지된다.
 
-## Phase 5. 검증용 경량 측정 도구 교체
+### 사용자 평가 포인트
+
+- 긴 카드가 포함된 열에서 `up/down` 반복 이동
+- 부모 카드 자동 정렬이 필요한 깊은 체인 탐색
+- 스크롤이 수반되는 빠른 좌우 이동
+
+### stop / go
+
+- 이 단계에서 만족하면 중단한다.
+- 여전히 입력은 가볍지만 화면 쪽이 무겁다고 느껴지면 Phase 3으로 진행한다.
+
+## Phase 3. SwiftUI invalidation 범위 축소
 
 ### 목적
 
-지금처럼 파일 로그를 남기지 않고도 병목을 계측할 수 있게 한다.
+포커스 이동 1회가 메인 작업창 전체 상태 변경처럼 퍼지지 않도록, 렌더 갱신 범위를 필요한 카드와 컬럼으로 좁힌다.
 
-### 구현 방향
+### 변경 범위
 
-- `bounceDebugLog` 같은 파일 기록형 계측 대신, 필요 시 켜는 lightweight signpost 또는 in-memory counters로 전환
-- 측정 대상:
-  - active card change 당 relation 계산 시간
-  - layout cache miss율
-  - scroll target recalculation 횟수
-  - column body recompute 추정 횟수
+- 메인 작업창 전용 render snapshot 또는 column view model
+- active/ancestor/descendant diff 기반 갱신
+- scroll / highlight / selection 반영 범위 축소
+
+### 금지
+
+- 상위 기능 의미 변경
+- split/history/focus mode 동기화 의미 변경
+- Focus View / Index View 렌더 규칙 변경
+
+### 실행 내용
+
+- `displayedLevelsData()` 같은 대형 계산을 포커스 이동과 느슨하게 분리한다.
+- 이전 active와 새 active의 diff만 반영하도록 highlight 갱신을 좁힌다.
+- 메인 작업창에서 포커스와 무관한 상태가 body 재평가를 넓게 일으키지 않게 구조를 정리한다.
 
 ### 기대 효과
 
-- 성능 리팩터링 과정에서 다시 “계측이 성능에 끼는” 문제를 줄임
+- 카드 수가 많을수록 체감 개선이 커진다.
+- 이동 계산뿐 아니라 "화면 전체가 다시 흔들리는 느낌"이 줄어든다.
 
-## 우선순위
+### 완료 기준
 
-실행 순서는 아래가 맞다.
+- 대형 문서/깊은 트리에서 방향키 반복 입력이 확실히 가벼워진다.
+- 카드 강조, selection, 편집 상태 전환 의미는 기존과 같다.
+- Focus View / Index View 동작 차이는 없다.
 
-1. Phase 1
-2. Phase 2
-3. Phase 3
-4. Phase 5
-5. Phase 4
+### 사용자 평가 포인트
 
-이 순서가 좋은 이유는, 먼저 포커스 이동의 계산 경로를 가볍게 만들고, 그 다음에 렌더 invalidation을 줄이는 쪽이 리스크가 낮기 때문이다.
+- 카드 수가 많은 실제 작업 시나리오에서 연속 이동
+- active 강조와 주변 카드 강조 전환 감각 확인
+- 선택 범위, 편집 진입/이탈 회귀 확인
 
-## 완료 기준
+### stop / go
 
-이번 계획이 성공했다고 보려면 다음 조건을 만족해야 한다.
+- 이 단계에서 만족하면 중단한다.
+- 그래도 "계산은 빨라졌는데 캔버스 자체가 무겁다"는 느낌이 남으면 Phase 4로 진행한다.
 
-- 빠른 좌우/상하 화살표 이동 시 체감 끊김이 현저히 줄어듦
-- 부모 카드 자동 정렬 감각은 유지
-- 긴 카드 top reveal 규칙 유지
-- 포커스 모드와 메인 작업창의 의미 차이는 유지
-- split pane / history preview / undo redo 회귀 없음
+## Phase 4. 메인 캔버스 엔진 교체(AppKit / CALayer)
 
-## 권장 1차 작업 범위
+### 목적
 
-지금 바로 들어간다면 1차 범위는 아래로 제한하는 것이 안전하다.
+메인 작업창만 별도 엔진으로 분리해, 비편집 카드는 레이어 기반으로 유지하고 활성 카드만 편집 뷰를 올리는 구조로 성능 상한선을 올린다.
 
-- Navigation runtime 분리
-- Main column layout cache 도입
-- scroll coordinator fast path 연결
+### 전제
 
-즉, 이번 라운드의 핵심 산출물은 “포커스 이동 1회가 전체 열 레이아웃 추론을 다시 부르지 않게 만드는 것”이다.
+- 이 phase는 선택 사항이다.
+- Phase 1~3으로 충분하면 들어가지 않는다.
+- 이 phase에 들어가도 Focus View와 Index View 기능은 바꾸지 않는다.
 
-이 세 단계만 제대로 들어가도, 현재 UX를 유지한 채 체감 성능이 가장 크게 개선될 가능성이 높다.
+### 변경 범위
+
+- 메인 작업창 캔버스만 `NSView + CALayer` 중심으로 교체
+- SwiftUI는 바깥 shell과 상태 연결만 유지
+- 비편집 카드는 cached layer/text rendering 사용
+- 활성 카드만 `NSTextView` 또는 동등한 편집 경로 유지
+
+### 금지
+
+- 메인 작업창 의미 변경
+- Focus View / Index View 엔진까지 함께 교체
+- 텍스트 편집 기능, 선택 기능, 접근성 의미 손상
+
+### 실행 내용
+
+- 드로잉 기술만 바꾸는 것이 아니라, 메인 작업창을 scene engine처럼 분리한다.
+- 포커스 이동 시 이전 active, 새 active, 관련 체인만 diff로 갱신한다.
+- 스크롤, 하이라이트, 텍스트 표시를 layer 중심으로 관리한다.
+- 편집 시작 시에만 실제 텍스트 편집 뷰를 활성화한다.
+
+### 기대 효과
+
+- 반복 이동과 key repeat에서 가장 높은 성능 상한선 확보
+- 카드 수가 매우 많을 때도 입력당 비용을 더 안정적으로 유지
+
+### 완료 기준
+
+- 메인 작업창에서 연속 방향키 이동이 확실히 더 가볍다.
+- 부모/자식 체인 정렬 감각과 편집 전환 의미가 그대로다.
+- Focus View / Index View는 기능상 완전히 동일하다.
+
+### 사용자 평가 포인트
+
+- 대형 데이터에서 장시간 탐색
+- 편집 진입/이탈이 잦은 실제 작업 루프
+- Focus View / Index View smoke test
+
+### stop / go
+
+- 이 단계는 마지막 단계다.
+- 여기까지 와도 만족하지 못하면 추가 미세 튜닝이 아니라 별도 재진단이 필요하다.
+
+## 권장 실행 순서
+
+1. Phase 0
+2. Phase 1
+3. 사용자 평가
+4. 필요 시 Phase 2
+5. 사용자 평가
+6. 필요 시 Phase 3
+7. 사용자 평가
+8. 정말 필요할 때만 Phase 4
+
+## 최종 성공 기준
+
+이번 계획이 성공이라고 보려면 아래를 모두 만족해야 한다.
+
+- 메인 작업창의 반복 화살표 이동과 key repeat가 체감상 훨씬 가볍다.
+- 포커스 카드 변경 시 부모/자식 체인이 끝까지 재정렬되는 핵심 UX는 유지된다.
+- Focus View 기능 변화가 없다.
+- Index View 기능 변화가 없다.
+- 사용자가 원하는 시점에서 phase 단위로 중단 가능하다.
