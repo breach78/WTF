@@ -27,7 +27,7 @@
 		<dict>
 			<key>cdhash</key>
 			<data>
-			EqMpdwuNOCpPwNF4KmDjyYfEym8=
+			uFAW1Qr3JHu59XgkG5QDgmMvLyg=
 			</data>
 			<key>requirement</key>
 			<string>identifier "WTF.debug" and anchor apple generic and certificate leaf[subject.CN] = "Apple Development: sleepyblue@me.com (EE95RB228E)" and certificate 1[field.1.2.840.113635.100.6.2.1] /* exists */</string>

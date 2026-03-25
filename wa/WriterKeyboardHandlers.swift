@@ -2,6 +2,32 @@ import SwiftUI
 import AppKit
 
 extension ScenarioWriterView {
+    private struct MainNavigationContext {
+        let levelIndex: Int
+        let cardIndex: Int
+        let currentLevel: [SceneCard]
+        let nextLevel: [SceneCard]
+        let card: SceneCard
+    }
+
+    private func resolvedMainNavigationContext(for cardID: UUID) -> MainNavigationContext? {
+        guard let location = scenario.cardLocationByID(cardID),
+              let currentLevel = resolvedMainUnfilteredLevel(at: location.level),
+              currentLevel.indices.contains(location.index) else {
+            return nil
+        }
+
+        let card = currentLevel[location.index]
+        guard card.id == cardID else { return nil }
+
+        return MainNavigationContext(
+            levelIndex: location.level,
+            cardIndex: location.index,
+            currentLevel: currentLevel,
+            nextLevel: resolvedMainUnfilteredLevel(at: location.level + 1) ?? [],
+            card: card
+        )
+    }
 
     // --- Key Handling Logic ---
     func handleGlobalKeyPress(_ press: KeyPress) -> KeyPress.Result {
@@ -636,14 +662,10 @@ extension ScenarioWriterView {
         guard textView.string == editingCard.content else { return false }
         guard !textView.hasMarkedText() else { return false }
 
-        let levels = resolvedLevelsWithParents().map(\.cards)
-        guard let location = displayedMainCardLocationByID(editingID, in: levels) else { return false }
-        let levelIndex = location.level
-        let cardIndex = location.index
-        guard levels.indices.contains(levelIndex),
-              levels[levelIndex].indices.contains(cardIndex) else { return false }
-
-        let currentLevel = levels[levelIndex]
+        guard let navigationContext = resolvedMainNavigationContext(for: editingID) else { return false }
+        let levelIndex = navigationContext.levelIndex
+        let cardIndex = navigationContext.cardIndex
+        let currentLevel = navigationContext.currentLevel
         let content = textView.string as NSString
         let cursor = min(max(0, textView.selectedRange().location), content.length)
         let visualBoundary = focusCaretVisualBoundaryState(textView: textView, cursor: cursor)
@@ -698,7 +720,7 @@ extension ScenarioWriterView {
                 press: press,
                 editingCard: editingCard,
                 currentLevel: currentLevel,
-                levels: levels,
+                nextLevel: navigationContext.nextLevel,
                 levelIndex: levelIndex,
                 cardIndex: cardIndex,
                 atBottomBoundary: atBottomBoundary,
@@ -736,7 +758,9 @@ extension ScenarioWriterView {
         } else if let boundaryTarget = mainCrossCategoryBoundaryTarget(
             for: editingCard,
             levelIndex: levelIndex,
-            step: -1
+            step: -1,
+            currentLevel: currentLevel,
+            currentIndex: cardIndex
         ) {
             target = boundaryTarget
         } else {
@@ -800,7 +824,9 @@ extension ScenarioWriterView {
         } else if let boundaryTarget = mainCrossCategoryBoundaryTarget(
             for: editingCard,
             levelIndex: levelIndex,
-            step: 1
+            step: 1,
+            currentLevel: currentLevel,
+            currentIndex: cardIndex
         ) {
             target = boundaryTarget
         } else {
@@ -890,7 +916,7 @@ extension ScenarioWriterView {
         press: KeyPress,
         editingCard: SceneCard,
         currentLevel: [SceneCard],
-        levels: [[SceneCard]],
+        nextLevel: [SceneCard],
         levelIndex: Int,
         cardIndex: Int,
         atBottomBoundary: Bool,
@@ -910,7 +936,6 @@ extension ScenarioWriterView {
 
         clearMainEditTabArm()
         clearMainBoundaryParentLeftArm()
-        let nextLevel = (levelIndex + 1 < levels.count) ? levels[levelIndex + 1] : []
 
         if isShiftSelection {
             clearMainBoundaryChildRightArm()
@@ -1229,9 +1254,20 @@ extension ScenarioWriterView {
     func mainCrossCategoryBoundaryTarget(
         for card: SceneCard,
         levelIndex: Int,
-        step: Int
+        step: Int,
+        currentLevel: [SceneCard]? = nil,
+        currentIndex: Int? = nil
     ) -> SceneCard? {
         guard levelIndex >= 2 else { return nil }
+        if activeIndexBoardSession == nil,
+           let currentLevel,
+           let currentIndex {
+            let targetIndex = currentIndex + step
+            guard currentLevel.indices.contains(targetIndex) else { return nil }
+            let target = currentLevel[targetIndex]
+            guard target.category != card.category else { return nil }
+            return target
+        }
         guard let level = resolvedMainBoundaryNavigableLevel(at: levelIndex),
               let index = level.firstIndex(where: { $0.id == card.id }) else {
             return nil
@@ -1398,18 +1434,12 @@ extension ScenarioWriterView {
             return false
         }
 
-        let levels = resolvedLevelsWithParents().map(\.cards)
-        guard let location = displayedMainCardLocationByID(id, in: levels) else { return false }
-        let levelIndex = location.level
-        let cardIndex = location.index
-        guard levels.indices.contains(levelIndex),
-              levels[levelIndex].indices.contains(cardIndex) else {
-            return false
-        }
-
-        let currentLevel = levels[levelIndex]
-        let nextLevel = (levelIndex + 1 < levels.count) ? levels[levelIndex + 1] : []
-        let card = currentLevel[cardIndex]
+        guard let navigationContext = resolvedMainNavigationContext(for: id) else { return false }
+        let levelIndex = navigationContext.levelIndex
+        let cardIndex = navigationContext.cardIndex
+        let currentLevel = navigationContext.currentLevel
+        let nextLevel = navigationContext.nextLevel
+        let card = navigationContext.card
         if !isShiftPressed && selectedCardIDs.count > 1 {
             selectedCardIDs = [card.id]
         }
@@ -1424,7 +1454,9 @@ extension ScenarioWriterView {
             } else if let boundaryTarget = mainCrossCategoryBoundaryTarget(
                 for: card,
                 levelIndex: levelIndex,
-                step: -1
+                step: -1,
+                currentLevel: currentLevel,
+                currentIndex: cardIndex
             ) {
                 target = boundaryTarget
             } else {
@@ -1491,7 +1523,9 @@ extension ScenarioWriterView {
             guard let target = mainCrossCategoryBoundaryTarget(
                 for: card,
                 levelIndex: levelIndex,
-                step: 1
+                step: 1,
+                currentLevel: currentLevel,
+                currentIndex: cardIndex
             ) else {
                 return false
             }
