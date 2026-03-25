@@ -405,6 +405,8 @@ private struct IndexBoardSurfaceAppKitConfiguration {
     let scrollOffset: CGPoint
     let revealCardID: UUID?
     let revealRequestToken: Int
+    let inlineEditRequestCardID: UUID?
+    let inlineEditRequestToken: Int
     let isInteractionEnabled: Bool
     let onCreateTempCard: () -> Void
     let onCreateTempCardAt: (IndexBoardGridPosition?) -> Void
@@ -448,6 +450,8 @@ private struct IndexBoardSurfaceAppKitRenderState: Equatable {
     let scrollOffset: CGPoint
     let revealCardID: UUID?
     let revealRequestToken: Int
+    let inlineEditRequestCardID: UUID?
+    let inlineEditRequestToken: Int
     let isInteractionEnabled: Bool
     let themeSignature: String
 
@@ -461,6 +465,8 @@ private struct IndexBoardSurfaceAppKitRenderState: Equatable {
         canvasSize == other.canvasSize &&
         revealCardID == other.revealCardID &&
         revealRequestToken == other.revealRequestToken &&
+        inlineEditRequestCardID == other.inlineEditRequestCardID &&
+        inlineEditRequestToken == other.inlineEditRequestToken &&
         isInteractionEnabled == other.isInteractionEnabled &&
         themeSignature == other.themeSignature
     }
@@ -491,6 +497,8 @@ private extension IndexBoardSurfaceAppKitConfiguration {
             scrollOffset: scrollOffset,
             revealCardID: revealCardID,
             revealRequestToken: revealRequestToken,
+            inlineEditRequestCardID: inlineEditRequestCardID,
+            inlineEditRequestToken: inlineEditRequestToken,
             isInteractionEnabled: isInteractionEnabled,
             themeSignature: theme.renderSignature
         )
@@ -914,6 +922,7 @@ private final class IndexBoardSurfaceAppKitInteractiveCardView: IndexBoardSurfac
 }
 
 private final class IndexBoardSurfaceAppKitInlineTextView: NSTextView {
+    static let identifier = NSUserInterfaceItemIdentifier("IndexBoardInlineTextView")
     var onPostInteraction: (() -> Void)?
 
     override func keyDown(with event: NSEvent) {
@@ -958,6 +967,7 @@ private final class IndexBoardSurfaceAppKitDocumentView: NSView, IndexBoardSurfa
     private var pendingBackgroundClickCount = 0
     private var pendingCardClick: (cardID: UUID, point: CGPoint, clickCount: Int)?
     private var pendingGroupClick: (parentCardID: UUID, point: CGPoint)?
+    private var pendingSingleClickInlineEditWorkItem: DispatchWorkItem?
     private var contextMenuCardID: UUID?
     private var contextMenuParentCardID: UUID?
     private var contextMenuParentGroupIsTemp = false
@@ -978,6 +988,7 @@ private final class IndexBoardSurfaceAppKitDocumentView: NSView, IndexBoardSurfa
     private var inlineEditingCardID: UUID?
     private var inlineEditingOriginalContent = ""
     private var isEndingInlineEditing = false
+    private var lastHandledInlineEditRequestToken = 0
     fileprivate var suppressViewportChangeNotifications = false
     fileprivate var pendingDropPreservedScrollOrigin: CGPoint? = nil
     fileprivate var defersLayoutForLiveViewport = false
@@ -1010,6 +1021,7 @@ private final class IndexBoardSurfaceAppKitDocumentView: NSView, IndexBoardSurfa
     }
 
     deinit {
+        pendingSingleClickInlineEditWorkItem?.cancel()
         endInlineEditing(commit: true)
     }
 
@@ -1176,6 +1188,7 @@ private final class IndexBoardSurfaceAppKitDocumentView: NSView, IndexBoardSurfa
             super.mouseDown(with: event)
             return
         }
+        cancelPendingSingleClickInlineEdit()
         let point = convert(event.locationInWindow, from: nil)
         if let inlineEditorScrollView,
            !inlineEditorScrollView.isHidden,
@@ -1304,23 +1317,7 @@ private final class IndexBoardSurfaceAppKitDocumentView: NSView, IndexBoardSurfa
                 return
             }
             guard let card = configuration.cardsByID[pendingCardClick.cardID] else { return }
-            if event.clickCount == 2 {
-                configuration.onCardOpen(card)
-            } else {
-                let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-                let disallowedModifiers: NSEvent.ModifierFlags = [.command, .shift, .option, .control]
-                let canEnterInlineEdit =
-                    configuration.allowsInlineEditing &&
-                    flags.intersection(disallowedModifiers).isEmpty &&
-                    configuration.activeCardID == card.id &&
-                    configuration.selectedCardIDs == Set([card.id])
-                if canEnterInlineEdit {
-                    beginInlineEditing(cardID: card.id)
-                    return
-                } else {
-                    configuration.onCardTap(card)
-                }
-            }
+            handleResolvedCardClick(card, event: event)
             window?.makeFirstResponder(self)
             return
         }
@@ -1411,6 +1408,12 @@ private final class IndexBoardSurfaceAppKitDocumentView: NSView, IndexBoardSurfa
         } else if let inlineEditingCardID,
                   configuration.cardsByID[inlineEditingCardID] == nil {
             endInlineEditing(commit: false)
+        }
+        if configuration.inlineEditRequestToken != lastHandledInlineEditRequestToken,
+           let cardID = configuration.inlineEditRequestCardID,
+           configuration.cardsByID[cardID] != nil {
+            lastHandledInlineEditRequestToken = configuration.inlineEditRequestToken
+            beginInlineEditing(cardID: cardID)
         }
         guard nextRenderState != lastRenderState else { return }
         lastRenderState = nextRenderState
@@ -1521,6 +1524,7 @@ private final class IndexBoardSurfaceAppKitDocumentView: NSView, IndexBoardSurfa
 
     func handleCardMouseDown(cardID: UUID, event: NSEvent, in view: NSView) {
         guard configuration.isInteractionEnabled else { return }
+        cancelPendingSingleClickInlineEdit()
         let point = convert(event.locationInWindow, from: nil)
         pendingCardClick = (cardID, point, event.clickCount)
         pendingBackgroundClickPoint = nil
@@ -1563,23 +1567,7 @@ private final class IndexBoardSurfaceAppKitDocumentView: NSView, IndexBoardSurfa
         }
 
         guard let card = configuration.cardsByID[cardID] else { return }
-        if event.clickCount == 2 {
-            configuration.onCardOpen(card)
-        } else {
-            let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-            let disallowedModifiers: NSEvent.ModifierFlags = [.command, .shift, .option, .control]
-            let canEnterInlineEdit =
-                configuration.allowsInlineEditing &&
-                flags.intersection(disallowedModifiers).isEmpty &&
-                configuration.activeCardID == card.id &&
-                configuration.selectedCardIDs == Set([card.id])
-            if canEnterInlineEdit {
-                beginInlineEditing(cardID: card.id)
-                return
-            } else {
-                configuration.onCardTap(card)
-            }
-        }
+        handleResolvedCardClick(card, event: event)
         window?.makeFirstResponder(self)
     }
 
@@ -1638,6 +1626,7 @@ private final class IndexBoardSurfaceAppKitDocumentView: NSView, IndexBoardSurfa
         scrollView.scrollerStyle = .overlay
 
         let textView = IndexBoardSurfaceAppKitInlineTextView()
+        textView.identifier = IndexBoardSurfaceAppKitInlineTextView.identifier
         textView.delegate = self
         textView.onPostInteraction = { [weak self] in
             self?.revealInlineEditorSelection()
@@ -1762,6 +1751,10 @@ private final class IndexBoardSurfaceAppKitDocumentView: NSView, IndexBoardSurfa
         }
 
         let originalContent = inlineEditingOriginalContent
+        if let textView = inlineEditorTextView,
+           textView.window?.firstResponder === textView {
+            textView.window?.makeFirstResponder(nil)
+        }
         let committedText = inlineEditorTextView?.string ?? originalContent
         inlineEditingCardID = nil
         inlineEditingOriginalContent = ""
@@ -1770,6 +1763,54 @@ private final class IndexBoardSurfaceAppKitDocumentView: NSView, IndexBoardSurfa
 
         if commit, committedText != originalContent {
             configuration.onInlineCardEditCommit(cardID, committedText)
+        }
+    }
+
+    private func cancelPendingSingleClickInlineEdit() {
+        pendingSingleClickInlineEditWorkItem?.cancel()
+        pendingSingleClickInlineEditWorkItem = nil
+    }
+
+    private func shouldDelayInlineEdit(for cardID: UUID, event: NSEvent) -> Bool {
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        let disallowedModifiers: NSEvent.ModifierFlags = [.command, .shift, .option, .control]
+        return configuration.allowsInlineEditing &&
+            flags.intersection(disallowedModifiers).isEmpty &&
+            configuration.activeCardID == cardID &&
+            configuration.selectedCardIDs == Set([cardID])
+    }
+
+    private func schedulePendingSingleClickInlineEdit(for cardID: UUID) {
+        cancelPendingSingleClickInlineEdit()
+
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.pendingSingleClickInlineEditWorkItem = nil
+            guard self.inlineEditingCardID == nil,
+                  self.configuration.allowsInlineEditing,
+                  self.configuration.activeCardID == cardID,
+                  self.configuration.selectedCardIDs == Set([cardID]) else { return }
+            self.beginInlineEditing(cardID: cardID)
+        }
+
+        pendingSingleClickInlineEditWorkItem = workItem
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + max(0.18, NSEvent.doubleClickInterval - 0.06),
+            execute: workItem
+        )
+    }
+
+    private func handleResolvedCardClick(_ card: SceneCard, event: NSEvent) {
+        if event.clickCount == 2 {
+            cancelPendingSingleClickInlineEdit()
+            configuration.onCardOpen(card)
+            return
+        }
+
+        let shouldOpenInlineAfterDelay = shouldDelayInlineEdit(for: card.id, event: event)
+        configuration.onCardTap(card)
+        if shouldOpenInlineAfterDelay {
+            schedulePendingSingleClickInlineEdit(for: card.id)
         }
     }
 
@@ -2271,6 +2312,92 @@ private final class IndexBoardSurfaceAppKitDocumentView: NSView, IndexBoardSurfa
             .0
     }
 
+    private func resolvedGroupBoundaryFrame(
+        for group: BoardSurfaceParentGroupPlacement,
+        visibleItems: [BoardSurfaceItem]
+    ) -> CGRect? {
+        let cardFrames = visibleItems.compactMap { interactionCardFrame(for: $0.cardID) }
+        guard let firstFrame = cardFrames.first else { return nil }
+        let cardUnion = cardFrames.dropFirst().reduce(firstFrame) { partial, frame in
+            partial.union(frame)
+        }
+        return cardUnion.insetBy(
+            dx: -IndexBoardSurfaceAppKitConstants.laneWrapperInset,
+            dy: -IndexBoardSurfaceAppKitConstants.laneWrapperInset
+        )
+    }
+
+    private func dragCardHasEnteredGroupBoundary(
+        _ dragCardFrame: CGRect,
+        for group: BoardSurfaceParentGroupPlacement,
+        visibleItems: [BoardSurfaceItem],
+        insertionIndex: Int
+    ) -> Bool {
+        guard let boundaryFrame = resolvedGroupBoundaryFrame(
+            for: group,
+            visibleItems: visibleItems
+        ) else {
+            return false
+        }
+
+        let horizontalEntryInset = IndexBoardSurfaceAppKitConstants.laneWrapperInset
+        let verticalEntryInset = IndexBoardSurfaceAppKitConstants.laneWrapperInset
+        let hasVerticalEntry =
+            dragCardFrame.maxY > boundaryFrame.minY + verticalEntryInset &&
+            dragCardFrame.minY < boundaryFrame.maxY - verticalEntryInset
+        guard hasVerticalEntry else { return false }
+
+        if insertionIndex <= 0 {
+            return dragCardFrame.maxX > boundaryFrame.minX + horizontalEntryInset
+        }
+        if insertionIndex >= visibleItems.count {
+            return dragCardFrame.minX < boundaryFrame.maxX - horizontalEntryInset
+        }
+        return dragCardFrame.maxX > boundaryFrame.minX + horizontalEntryInset &&
+            dragCardFrame.minX < boundaryFrame.maxX - horizontalEntryInset
+    }
+
+    private func resolvedUnifiedGroupSlotTarget(
+        at slotPosition: IndexBoardGridPosition,
+        dragCardFrame: CGRect,
+        for drag: IndexBoardSurfaceAppKitDragState
+    ) -> IndexBoardCardDropTarget? {
+        let visibleItemsByGroupID = Dictionary(
+            grouping: interactionProjection.surfaceItems.filter { item in
+                item.parentGroupID != nil && !drag.movingCardIDSet.contains(item.cardID)
+            },
+            by: { $0.parentGroupID! }
+        )
+
+        for group in interactionProjection.parentGroups.sorted(by: indexBoardSurfaceAppKitGroupSort) {
+            guard slotPosition.row == group.origin.row else { continue }
+            let visibleItems = (visibleItemsByGroupID[group.id] ?? []).sorted(by: indexBoardSurfaceAppKitSort)
+            let insertionIndex = slotPosition.column - group.origin.column
+            guard insertionIndex >= 0, insertionIndex <= visibleItems.count else { continue }
+            guard dragCardHasEnteredGroupBoundary(
+                dragCardFrame,
+                for: group,
+                visibleItems: visibleItems,
+                insertionIndex: insertionIndex
+            ) else {
+                continue
+            }
+
+            let previousCardID = insertionIndex > 0 ? visibleItems[insertionIndex - 1].cardID : nil
+            let nextCardID = insertionIndex < visibleItems.count ? visibleItems[insertionIndex].cardID : nil
+            return IndexBoardCardDropTarget(
+                groupID: legacyGroupID(for: group.parentCardID),
+                insertionIndex: insertionIndex,
+                laneParentID: group.parentCardID,
+                previousCardID: previousCardID,
+                nextCardID: nextCardID,
+                preferredColumnCount: nil
+            )
+        }
+
+        return nil
+    }
+
     private func movableParentGroupID(at point: CGPoint) -> UUID? {
         let candidateGroups = interactionProjection.parentGroups
 
@@ -2468,13 +2595,19 @@ private final class IndexBoardSurfaceAppKitDocumentView: NSView, IndexBoardSurfa
         )
     }
 
-    private func resolvedDetachedGridPosition(for point: CGPoint, excluding excludedCardIDs: Set<UUID>) -> IndexBoardGridPosition {
-        let candidate = resolvedNearestGridPosition(for: point)
-        let occupiedPositions = Set(
+    private func occupiedGridPositions(
+        excluding excludedCardIDs: Set<UUID>
+    ) -> Set<IndexBoardGridPosition> {
+        Set(
             occupiedGridPositionByCardID().compactMap { entry -> IndexBoardGridPosition? in
                 excludedCardIDs.contains(entry.key) ? nil : entry.value
             }
         )
+    }
+
+    private func resolvedDetachedGridPosition(for point: CGPoint, excluding excludedCardIDs: Set<UUID>) -> IndexBoardGridPosition {
+        let candidate = resolvedNearestGridPosition(for: point)
+        let occupiedPositions = occupiedGridPositions(excluding: excludedCardIDs)
         guard occupiedPositions.contains(candidate) else { return candidate }
 
         let bounds = logicalGridBounds
@@ -2755,6 +2888,50 @@ private final class IndexBoardSurfaceAppKitDocumentView: NSView, IndexBoardSurfa
         }
 
         return bestCandidate?.target
+    }
+
+    private func resolvedUnifiedTempStripSlotTarget(
+        at slotPosition: IndexBoardGridPosition,
+        for drag: IndexBoardSurfaceAppKitDragState
+    ) -> IndexBoardCardDropTarget? {
+        let compactedStrips = resolvedIndexBoardTempStripsAfterRemovingMembers(
+            strips: referenceTempStrips(),
+            movingMembers: drag.movingTempMembers
+        )
+        let widthsByParentID = resolvedTempGroupWidthsByParentID(from: configuration.surfaceProjection)
+
+        for strip in compactedStrips.sorted(by: { lhs, rhs in
+            if lhs.row != rhs.row {
+                return lhs.row < rhs.row
+            }
+            if lhs.anchorColumn != rhs.anchorColumn {
+                return lhs.anchorColumn < rhs.anchorColumn
+            }
+            return lhs.id < rhs.id
+        }) {
+            guard strip.row == slotPosition.row else { continue }
+            guard let slot = resolvedTempStripSlotDescriptors(
+                for: strip,
+                widthsByParentID: widthsByParentID
+            ).first(where: { $0.column == slotPosition.column }) else {
+                continue
+            }
+
+            let previousCardID = slot.previous?.kind == .card ? slot.previous?.id : nil
+            let nextCardID = slot.next?.kind == .card ? slot.next?.id : nil
+            return IndexBoardCardDropTarget(
+                groupID: legacyGroupID(for: tempLaneParentID() ?? drag.sourceLaneParentID),
+                insertionIndex: 0,
+                laneParentID: tempLaneParentID() ?? drag.sourceLaneParentID,
+                previousCardID: previousCardID,
+                nextCardID: nextCardID,
+                previousTempMember: slot.previous,
+                nextTempMember: slot.next,
+                preferredColumnCount: nil
+            )
+        }
+
+        return nil
     }
 
     private func resolvedMovingItems(for draggedCardID: UUID) -> [BoardSurfaceItem] {
@@ -3123,40 +3300,68 @@ private final class IndexBoardSurfaceAppKitDocumentView: NSView, IndexBoardSurfa
             )
         }
 
-        return .detached(resolvedDetachedGridPosition(for: drag.pointerInContent, excluding: drag.movingCardIDSet))
+        return .detached(
+            resolvedDetachedGridPosition(
+                for: drag.pointerInContent,
+                excluding: drag.movingCardIDSet
+            )
+        )
     }
 
     private func resolvedDropTarget(for drag: IndexBoardSurfaceAppKitDragState) -> IndexBoardCardDropTarget {
         let dragCardFrame = CGRect(origin: drag.overlayOrigin(), size: IndexBoardMetrics.cardSize)
-        let dragCardCenter = CGPoint(x: dragCardFrame.midX, y: dragCardFrame.midY)
+        let targetPoint = drag.pointerInContent
+        let targetSlot = resolvedNearestGridPosition(for: targetPoint)
+        let occupiedPositions = occupiedGridPositions(excluding: drag.movingCardIDSet)
+        let detachedGridPosition = resolvedDetachedGridPosition(
+            for: targetPoint,
+            excluding: drag.movingCardIDSet
+        )
 
-        if let targetGroup = resolvedCardDropTargetGroup(at: dragCardCenter, for: drag) {
-            let visibleItems = orderedItems.filter { item in
-                item.parentGroupID == targetGroup.id && !drag.movingCardIDSet.contains(item.cardID)
+        if !occupiedPositions.contains(targetSlot) {
+            if let groupTarget = resolvedUnifiedGroupSlotTarget(
+                at: targetSlot,
+                dragCardFrame: dragCardFrame,
+                for: drag
+            ) {
+                return groupTarget
             }
-            let insertionIndex = visibleItems.firstIndex(where: { item in
-                guard let itemFrame = cardFrameByID[item.cardID] else { return false }
-                return dragCardCenter.x < itemFrame.midX
-            }) ?? visibleItems.count
-            let previousCardID = insertionIndex > 0 ? visibleItems[insertionIndex - 1].cardID : nil
-            let nextCardID = insertionIndex < visibleItems.count ? visibleItems[insertionIndex].cardID : nil
+
+            if let tempStripTarget = resolvedUnifiedTempStripSlotTarget(at: targetSlot, for: drag) {
+                return tempStripTarget
+            }
+
+            if drag.sourceTarget.detachedGridPosition == targetSlot,
+               drag.sourceTarget.previousTempMember == nil,
+               drag.sourceTarget.nextTempMember == nil,
+               drag.sourceTarget.previousCardID == nil,
+               drag.sourceTarget.nextCardID == nil {
+                return drag.sourceTarget
+            }
+
             return IndexBoardCardDropTarget(
-                groupID: legacyGroupID(for: targetGroup.parentCardID),
-                insertionIndex: insertionIndex,
-                laneParentID: targetGroup.parentCardID,
-                previousCardID: previousCardID,
-                nextCardID: nextCardID,
+                groupID: legacyGroupID(for: tempLaneParentID() ?? drag.sourceLaneParentID),
+                insertionIndex: drag.sourceTarget.insertionIndex,
+                laneParentID: tempLaneParentID() ?? drag.sourceLaneParentID,
+                detachedGridPosition: targetSlot,
                 preferredColumnCount: nil
             )
         }
 
-        let detachedGridPosition = resolvedDetachedGridPosition(
-            for: drag.pointerInContent,
-            excluding: drag.movingCardIDSet
-        )
+        if let groupTarget = resolvedUnifiedGroupSlotTarget(
+            at: targetSlot,
+            dragCardFrame: dragCardFrame,
+            for: drag
+        ) {
+            return groupTarget
+        }
+
+        if let tempStripTarget = resolvedUnifiedTempStripSlotTarget(at: targetSlot, for: drag) {
+            return tempStripTarget
+        }
 
         if let detachedBlockTarget = resolvedDetachedBlockDropTarget(
-            at: dragCardCenter,
+            at: targetPoint,
             for: drag
         ) {
             if drag.sourceTarget == detachedBlockTarget {
@@ -3203,10 +3408,13 @@ private final class IndexBoardSurfaceAppKitDocumentView: NSView, IndexBoardSurfa
         )
     }
 
-    private func resolvedPreviewParentGroups(
+    private func resolvedPreviewSurfaceLayout(
         for drag: IndexBoardSurfaceAppKitGroupDragState,
         baseProjection: BoardSurfaceProjection
-    ) -> [BoardSurfaceParentGroupPlacement] {
+    ) -> (
+        parentGroups: [BoardSurfaceParentGroupPlacement],
+        detachedPositionsByCardID: [UUID: IndexBoardGridPosition]
+    ) {
         let updatedParentGroups = baseProjection.parentGroups.map { group in
             guard group.parentCardID == drag.parentCardID else { return group }
             return BoardSurfaceParentGroupPlacement(
@@ -3224,17 +3432,24 @@ private final class IndexBoardSurfaceAppKitDocumentView: NSView, IndexBoardSurfa
 
         guard let movingGroup = updatedParentGroups.first(where: { $0.parentCardID == drag.parentCardID }),
               !movingGroup.isTempGroup else {
-            return updatedParentGroups.sorted(by: indexBoardSurfaceAppKitGroupSort)
+            return (
+                parentGroups: updatedParentGroups.sorted(by: indexBoardSurfaceAppKitGroupSort),
+                detachedPositionsByCardID: indexBoardDetachedGridPositionsByCardID(from: baseProjection)
+            )
         }
 
+        let referenceDetachedPositions = indexBoardDetachedGridPositionsByCardID(from: baseProjection)
         let normalizedLayout = normalizedIndexBoardSurfaceLayout(
             parentGroups: updatedParentGroups,
-            detachedPositionsByCardID: indexBoardDetachedGridPositionsByCardID(from: baseProjection),
+            detachedPositionsByCardID: referenceDetachedPositions,
             referenceParentGroups: baseProjection.parentGroups,
-            referenceDetachedPositionsByCardID: indexBoardDetachedGridPositionsByCardID(from: baseProjection),
+            referenceDetachedPositionsByCardID: referenceDetachedPositions,
             preferredLeadingParentCardID: drag.parentCardID
         )
-        return normalizedLayout.parentGroups.sorted(by: indexBoardSurfaceAppKitGroupSort)
+        return (
+            parentGroups: normalizedLayout.parentGroups.sorted(by: indexBoardSurfaceAppKitGroupSort),
+            detachedPositionsByCardID: normalizedLayout.detachedPositionsByCardID
+        )
     }
 
     private func resolvedLocalGroupDragPreview(
@@ -3242,12 +3457,12 @@ private final class IndexBoardSurfaceAppKitDocumentView: NSView, IndexBoardSurfa
     ) -> IndexBoardSurfaceAppKitGroupDragPreview? {
         withIndexBoardSurfaceAppKitSignpost(IndexBoardSurfaceAppKitSignpostName.resolvedLocalGroupPreview) {
             let snapshot = restingSceneSnapshot ?? makeRestingSceneSnapshot()
-            let previewParentGroups = resolvedPreviewParentGroups(
+            let previewLayout = resolvedPreviewSurfaceLayout(
                 for: drag,
                 baseProjection: snapshot.projection
             )
             var frames = snapshot.cardFrameByID
-            for group in previewParentGroups {
+            for group in previewLayout.parentGroups {
                 for (index, cardID) in group.cardIDs.enumerated() {
                     frames[cardID] = resolvedCardFrame(
                         for: IndexBoardGridPosition(
@@ -3257,7 +3472,10 @@ private final class IndexBoardSurfaceAppKitDocumentView: NSView, IndexBoardSurfa
                     )
                 }
             }
-            let targetFrame = previewParentGroups
+            for (cardID, position) in previewLayout.detachedPositionsByCardID {
+                frames[cardID] = resolvedCardFrame(for: position)
+            }
+            let targetFrame = previewLayout.parentGroups
                 .first(where: { $0.parentCardID == drag.parentCardID })
                 .map { resolvedCardFrame(for: $0.origin) }
             return IndexBoardSurfaceAppKitGroupDragPreview(
@@ -3283,7 +3501,14 @@ private final class IndexBoardSurfaceAppKitDocumentView: NSView, IndexBoardSurfa
                   origin.column <= maxStartColumn else {
                 return false
             }
-            return !occupiedPositions.contains(origin)
+            return (0..<safeWidth).allSatisfy { offset in
+                !occupiedPositions.contains(
+                    IndexBoardGridPosition(
+                        column: origin.column + offset,
+                        row: origin.row
+                    )
+                )
+            }
         }
 
         let clampedCandidate = IndexBoardGridPosition(
@@ -3551,11 +3776,14 @@ private final class IndexBoardSurfaceAppKitDocumentView: NSView, IndexBoardSurfa
             )
         )
         let previewTempDetachedCardIDs = Set(previewTempLayout.detachedPositionsByCardID.keys)
+        let referenceDetachedPositions = indexBoardDetachedGridPositionsByCardID(
+            from: configuration.surfaceProjection
+        )
 
         func normalizedPresentation(
             from parentGroups: [BoardSurfaceParentGroupPlacement]
         ) -> ([BoardSurfaceParentGroupPlacement], [BoardSurfaceItem]) {
-            let updatedParentGroups = parentGroups.map { placement in
+            let tempPositionedParentGroups = parentGroups.map { placement in
                 guard placement.isTempGroup,
                       let parentCardID = placement.parentCardID,
                       let origin = previewTempLayout.groupOriginByParentID[parentCardID] else {
@@ -3572,7 +3800,15 @@ private final class IndexBoardSurfaceAppKitDocumentView: NSView, IndexBoardSurfa
                     isMainline: placement.isMainline,
                     isTempGroup: placement.isTempGroup
                 )
-            }.sorted(by: indexBoardSurfaceAppKitGroupSort)
+            }
+
+            let normalizedLayout = normalizedIndexBoardSurfaceLayout(
+                parentGroups: tempPositionedParentGroups,
+                detachedPositionsByCardID: previewTempLayout.detachedPositionsByCardID,
+                referenceParentGroups: configuration.surfaceProjection.parentGroups,
+                referenceDetachedPositionsByCardID: referenceDetachedPositions
+            )
+            let updatedParentGroups = normalizedLayout.parentGroups.sorted(by: indexBoardSurfaceAppKitGroupSort)
 
             let normalizedFlowItems = updatedParentGroups.flatMap { placement in
                 let laneIndex = configuration.surfaceProjection.lanes.first(where: { $0.parentCardID == placement.parentCardID })?.laneIndex
@@ -3595,7 +3831,7 @@ private final class IndexBoardSurfaceAppKitDocumentView: NSView, IndexBoardSurfa
             }
 
             let tempLaneIndex = configuration.surfaceProjection.lanes.first(where: \.isTempLane)?.laneIndex
-            let normalizedDetachedItems = previewTempLayout.detachedPositionsByCardID
+            let normalizedDetachedItems = normalizedLayout.detachedPositionsByCardID
                 .sorted { lhs, rhs in
                     if lhs.value.row != rhs.value.row {
                         return lhs.value.row < rhs.value.row
@@ -3659,14 +3895,13 @@ private final class IndexBoardSurfaceAppKitDocumentView: NSView, IndexBoardSurfa
         for drag: IndexBoardSurfaceAppKitGroupDragState
     ) -> BoardSurfaceProjection {
         let baseProjection = restingSceneSnapshot?.projection ?? configuration.surfaceProjection
-        let updatedParentGroups = resolvedPreviewParentGroups(
+        let previewLayout = resolvedPreviewSurfaceLayout(
             for: drag,
             baseProjection: baseProjection
         )
-
-        let stationaryDetachedItems = baseProjection.surfaceItems.filter { $0.parentGroupID == nil }
+        let baseItemsByCardID = Dictionary(uniqueKeysWithValues: baseProjection.surfaceItems.map { ($0.cardID, $0) })
         var regroupedItems: [BoardSurfaceItem] = []
-        for placement in updatedParentGroups.sorted(by: indexBoardSurfaceAppKitGroupSort) {
+        for placement in previewLayout.parentGroups.sorted(by: indexBoardSurfaceAppKitGroupSort) {
             let laneIndex = baseProjection.lanes.first(where: { $0.parentCardID == placement.parentCardID })?.laneIndex ?? 0
             let updatedItems = placement.cardIDs.enumerated().map { index, cardID in
                 BoardSurfaceItem(
@@ -3685,12 +3920,35 @@ private final class IndexBoardSurfaceAppKitDocumentView: NSView, IndexBoardSurfa
             regroupedItems.append(contentsOf: updatedItems)
         }
 
-        let sortedItems = (regroupedItems + stationaryDetachedItems).sorted(by: indexBoardSurfaceAppKitSort)
+        let detachedItems = previewLayout.detachedPositionsByCardID
+            .sorted { lhs, rhs in
+                if lhs.value.row != rhs.value.row {
+                    return lhs.value.row < rhs.value.row
+                }
+                if lhs.value.column != rhs.value.column {
+                    return lhs.value.column < rhs.value.column
+                }
+                return lhs.key.uuidString < rhs.key.uuidString
+            }
+            .map { cardID, position in
+                let sourceItem = baseItemsByCardID[cardID]
+                return BoardSurfaceItem(
+                    cardID: cardID,
+                    laneParentID: sourceItem?.laneParentID,
+                    laneIndex: sourceItem?.laneIndex ?? 0,
+                    slotIndex: sourceItem?.slotIndex,
+                    detachedGridPosition: position,
+                    gridPosition: position,
+                    parentGroupID: nil
+                )
+            }
+
+        let sortedItems = (regroupedItems + detachedItems).sorted(by: indexBoardSurfaceAppKitSort)
         return BoardSurfaceProjection(
             source: baseProjection.source,
             startAnchor: baseProjection.startAnchor,
             lanes: baseProjection.lanes,
-            parentGroups: updatedParentGroups.sorted(by: indexBoardSurfaceAppKitGroupSort),
+            parentGroups: previewLayout.parentGroups.sorted(by: indexBoardSurfaceAppKitGroupSort),
             tempStrips: baseProjection.tempStrips,
             surfaceItems: sortedItems,
             orderedCardIDs: sortedItems.map(\.cardID)
@@ -5036,8 +5294,6 @@ private final class IndexBoardSurfaceAppKitContainerView: NSView {
     private var pendingViewportReapplyAttempts = 0
     private var isRestoringInitialViewport = true
     private var hasPresentedInitialViewport = false
-    private let viewportDebugID = String(UUID().uuidString.prefix(8))
-    private var viewportDebugLogBudget = 24
 
     init(configuration: IndexBoardSurfaceAppKitConfiguration) {
         backgroundView = IndexBoardSurfaceAppKitBackgroundView(theme: configuration.theme)
@@ -5075,7 +5331,6 @@ private final class IndexBoardSurfaceAppKitContainerView: NSView {
 
         update(configuration: configuration)
         installViewportObservers()
-        logViewportDebug("init_complete")
     }
 
     private func installViewportObservers() {
@@ -5162,7 +5417,6 @@ private final class IndexBoardSurfaceAppKitContainerView: NSView {
         applyConfiguredViewportIfNeeded()
         scheduleDeferredViewportReapplyIfNeeded()
         updateInitialViewportPresentation()
-        logViewportDebug("layout")
     }
 
     override func viewDidMoveToWindow() {
@@ -5173,7 +5427,6 @@ private final class IndexBoardSurfaceAppKitContainerView: NSView {
             self?.applyConfiguredViewportIfNeeded()
             self?.scheduleDeferredViewportReapplyIfNeeded()
             self?.updateInitialViewportPresentation()
-            self?.logViewportDebug("view_did_move_to_window_async")
         }
     }
 
@@ -5205,7 +5458,6 @@ private final class IndexBoardSurfaceAppKitContainerView: NSView {
         applyConfiguredViewportIfNeeded()
         scheduleDeferredViewportReapplyIfNeeded()
         updateInitialViewportPresentation()
-        logViewportDebug("update")
 
         if let preservedOrigin = documentView.pendingDropPreservedScrollOrigin {
             let visibleRect = scrollView.documentVisibleRect
@@ -5236,9 +5488,6 @@ private final class IndexBoardSurfaceAppKitContainerView: NSView {
     }
 
     private func applyConfiguredViewportIfNeeded() {
-        if viewportNeedsExternalApply() {
-            logViewportDebug("apply_begin")
-        }
         let configuration = documentView.configuration
 
         if !isLiveMagnifying,
@@ -5268,11 +5517,6 @@ private final class IndexBoardSurfaceAppKitContainerView: NSView {
             )
             scrollView.reflectScrolledClipView(scrollView.contentView)
             isApplyingExternalViewport = false
-        }
-        if viewportNeedsExternalApply() {
-            logViewportDebug("apply_end_needs_more")
-        } else {
-            logViewportDebug("apply_end_resolved")
         }
     }
 
@@ -5309,7 +5553,6 @@ private final class IndexBoardSurfaceAppKitContainerView: NSView {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.applyConfiguredViewportIfNeeded()
-            self.logViewportDebug("deferred_apply_tick")
             if self.isRestoringInitialViewport, self.initialViewportRestoreCompleted() {
                 self.isRestoringInitialViewport = false
             }
@@ -5347,24 +5590,6 @@ private final class IndexBoardSurfaceAppKitContainerView: NSView {
         return matchesScale && matchesOrigin
     }
 
-    private func logViewportDebug(_ event: String) {
-        guard viewportDebugLogBudget > 0 else { return }
-        viewportDebugLogBudget -= 1
-        let configuration = documentView.configuration
-        let currentOrigin = scrollView.contentView.bounds.origin
-        let visibleRect = scrollView.documentVisibleRect
-        indexBoardRestoreTrace(
-            "board_surface_\(event)",
-            "id=\(self.viewportDebugID) desiredScroll=(\(String(format: "%.2f", configuration.scrollOffset.x)),\(String(format: "%.2f", configuration.scrollOffset.y))) " +
-            "currentScroll=(\(String(format: "%.2f", currentOrigin.x)),\(String(format: "%.2f", currentOrigin.y))) " +
-            "desiredZoom=\(String(format: "%.2f", configuration.zoomScale)) currentZoom=\(String(format: "%.2f", self.scrollView.magnification)) " +
-            "docSize=(\(String(format: "%.2f", self.documentView.frame.width)),\(String(format: "%.2f", self.documentView.frame.height))) " +
-            "visibleRect=(\(String(format: "%.2f", visibleRect.width)),\(String(format: "%.2f", visibleRect.height))) " +
-            "containerBounds=(\(String(format: "%.2f", self.bounds.width)),\(String(format: "%.2f", self.bounds.height))) " +
-            "reapplyAttempts=\(self.pendingViewportReapplyAttempts)"
-        )
-    }
-
     private func handleViewportChanged() {
         guard !isApplyingExternalViewport,
               !documentView.suppressViewportChangeNotifications else { return }
@@ -5376,7 +5601,6 @@ private final class IndexBoardSurfaceAppKitContainerView: NSView {
                 isRestoringInitialViewport = false
             } else {
                 scheduleDeferredViewportReapplyIfNeeded()
-                logViewportDebug("skip_initial_viewport_change")
                 return
             }
         }
@@ -5553,6 +5777,8 @@ struct IndexBoardSurfaceAppKitPhaseTwoView: View {
     let scrollOffset: CGPoint
     let revealCardID: UUID?
     let revealRequestToken: Int
+    let inlineEditRequestCardID: UUID?
+    let inlineEditRequestToken: Int
     let isInteractionEnabled: Bool
     let onClose: () -> Void
     let onCreateTempCard: () -> Void
@@ -5612,6 +5838,8 @@ struct IndexBoardSurfaceAppKitPhaseTwoView: View {
                         scrollOffset: scrollOffset,
                         revealCardID: revealCardID,
                         revealRequestToken: revealRequestToken,
+                        inlineEditRequestCardID: inlineEditRequestCardID,
+                        inlineEditRequestToken: inlineEditRequestToken,
                         isInteractionEnabled: isInteractionEnabled,
                         onCreateTempCard: onCreateTempCard,
                         onCreateTempCardAt: onCreateTempCardAt,

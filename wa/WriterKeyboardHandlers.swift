@@ -5,6 +5,12 @@ extension ScenarioWriterView {
 
     // --- Key Handling Logic ---
     func handleGlobalKeyPress(_ press: KeyPress) -> KeyPress.Result {
+        if isIndexBoardActive,
+           let textView = NSApp.keyWindow?.firstResponder as? NSTextView,
+           textView.isEditable,
+           textView.identifier?.rawValue == "IndexBoardInlineTextView" {
+            return .ignored
+        }
         if isIndexBoardInlineEditing {
             return .ignored
         }
@@ -501,12 +507,16 @@ extension ScenarioWriterView {
         guard !press.modifiers.contains(.command),
               !press.modifiers.contains(.option),
               !press.modifiers.contains(.control) else { return nil }
-        switch press.key {
-        case .upArrow, .downArrow, .leftArrow, .rightArrow:
-            return handleNavigation(press: press)
-        default:
-            return nil
-        }
+        guard let direction = directionForNavigationKeyPress(press.key) else { return nil }
+        _ = handleMainArrowNavigation(
+            direction: direction,
+            isRepeat: press.phase == .repeat,
+            isShiftPressed: press.modifiers.contains(.shift),
+            consumeRightArrowWhenUnavailable: direction == .right,
+            seedRangeAnchorWhenNoActive: true,
+            playBoundaryFeedbackWhenUnhandled: true
+        )
+        return .handled
     }
 
     func handleCommandCreationAndSearchShortcut(_ press: KeyPress) -> KeyPress.Result? {
@@ -1071,21 +1081,18 @@ extension ScenarioWriterView {
             if event.isARepeat {
                 mainArrowRepeatAnimationSuppressedUntil = Date().addingTimeInterval(0.16)
             }
-            bounceDebugLog(
-                "mainNavKeyMonitor keyCode=\(event.keyCode) repeat=\(event.isARepeat) " +
-                "active=\(activeCardID?.uuidString ?? "nil")"
-            )
-            if handleNavigationKeyCode(
-                event.keyCode,
-                isRepeat: event.isARepeat,
-                isShiftPressed: flags.contains(.shift)
-            ) {
+            if let direction = directionForNavigationKeyCode(event.keyCode) {
+                _ = handleMainArrowNavigation(
+                    direction: direction,
+                    isRepeat: event.isARepeat,
+                    isShiftPressed: flags.contains(.shift),
+                    consumeRightArrowWhenUnavailable: direction == .right,
+                    seedRangeAnchorWhenNoActive: true,
+                    playBoundaryFeedbackWhenUnhandled: true
+                )
                 return nil
             }
-            if [123, 124, 125, 126].contains(event.keyCode) {
-                playMainBoundaryFeedbackIfNeeded(for: event.keyCode, activeID: activeCardID)
-                return nil
-            }
+            clearMainNoChildRightArm()
             return event
         }
     }
@@ -1109,16 +1116,6 @@ extension ScenarioWriterView {
         mainBoundaryFeedbackCardID = activeID
         mainBoundaryFeedbackKeyCode = keyCode
         playSoftBoundaryFeedbackSound()
-    }
-
-    func boundaryFeedbackKeyCode(for key: KeyEquivalent) -> UInt16? {
-        switch key {
-        case .upArrow: return 126
-        case .downArrow: return 125
-        case .rightArrow: return 124
-        case .leftArrow: return 123
-        default: return nil
-        }
     }
 
     func registerMainVerticalArrowPress(for keyCode: UInt16) -> Bool {
@@ -1224,6 +1221,7 @@ extension ScenarioWriterView {
 
     private func resolvedMainBoundaryNavigableLevel(at levelIndex: Int) -> [SceneCard]? {
         guard let level = resolvedMainUnfilteredLevel(at: levelIndex) else { return nil }
+        guard activeIndexBoardSession != nil else { return level }
         let filtered = level.filter { !isIndexBoardTempDescendant(cardID: $0.id) }
         return filtered.isEmpty ? level : filtered
     }
@@ -1257,47 +1255,6 @@ extension ScenarioWriterView {
             return fallback
         }
         return fullLevel
-    }
-
-    func nearestChildInSibling(
-        _ sibling: SceneCard,
-        matching category: String?,
-        rankedNextLevel: [SceneCard],
-        anchorRank: Int
-    ) -> (child: SceneCard, nextRank: Int)? {
-        let candidates: [SceneCard]
-        if let category {
-            candidates = sibling.sortedChildren.filter { $0.category == category }
-        } else {
-            candidates = sibling.sortedChildren
-        }
-
-        let rankedCandidates = candidates.compactMap { child -> (child: SceneCard, nextRank: Int)? in
-            guard let nextRank = rankedNextLevel.firstIndex(where: { $0.id == child.id }) else {
-                return nil
-            }
-            return (child, nextRank)
-        }
-        guard !rankedCandidates.isEmpty else { return nil }
-
-        return rankedCandidates.min { lhs, rhs in
-            let leftDistance = abs(lhs.nextRank - anchorRank)
-            let rightDistance = abs(rhs.nextRank - anchorRank)
-            if leftDistance != rightDistance {
-                return leftDistance < rightDistance
-            }
-
-            let leftForwardBias = lhs.nextRank >= anchorRank ? 0 : 1
-            let rightForwardBias = rhs.nextRank >= anchorRank ? 0 : 1
-            if leftForwardBias != rightForwardBias {
-                return leftForwardBias < rightForwardBias
-            }
-
-            if lhs.nextRank != rhs.nextRank {
-                return lhs.nextRank < rhs.nextRank
-            }
-            return lhs.child.orderIndex < rhs.child.orderIndex
-        }
     }
 
     func nearestLevelChildTarget(
@@ -1364,15 +1321,6 @@ extension ScenarioWriterView {
         }
 
         return chosenParent?.child
-    }
-
-    func nearestLevelChildTarget(in level: [SceneCard], around index: Int) -> SceneCard? {
-        return nearestLevelChildTarget(
-            in: level,
-            nextLevel: [],
-            around: index,
-            matching: nil
-        )
     }
 
     enum MainRightResolution {
@@ -1608,119 +1556,36 @@ extension ScenarioWriterView {
         }
     }
 
-    // --- Navigation Key Code Handler ---
-    func handleNavigationKeyCode(_ keyCode: UInt16, isRepeat: Bool = false, isShiftPressed: Bool = false) -> Bool {
-        let previousActiveID = activeCardID
-        let handled: Bool
-        switch keyCode {
-        case 126: // up
-            handled = performMainArrowNavigation(
-                .up,
-                isRepeat: isRepeat,
-                isShiftPressed: isShiftPressed,
-                consumeRightArrowWhenUnavailable: false,
-                seedRangeAnchorWhenNoActive: true
-            )
-        case 125: // down
-            handled = performMainArrowNavigation(
-                .down,
-                isRepeat: isRepeat,
-                isShiftPressed: isShiftPressed,
-                consumeRightArrowWhenUnavailable: false,
-                seedRangeAnchorWhenNoActive: true
-            )
-        case 124: // right
-            handled = performMainArrowNavigation(
-                .right,
-                isRepeat: isRepeat,
-                isShiftPressed: isShiftPressed,
-                consumeRightArrowWhenUnavailable: true,
-                seedRangeAnchorWhenNoActive: true
-            )
-        case 123: // left
-            handled = performMainArrowNavigation(
-                .left,
-                isRepeat: isRepeat,
-                isShiftPressed: isShiftPressed,
-                consumeRightArrowWhenUnavailable: false,
-                seedRangeAnchorWhenNoActive: true
-            )
-        default:
-            clearMainNoChildRightArm()
-            handled = false
-        }
-        if handled {
-            registerHandledMainArrowNavigation(
-                direction: directionForNavigationKeyCode(keyCode),
-                previousActiveID: previousActiveID,
-                isRepeat: isRepeat
-            )
-        }
-        return handled
-    }
-
-    // --- Navigation Press Handler ---
-    func handleNavigation(press: KeyPress) -> KeyPress.Result {
-        if activeCardID == nil && scenario.rootCards.isEmpty {
-            return .ignored
-        }
-        let isShiftPressed = press.modifiers.contains(.shift)
-        let isRepeat = (press.phase == .repeat)
+    @discardableResult
+    func handleMainArrowNavigation(
+        direction: MainArrowDirection,
+        isRepeat: Bool,
+        isShiftPressed: Bool,
+        consumeRightArrowWhenUnavailable: Bool,
+        seedRangeAnchorWhenNoActive: Bool,
+        playBoundaryFeedbackWhenUnhandled: Bool
+    ) -> Bool {
         if isRepeat {
             mainArrowRepeatAnimationSuppressedUntil = Date().addingTimeInterval(0.16)
         }
         let previousActiveID = activeCardID
-        let handled: Bool
-        bounceDebugLog(
-            "handleNavigation key=\(String(describing: press.key)) phase=\(String(describing: press.phase)) " +
-            "repeat=\(isRepeat) active=\(activeCardID?.uuidString ?? "nil")"
+        let handled = performMainArrowNavigation(
+            direction,
+            isRepeat: isRepeat,
+            isShiftPressed: isShiftPressed,
+            consumeRightArrowWhenUnavailable: consumeRightArrowWhenUnavailable,
+            seedRangeAnchorWhenNoActive: seedRangeAnchorWhenNoActive
         )
-        switch press.key {
-        case .upArrow:
-            handled = performMainArrowNavigation(
-                .up,
-                isRepeat: isRepeat,
-                isShiftPressed: isShiftPressed,
-                consumeRightArrowWhenUnavailable: false,
-                seedRangeAnchorWhenNoActive: false
-            )
-        case .downArrow:
-            handled = performMainArrowNavigation(
-                .down,
-                isRepeat: isRepeat,
-                isShiftPressed: isShiftPressed,
-                consumeRightArrowWhenUnavailable: false,
-                seedRangeAnchorWhenNoActive: false
-            )
-        case .rightArrow:
-            handled = performMainArrowNavigation(
-                .right,
-                isRepeat: isRepeat,
-                isShiftPressed: isShiftPressed,
-                consumeRightArrowWhenUnavailable: false,
-                seedRangeAnchorWhenNoActive: false
-            )
-        case .leftArrow:
-            handled = performMainArrowNavigation(
-                .left,
-                isRepeat: isRepeat,
-                isShiftPressed: isShiftPressed,
-                consumeRightArrowWhenUnavailable: false,
-                seedRangeAnchorWhenNoActive: false
-            )
-        default: return .ignored
-        }
         if handled {
             registerHandledMainArrowNavigation(
-                direction: directionForNavigationKeyPress(press.key),
+                direction: direction,
                 previousActiveID: previousActiveID,
                 isRepeat: isRepeat
             )
+        } else if playBoundaryFeedbackWhenUnhandled {
+            playMainBoundaryFeedbackIfNeeded(for: keyCode(for: direction), activeID: activeCardID)
         }
-        if !handled, let keyCode = boundaryFeedbackKeyCode(for: press.key) {
-            playMainBoundaryFeedbackIfNeeded(for: keyCode, activeID: activeCardID)
-        }
-        return .handled
+        return handled
     }
 
     func directionForNavigationKeyCode(_ keyCode: UInt16) -> MainArrowDirection? {
@@ -1743,20 +1608,21 @@ extension ScenarioWriterView {
         }
     }
 
+    func keyCode(for direction: MainArrowDirection) -> UInt16 {
+        switch direction {
+        case .up: return 126
+        case .down: return 125
+        case .right: return 124
+        case .left: return 123
+        }
+    }
+
     func registerHandledMainArrowNavigation(
         direction: MainArrowDirection?,
         previousActiveID: UUID?,
         isRepeat: Bool
     ) {
         guard let direction else { return }
-
-        MainCanvasNavigationDiagnostics.shared.beginFocusIntent(
-            ownerKey: mainCanvasDiagnosticsOwnerKey,
-            direction: direction,
-            isRepeat: isRepeat,
-            sourceCardID: previousActiveID,
-            intendedCardID: activeCardID
-        )
 
         switch direction {
         case .left, .right:

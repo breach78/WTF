@@ -359,6 +359,24 @@ extension ScenarioWriterView {
         performMainTypingRedo()
     }
 
+    func performIndexBoardTextUndoIfPossible() -> Bool {
+        guard indexBoardEditorDraft != nil || isIndexBoardInlineEditing else { return false }
+        guard let textView = NSApp.keyWindow?.firstResponder as? NSTextView else { return true }
+        if let undoManager = textView.undoManager, undoManager.canUndo {
+            undoManager.undo()
+        }
+        return true
+    }
+
+    func performIndexBoardTextRedoIfPossible() -> Bool {
+        guard indexBoardEditorDraft != nil || isIndexBoardInlineEditing else { return false }
+        guard let textView = NSApp.keyWindow?.firstResponder as? NSTextView else { return true }
+        if let undoManager = textView.undoManager, undoManager.canRedo {
+            undoManager.redo()
+        }
+        return true
+    }
+
     func performUndo() {
         finishEditing()
         guard let previous = undoStack.popLast() else {

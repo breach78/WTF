@@ -1,0 +1,192 @@
+{
+  "source": "/Users/three/app_build/wa/wa/waApp.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "레퍼런스 카드",
+        "location": {
+          "startingColumn": 16,
+          "startingLine": 646
+        }
+      },
+      {
+        "comment": "",
+        "key": "작업 파일을 먼저 열어주세요.",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 653
+        }
+      },
+      {
+        "comment": "",
+        "key": "Undo",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 663
+        }
+      },
+      {
+        "comment": "",
+        "key": "Redo",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 671
+        }
+      },
+      {
+        "comment": "",
+        "key": "레퍼런스 창 열기",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 680
+        }
+      },
+      {
+        "comment": "",
+        "key": "인덱스 카드뷰 토글",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 686
+        }
+      },
+      {
+        "comment": "",
+        "key": "집중 모드 토글",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 691
+        }
+      },
+      {
+        "comment": "",
+        "key": "다크 모드",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 697
+        }
+      },
+      {
+        "comment": "",
+        "key": "메인 작업창 스플릿 모드",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 700
+        }
+      },
+      {
+        "comment": "",
+        "key": "메인 캔버스 좌우 스크롤",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 703
+        }
+      },
+      {
+        "comment": "",
+        "key": "포커스 이동 애니메이션",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 710
+        }
+      },
+      {
+        "comment": "",
+        "key": "포커스 모드 타이프라이터",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 713
+        }
+      },
+      {
+        "comment": "",
+        "key": "메인 작업창 줌 축소",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 716
+        }
+      },
+      {
+        "comment": "",
+        "key": "메인 작업창 줌 확대",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 722
+        }
+      },
+      {
+        "comment": "",
+        "key": "메인 작업창 줌 100%",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 728
+        }
+      },
+      {
+        "comment": "",
+        "key": "편집기",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 735
+        }
+      },
+      {
+        "comment": "",
+        "key": "폰트 작게",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 736
+        }
+      },
+      {
+        "comment": "",
+        "key": "폰트 크게",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 741
+        }
+      },
+      {
+        "comment": "",
+        "key": "폰트 기본값 (17pt)",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 746
+        }
+      },
+      {
+        "comment": "",
+        "key": "데이터 저장 위치 설정",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 768
+        }
+      },
+      {
+        "comment": "",
+        "key": "시나리오 텍스트 파일을 저장할 작업 파일(.wtf)을 선택해주세요.\n클라우드 동기화 폴더(Dropbox, iCloud Drive 등)에 저장하면\n다른 기기에서도 이어서 작업할 수 있습니다.",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 771
+        }
+      },
+      {
+        "comment": "",
+        "key": "기존 작업 파일 열기",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 780
+        }
+      },
+      {
+        "comment": "",
+        "key": "새 작업 파일 만들기",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 788
+        }
+      }
+    ]
+  },
+  "version": 1
+}

@@ -90,6 +90,7 @@ extension ScenarioWriterView {
     }
 
     func isIndexBoardTempDescendant(cardID: UUID?) -> Bool {
+        guard activeIndexBoardSession != nil else { return false }
         guard let cardID, let tempContainer = resolvedIndexBoardTempContainer() else { return false }
         var current = findCard(by: cardID)
         while let card = current {

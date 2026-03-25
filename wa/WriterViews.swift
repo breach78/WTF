@@ -88,8 +88,6 @@ struct ScenarioWriterView: View {
     @AppStorage("geminiModelID") var geminiModelID: String = "gemini-3.1-pro-preview"
     @AppStorage("autoBackupEnabledOnQuit") var autoBackupEnabledOnQuit: Bool = true
     @AppStorage("autoBackupDirectoryPath") var autoBackupDirectoryPath: String = ""
-    @AppStorage("lastEditedScenarioID") var lastEditedScenarioID: String = ""
-    @AppStorage("lastEditedCardID") var lastEditedCardID: String = ""
     @AppStorage("lastFocusedScenarioID") var lastFocusedScenarioID: String = ""
     @AppStorage("lastFocusedCardID") var lastFocusedCardID: String = ""
     @AppStorage("lastFocusedCaretLocation") var lastFocusedCaretLocation: Int = -1
@@ -104,6 +102,8 @@ struct ScenarioWriterView: View {
     @State var editingCardID: UUID? = nil
     @State var indexBoardEditorDraft: IndexBoardEditorDraft? = nil
     @State var isIndexBoardInlineEditing: Bool = false
+    @State var indexBoardInlineEditRequestCardID: UUID? = nil
+    @State var indexBoardInlineEditRequestToken: Int = 0
     @State var pendingIndexBoardCreationPrevStateByCardID: [UUID: ScenarioState] = [:]
     @State var showDeleteAlert: Bool = false
     @State var pendingUpperCardCreationRequest: UpperCardCreationRequest? = nil
@@ -411,13 +411,6 @@ struct ScenarioWriterView: View {
         forceSemantic: Bool = false,
         reason: MainCanvasViewState.RestoreRequest.Reason = .generic
     ) {
-        indexBoardRestoreTrace(
-            "main_canvas_schedule_restore_request",
-            "target=\(debugRestoreUUID(targetCardID)) visibleLevel=\(visibleLevel.map(String.init) ?? "nil") " +
-            "forceSemantic=\(forceSemantic) reason=\(reason) active=\(debugRestoreUUID(activeCardID)) " +
-            "editing=\(debugRestoreUUID(editingCardID)) suppressHorizontal=\(suppressHorizontalAutoScroll) " +
-            "currentOffset=\(debugRestoreCGFloat(mainCanvasScrollCoordinator.resolvedMainCanvasHorizontalOffset()))"
-        )
         mainCanvasViewState.scheduleRestoreRequest(
             targetCardID: targetCardID,
             visibleLevel: visibleLevel,
@@ -449,11 +442,6 @@ struct ScenarioWriterView: View {
     var mainCanvasHorizontalScrollMode: MainCanvasHorizontalScrollMode {
         get { MainCanvasHorizontalScrollMode(rawValue: mainCanvasHorizontalScrollModeRawValue) ?? .twoStep }
         nonmutating set { mainCanvasHorizontalScrollModeRawValue = newValue.rawValue }
-    }
-
-    var mainCanvasDiagnosticsOwnerKey: String {
-        let paneKey = splitModeEnabled ? splitPaneID : 0
-        return "scenario:\(scenario.id.uuidString)|pane:\(paneKey)"
     }
 
     func resolvedMainCanvasHorizontalViewportSnapshotOffset() -> CGFloat? {
@@ -1345,11 +1333,6 @@ struct ScenarioWriterView: View {
 
     func handleWorkspaceAppear() {
         mainCanvasScrollCoordinator.reset()
-        MainCanvasNavigationDiagnostics.shared.reset(
-            ownerKey: mainCanvasDiagnosticsOwnerKey,
-            scenarioID: scenario.id,
-            splitPaneID: splitModeEnabled ? splitPaneID : 0
-        )
         syncMainCanvasInteractionState()
         syncScenarioObservedState()
         restoreStartupViewportIfNeeded()
@@ -1423,25 +1406,11 @@ struct ScenarioWriterView: View {
     }
 
     func handleActiveCardIDChange(_ newID: UUID?) {
-        let clearedRequestCount = mainColumnLastFocusRequestByKey.count
         mainColumnLastFocusRequestByKey = [:]
         if let newID, scenario.rootCards.contains(where: { $0.id == newID }) {
             mainColumnViewportRestoreUntil = Date().addingTimeInterval(0.35)
         }
-        bounceDebugLog(
-            "handleActiveCardIDChange new=\(debugCardIDString(newID)) clearedRequests=\(clearedRequestCount) " +
-            "restoreUntil=\(mainColumnViewportRestoreUntil.timeIntervalSince1970) \(debugFocusStateSummary())"
-        )
-        indexBoardRestoreTrace(
-            "main_canvas_handle_active_card_change",
-            "newID=\(debugRestoreUUID(newID)) clearedRequests=\(clearedRequestCount) " +
-            "showFocusMode=\(showFocusMode) boardActive=\(isIndexBoardActive) " +
-            "suppressOnce=\(suppressAutoScrollOnce) suppressHorizontal=\(suppressHorizontalAutoScroll) " +
-            "restoreUntil=\(String(format: "%.3f", mainColumnViewportRestoreUntil.timeIntervalSince1970)) " +
-            "offset=\(debugRestoreCGFloat(mainCanvasScrollCoordinator.resolvedMainCanvasHorizontalOffset()))"
-        )
         if let newID, findCard(by: newID) != nil {
-            persistLastEditedCard(newID)
             if editingCardID == nil && !showFocusMode {
                 persistLastFocusSnapshot(cardID: newID, isEditing: false, inFocusMode: false)
             }
@@ -1476,10 +1445,6 @@ struct ScenarioWriterView: View {
         }
         let clickFocusedTarget = pendingMainClickHorizontalFocusTargetID == newID
         if mainColumnViewportRestoreUntil > Date(), !clickFocusedTarget {
-            indexBoardRestoreTrace(
-                "main_canvas_handle_active_card_change_preserve_viewport",
-                "newID=\(debugRestoreUUID(newID)) restoreUntil=\(String(format: "%.3f", mainColumnViewportRestoreUntil.timeIntervalSince1970))"
-            )
             syncMainCanvasInteractionState()
             return
         }
@@ -1488,10 +1453,6 @@ struct ScenarioWriterView: View {
     }
 
     func handleScenarioCardsVersionChange() {
-        bounceDebugLog(
-            "handleScenarioCardsVersionChange version=\(scenario.cardsVersion) " +
-            "\(debugFocusStateSummary())"
-        )
         mainColumnLastFocusRequestByKey = [:]
         if isInactiveSplitPane {
             scheduleInactivePaneSnapshotRefresh()
@@ -1543,10 +1504,6 @@ struct ScenarioWriterView: View {
 
     func handleWorkspaceDisappear() {
         teardownIndexBoardIfNeeded(restoreEntryState: false)
-        MainCanvasNavigationDiagnostics.shared.emitSummary(
-            ownerKey: mainCanvasDiagnosticsOwnerKey,
-            reason: "workspaceDisappear"
-        )
         persistCurrentFocusSnapshotIfPossible()
         persistCurrentViewportSnapshotIfPossible()
         releaseScenarioTimestampSuppressionIfNeeded()
@@ -1653,7 +1610,6 @@ struct ScenarioWriterView: View {
 
     func handleEditingCardIDChange(oldID: UUID?, newID: UUID?) {
         if let newID {
-            persistLastEditedCard(newID)
             if !showFocusMode {
                 persistLastFocusSnapshot(cardID: newID, isEditing: true, inFocusMode: false)
             }
@@ -1829,6 +1785,9 @@ struct ScenarioWriterView: View {
         DispatchQueue.main.async {
             guard acceptsKeyboardInput else { return }
             if isPreviewingHistory || showHistoryBar || isSearchFocused { return }
+            if performIndexBoardTextUndoIfPossible() {
+                return
+            }
             if showFocusMode {
                 performFocusUndo()
             } else {
@@ -1846,6 +1805,9 @@ struct ScenarioWriterView: View {
         DispatchQueue.main.async {
             guard acceptsKeyboardInput else { return }
             if isPreviewingHistory || showHistoryBar || isSearchFocused { return }
+            if performIndexBoardTextRedoIfPossible() {
+                return
+            }
             if showFocusMode {
                 performFocusRedo()
             } else {
@@ -2840,28 +2802,18 @@ struct ScenarioWriterView: View {
         guard acceptsKeyboardInput else { return }
         guard let id = newID else { return }
         if showFocusMode {
-            indexBoardRestoreTrace("main_canvas_auto_scroll_skip", "reason=focusMode target=\(debugRestoreUUID(id))")
             return
         }
         if pendingMainEditingSiblingNavigationTargetID == id {
-            indexBoardRestoreTrace("main_canvas_auto_scroll_skip", "reason=pendingSibling target=\(debugRestoreUUID(id))")
             return
         }
         let clickFocusedTarget = pendingMainClickHorizontalFocusTargetID == id
         if suppressHorizontalAutoScroll && !clickFocusedTarget {
-            indexBoardRestoreTrace(
-                "main_canvas_auto_scroll_skip",
-                "reason=suppressHorizontal target=\(debugRestoreUUID(id)) clickFocused=\(clickFocusedTarget)"
-            )
             return
         }
         if suppressAutoScrollOnce {
             suppressAutoScrollOnce = false
             if !clickFocusedTarget {
-                indexBoardRestoreTrace(
-                    "main_canvas_auto_scroll_skip",
-                    "reason=suppressOnce target=\(debugRestoreUUID(id)) clickFocused=\(clickFocusedTarget)"
-                )
                 return
             }
         }
@@ -2870,10 +2822,6 @@ struct ScenarioWriterView: View {
             (pendingMainHorizontalScrollAnimation ?? !shouldSuppressMainArrowRepeatAnimation())
         pendingMainHorizontalScrollAnimation = nil
         if clickFocusedTarget {
-            indexBoardRestoreTrace(
-                "main_canvas_auto_scroll_execute",
-                "target=\(debugRestoreUUID(id)) trigger=clickFocused animated=\(animated) availableWidth=\(String(format: "%.2f", availableWidth))"
-            )
             scrollToColumnIfNeeded(
                 targetCardID: id,
                 proxy: hProxy,
@@ -2887,11 +2835,6 @@ struct ScenarioWriterView: View {
             return
         }
         if !isPreviewingHistory {
-            indexBoardRestoreTrace(
-                "main_canvas_auto_scroll_execute",
-                "target=\(debugRestoreUUID(id)) trigger=activeCard animated=\(animated) availableWidth=\(String(format: "%.2f", availableWidth)) " +
-                "clickFocused=\(clickFocusedTarget)"
-            )
             scrollToColumnIfNeeded(
                 targetCardID: id,
                 proxy: hProxy,
@@ -3247,10 +3190,6 @@ struct ScenarioWriterView: View {
 
     func applyStoredMainColumnViewportOffsets(_ offsets: [String: CGFloat]) {
         guard !offsets.isEmpty else { return }
-        indexBoardRestoreTrace(
-            "main_canvas_apply_column_viewport_offsets_begin",
-            "count=\(offsets.count) offsets=\(debugRestoreViewportOffsets(offsets)) active=\(debugRestoreUUID(activeCardID))"
-        )
 
         var didScheduleCaptureSuspension = false
         for (viewportKey, storedOffsetY) in offsets.sorted(by: { $0.key < $1.key }) {
@@ -3278,11 +3217,6 @@ struct ScenarioWriterView: View {
                 deadZone: 0.5,
                 snapToPixel: true
             )
-            indexBoardRestoreTrace(
-                "main_canvas_apply_column_viewport_offsets_applied",
-                "viewportKey=\(viewportKey) targetY=\(String(format: "%.2f", storedOffsetY)) " +
-                "currentY=\(String(format: "%.2f", scrollView.contentView.bounds.origin.y)) maxY=\(String(format: "%.2f", maxY))"
-            )
         }
     }
 
@@ -3297,12 +3231,6 @@ struct ScenarioWriterView: View {
     private func startupActiveCard() -> SceneCard? {
         if let snapshot = startupFocusSnapshot() {
             return snapshot.card
-        }
-        if scenario.id.uuidString == lastEditedScenarioID,
-           let restoredID = UUID(uuidString: lastEditedCardID),
-           let restored = findCard(by: restoredID),
-           !restored.isArchived {
-            return restored
         }
         return scenario.rootCards.last
     }
@@ -3384,9 +3312,4 @@ struct ScenarioWriterView: View {
         }
     }
 
-    private func persistLastEditedCard(_ cardID: UUID) {
-        guard let card = findCard(by: cardID), !card.isArchived else { return }
-        lastEditedScenarioID = scenario.id.uuidString
-        lastEditedCardID = cardID.uuidString
-    }
 }

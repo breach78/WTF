@@ -1,0 +1,280 @@
+{
+  "source": "/Users/three/app_build/wa/wa/WriterViews.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "카드 삭제",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 1235
+        }
+      },
+      {
+        "comment": "",
+        "key": "새 상위 카드 만들기",
+        "location": {
+          "startingColumn": 17,
+          "startingLine": 1258
+        }
+      },
+      {
+        "comment": "",
+        "key": "알림",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 1300
+        }
+      },
+      {
+        "comment": "",
+        "key": "취소",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 1239
+        }
+      },
+      {
+        "comment": "",
+        "key": "삭제",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 1241
+        }
+      },
+      {
+        "comment": "",
+        "key": "삭제",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 1243
+        }
+      },
+      {
+        "comment": "",
+        "key": "취소",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 1245
+        }
+      },
+      {
+        "comment": "",
+        "key": "선택한 카드들을 삭제(또는 내용 삭제)하시겠습니까?",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 1251
+        }
+      },
+      {
+        "comment": "",
+        "key": "이 카드는 하위 카드를 가지고 있습니다. 삭제하면 하위 카드까지 함께 삭제됩니다. 계속하시겠습니까?",
+        "location": {
+          "startingColumn": 40,
+          "startingLine": 1254
+        }
+      },
+      {
+        "comment": "",
+        "key": "카드를 삭제하시겠습니까?",
+        "location": {
+          "startingColumn": 182,
+          "startingLine": 1254
+        }
+      },
+      {
+        "comment": "",
+        "key": "빈 카드",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 1270
+        }
+      },
+      {
+        "comment": "",
+        "key": "AI 요약",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 1273
+        }
+      },
+      {
+        "comment": "",
+        "key": "취소",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 1276
+        }
+      },
+      {
+        "comment": "",
+        "key": "선택한 카드들을 묶어 새 상위 카드를 만듭니다.",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 1281
+        }
+      },
+      {
+        "comment": "",
+        "key": "현재 카드 위에 새 상위 카드를 만듭니다.",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 1283
+        }
+      },
+      {
+        "comment": "",
+        "key": "확인",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 1301
+        }
+      },
+      {
+        "comment": "",
+        "key": "오른쪽 편집을 왼쪽 카드의 연결 카드로 자동 기록합니다.",
+        "location": {
+          "startingColumn": 15,
+          "startingLine": 2024
+        }
+      },
+      {
+        "comment": "",
+        "key": "왼쪽과 오른쪽 편집을 독립적으로 유지합니다.",
+        "location": {
+          "startingColumn": 15,
+          "startingLine": 2025
+        }
+      },
+      {
+        "comment": "",
+        "key": "포커스 모드 열기",
+        "location": {
+          "startingColumn": 15,
+          "startingLine": 2060
+        }
+      },
+      {
+        "comment": "",
+        "key": "보드 뷰 열기",
+        "location": {
+          "startingColumn": 15,
+          "startingLine": 2075
+        }
+      },
+      {
+        "comment": "",
+        "key": "이름 있는 분기점 만들기",
+        "location": {
+          "startingColumn": 15,
+          "startingLine": 2101
+        }
+      },
+      {
+        "comment": "",
+        "key": "히스토리 타임라인 열기",
+        "location": {
+          "startingColumn": 15,
+          "startingLine": 2117
+        }
+      },
+      {
+        "comment": "",
+        "key": "AI와 시나리오 상담하기",
+        "location": {
+          "startingColumn": 15,
+          "startingLine": 2186
+        }
+      },
+      {
+        "comment": "",
+        "key": "전체 카드 목록 열기",
+        "location": {
+          "startingColumn": 15,
+          "startingLine": 2203
+        }
+      },
+      {
+        "comment": "",
+        "key": "전사 모드",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 2122
+        }
+      },
+      {
+        "comment": "",
+        "key": "취소",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 2147
+        }
+      },
+      {
+        "comment": "",
+        "key": "완료",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 2156
+        }
+      },
+      {
+        "comment": "",
+        "key": "카드 붙여넣기",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 2297
+        }
+      },
+      {
+        "comment": "",
+        "key": "붙여넣을 위치를 선택하세요.",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 2299
+        }
+      },
+      {
+        "comment": "",
+        "key": "↑/↓ 선택 · Enter 확인 · Esc 취소",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 2308
+        }
+      },
+      {
+        "comment": "",
+        "key": "붙여넣기 방식",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 2339
+        }
+      },
+      {
+        "comment": "",
+        "key": "↑/↓ 선택 · Enter 확인 · Esc 취소",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 2350
+        }
+      },
+      {
+        "comment": "",
+        "key": "씬 헤딩 %lld개를 감지했습니다.",
+        "location": {
+          "startingColumn": 40,
+          "startingLine": 2341
+        }
+      },
+      {
+        "comment": "",
+        "key": "붙여넣기 방식을 선택하세요.",
+        "location": {
+          "startingColumn": 95,
+          "startingLine": 2341
+        }
+      }
+    ]
+  },
+  "version": 1
+}

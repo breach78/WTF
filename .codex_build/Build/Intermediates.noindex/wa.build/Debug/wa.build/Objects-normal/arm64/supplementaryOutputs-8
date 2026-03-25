@@ -1,0 +1,37 @@
+{
+  "/Users/three/app_build/wa/.codex_build/Build/Intermediates.noindex/wa.build/Debug/wa.build/DerivedSources/GeneratedAssetSymbols.swift" : {
+    "const-values" : "/Users/three/app_build/wa/.codex_build/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/GeneratedAssetSymbols.swiftconstvalues",
+    "dependencies" : "/Users/three/app_build/wa/.codex_build/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/GeneratedAssetSymbols.d",
+    "diagnostics" : "/Users/three/app_build/wa/.codex_build/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/GeneratedAssetSymbols.dia",
+    "object" : "/Users/three/app_build/wa/.codex_build/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/GeneratedAssetSymbols.o",
+    "swift-dependencies" : "/Users/three/app_build/wa/.codex_build/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/GeneratedAssetSymbols.swiftdeps"
+  },
+  "/Users/three/app_build/wa/wa/WriterSharedTypes.swift" : {
+    "const-values" : "/Users/three/app_build/wa/.codex_build/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterSharedTypes.swiftconstvalues",
+    "dependencies" : "/Users/three/app_build/wa/.codex_build/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterSharedTypes.d",
+    "diagnostics" : "/Users/three/app_build/wa/.codex_build/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterSharedTypes.dia",
+    "object" : "/Users/three/app_build/wa/.codex_build/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterSharedTypes.o",
+    "swift-dependencies" : "/Users/three/app_build/wa/.codex_build/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterSharedTypes.swiftdeps"
+  },
+  "/Users/three/app_build/wa/wa/WriterSpeech.swift" : {
+    "const-values" : "/Users/three/app_build/wa/.codex_build/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterSpeech.swiftconstvalues",
+    "dependencies" : "/Users/three/app_build/wa/.codex_build/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterSpeech.d",
+    "diagnostics" : "/Users/three/app_build/wa/.codex_build/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterSpeech.dia",
+    "object" : "/Users/three/app_build/wa/.codex_build/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterSpeech.o",
+    "swift-dependencies" : "/Users/three/app_build/wa/.codex_build/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterSpeech.swiftdeps"
+  },
+  "/Users/three/app_build/wa/wa/WriterUndoRedo.swift" : {
+    "const-values" : "/Users/three/app_build/wa/.codex_build/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterUndoRedo.swiftconstvalues",
+    "dependencies" : "/Users/three/app_build/wa/.codex_build/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterUndoRedo.d",
+    "diagnostics" : "/Users/three/app_build/wa/.codex_build/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterUndoRedo.dia",
+    "object" : "/Users/three/app_build/wa/.codex_build/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterUndoRedo.o",
+    "swift-dependencies" : "/Users/three/app_build/wa/.codex_build/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterUndoRedo.swiftdeps"
+  },
+  "/Users/three/app_build/wa/wa/WriterViews.swift" : {
+    "const-values" : "/Users/three/app_build/wa/.codex_build/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterViews.swiftconstvalues",
+    "dependencies" : "/Users/three/app_build/wa/.codex_build/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterViews.d",
+    "diagnostics" : "/Users/three/app_build/wa/.codex_build/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterViews.dia",
+    "object" : "/Users/three/app_build/wa/.codex_build/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterViews.o",
+    "swift-dependencies" : "/Users/three/app_build/wa/.codex_build/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterViews.swiftdeps"
+  }
+}

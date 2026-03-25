@@ -346,6 +346,8 @@ struct IndexBoardPhaseThreeView: View {
     let scrollOffset: CGPoint
     let revealCardID: UUID?
     let revealRequestToken: Int
+    let inlineEditRequestCardID: UUID?
+    let inlineEditRequestToken: Int
     let editorDraftBinding: Binding<IndexBoardEditorDraft?>
     let editorSummary: IndexBoardResolvedSummary?
     let onClose: () -> Void
@@ -428,6 +430,8 @@ struct IndexBoardPhaseThreeView: View {
                     scrollOffset: scrollOffset,
                     revealCardID: revealCardID,
                     revealRequestToken: revealRequestToken,
+                    inlineEditRequestCardID: inlineEditRequestCardID,
+                    inlineEditRequestToken: inlineEditRequestToken,
                     isInteractionEnabled: true,
                     onClose: onClose,
                     onCreateTempCard: onCreateTempCard,
@@ -527,6 +531,20 @@ extension ScenarioWriterView {
         indexBoardEditorDraft != nil
     }
 
+    func requestIndexBoardEditorSave() {
+        guard isIndexBoardEditorPresented else { return }
+        if let window = NSApp.keyWindow,
+           let textView = window.firstResponder as? NSTextView,
+           textView.isEditable {
+            window.makeFirstResponder(nil)
+            DispatchQueue.main.async {
+                saveIndexBoardEditor()
+            }
+            return
+        }
+        saveIndexBoardEditor()
+    }
+
     func presentIndexBoardEditor(for card: SceneCard) {
         guard isIndexBoardActive else { return }
         finishEditing()
@@ -589,6 +607,7 @@ extension ScenarioWriterView {
         let previousState = pendingCreationPreviousState ?? captureScenarioState()
         card.content = normalizedContent
         reconcileIndexBoardSummaries(for: [card.id])
+        scenario.bumpCardsVersion()
         commitCardMutation(
             previousState: previousState,
             actionName: pendingCreationPreviousState == nil ? "보드 카드 편집" : "보드 Temp 카드 생성"
@@ -602,7 +621,7 @@ extension ScenarioWriterView {
     }
 
     func cancelIndexBoardEditor() {
-        saveIndexBoardEditor()
+        requestIndexBoardEditorSave()
     }
 
     func saveIndexBoardEditor() {
@@ -660,6 +679,7 @@ extension ScenarioWriterView {
 
         if contentChanged || summaryChanged {
             reconcileIndexBoardSummaries(for: [card.id])
+            scenario.bumpCardsVersion()
         }
 
         if let previousState {

@@ -6,12 +6,6 @@ import QuartzCore
 
 let focusModeBodySafetyInset: CGFloat = 8
 
-#if DEBUG
-func bounceDebugLog(_ message: @autoclosure () -> String) {}
-#else
-func bounceDebugLog(_ message: @autoclosure () -> String) {}
-#endif
-
 enum SoftBoundaryFeedbackSound {
     @MainActor static let shared: AVAudioPlayer? = {
         let url = URL(fileURLWithPath: "/System/Library/Sounds/Pop.aiff")
@@ -1687,11 +1681,6 @@ struct MainColumnScrollViewAccessor: NSViewRepresentable {
                 let visible = scrollView.documentVisibleRect
                 let documentHeight = scrollView.documentView?.bounds.height ?? 0
                 let maxY = max(0, documentHeight - visible.height)
-                bounceDebugLog(
-                    "applyStoredOffset key=\(self.attachedColumnKey ?? "nil") " +
-                    "stored=\(String(format: "%.1f", storedOffsetY)) current=\(String(format: "%.1f", visible.origin.y)) " +
-                    "max=\(String(format: "%.1f", maxY))"
-                )
                 let applied = CaretScrollCoordinator.applyVerticalScrollIfNeeded(
                     scrollView: scrollView,
                     visibleRect: visible,

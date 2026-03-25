@@ -125,11 +125,11 @@ extension ScenarioWriterView {
                 !press.modifiers.contains(.control) &&
                 !press.modifiers.contains(.shift)
             if press.key == .escape {
-                saveIndexBoardEditor()
+                requestIndexBoardEditorSave()
                 return .handled
             }
             if press.key == .return && hasOnlyCommandModifier {
-                saveIndexBoardEditor()
+                requestIndexBoardEditorSave()
                 return .handled
             }
             return .ignored
@@ -168,7 +168,10 @@ extension ScenarioWriterView {
            !press.modifiers.contains(.option) &&
            !press.modifiers.contains(.control) {
             if press.key == .return {
-                return canBeginIndexBoardInlineEditingFromKeyboard() ? nil : .handled
+                if canBeginIndexBoardInlineEditingFromKeyboard() {
+                    requestIndexBoardInlineEditingForSelection()
+                }
+                return .handled
             }
 
             let hasPrintableCharacter =
@@ -196,6 +199,13 @@ extension ScenarioWriterView {
             return false
         }
         return true
+    }
+
+    func requestIndexBoardInlineEditingForSelection() {
+        guard canBeginIndexBoardInlineEditingFromKeyboard(),
+              let cardID = activeCardID else { return }
+        indexBoardInlineEditRequestCardID = cardID
+        indexBoardInlineEditRequestToken &+= 1
     }
 
     func handleIndexBoardSharedPanelShortcut(_ press: KeyPress) -> KeyPress.Result? {
@@ -256,25 +266,13 @@ extension ScenarioWriterView {
 
     func handleOpenIndexBoardRequestNotification() {
         if isIndexBoardActive {
-            indexBoardRestoreTrace("board_toggle_request", "action=close activeSession=true")
             closeIndexBoard()
             return
         }
 
         let entrySnapshot = captureIndexBoardEntrySnapshot()
-        indexBoardRestoreTrace(
-            "board_toggle_request",
-            "action=open activeSession=false entryActive=\(debugRestoreUUID(entrySnapshot.activeCardID)) " +
-            "entryEditing=\(debugRestoreUUID(entrySnapshot.editingCardID)) entryOffset=\(debugRestoreCGFloat(entrySnapshot.mainCanvasHorizontalOffset)) " +
-            "entryViewportCount=\(entrySnapshot.mainColumnViewportOffsets.count)"
-        )
         if let persistedSession = indexBoardRuntime.persistedSession(for: scenario.id, entrySnapshot: entrySnapshot) {
             let liveCards = resolvedLiveIndexBoardSourceCards(for: persistedSession.source)
-            indexBoardRestoreTrace(
-                "board_toggle_request",
-                "usingPersistedSession sourceParent=\(debugRestoreUUID(persistedSession.sourceParentID)) " +
-                "sourceDepth=\(persistedSession.sourceDepth) liveCardCount=\(liveCards.count)"
-            )
             openIndexBoard(
                 sourceParentID: persistedSession.sourceParentID,
                 sourceDepth: persistedSession.sourceDepth,
@@ -354,15 +352,6 @@ extension ScenarioWriterView {
 
         let source = IndexBoardColumnSource(parentID: sourceParentID, depth: sourceDepth)
         let entrySnapshot = captureIndexBoardEntrySnapshot()
-        indexBoardRestoreTraceMark("board-open")
-        indexBoardRestoreTrace(
-            "board_open",
-            "sourceParent=\(debugRestoreUUID(sourceParentID)) sourceDepth=\(sourceDepth) cardCount=\(sourceCardIDs.count) " +
-            "entryActive=\(debugRestoreUUID(entrySnapshot.activeCardID)) entryEditing=\(debugRestoreUUID(entrySnapshot.editingCardID)) " +
-            "entryOffset=\(debugRestoreCGFloat(entrySnapshot.mainCanvasHorizontalOffset)) " +
-            "entryViewportCount=\(entrySnapshot.mainColumnViewportOffsets.count) " +
-            "entryVisibleLevel=\(entrySnapshot.visibleMainCanvasLevel.map(String.init) ?? "nil")"
-        )
         let persistedSession = indexBoardRuntime.persistedSession(for: scenario.id, entrySnapshot: entrySnapshot)
         let existingSession = activeIndexBoardSession ?? persistedSession
 
@@ -396,11 +385,6 @@ extension ScenarioWriterView {
 
         finishEditing()
         indexBoardRuntime.activate(session, scenarioID: scenario.id, paneID: paneContextID)
-        indexBoardRestoreTrace(
-            "board_open_activated",
-            "sessionSourceParent=\(debugRestoreUUID(session.sourceParentID)) sessionZoom=\(String(format: "%.2f", session.zoomScale)) " +
-            "sessionScroll=(\(String(format: "%.2f", session.viewport.scrollOffset.x)),\(String(format: "%.2f", session.viewport.scrollOffset.y)))"
-        )
         let summaryTargetIDs = session.sourceCardIDs + liveIndexBoardTempChildCards().map(\.id)
         reconcileIndexBoardSummaries(for: Array(Set(summaryTargetIDs)))
         isMainViewFocused = true
@@ -413,14 +397,6 @@ extension ScenarioWriterView {
             zoomScale: session.zoomScale,
             scrollOffset: session.scrollOffset
         )
-        let liveOffset = resolvedMainCanvasHorizontalViewportSnapshotOffset()
-        indexBoardRestoreTrace(
-            "board_deactivate",
-            "sessionSourceParent=\(debugRestoreUUID(session.sourceParentID)) liveActive=\(debugRestoreUUID(activeCardID)) " +
-            "liveEditing=\(debugRestoreUUID(editingCardID)) liveOffset=\(debugRestoreCGFloat(liveOffset)) " +
-            "entryOffset=\(debugRestoreCGFloat(session.entrySnapshot.mainCanvasHorizontalOffset)) " +
-            "entryViewportCount=\(session.entrySnapshot.mainColumnViewportOffsets.count)"
-        )
         indexBoardEditorDraft = nil
         indexBoardRuntime.deactivate(scenarioID: scenario.id, paneID: paneContextID)
         return session
@@ -428,14 +404,6 @@ extension ScenarioWriterView {
 
     func closeIndexBoard() {
         guard let session = deactivateIndexBoardSessionIfNeeded() else { return }
-        indexBoardRestoreTraceMark("board-close")
-        indexBoardRestoreTrace(
-            "board_close",
-            "restoreEntryActive=\(debugRestoreUUID(session.entrySnapshot.activeCardID)) " +
-            "restoreEntryEditing=\(debugRestoreUUID(session.entrySnapshot.editingCardID)) " +
-            "restoreEntryOffset=\(debugRestoreCGFloat(session.entrySnapshot.mainCanvasHorizontalOffset)) " +
-            "restoreEntryViewportCount=\(session.entrySnapshot.mainColumnViewportOffsets.count)"
-        )
         restoreIndexBoardEntrySnapshot(session.entrySnapshot)
     }
 
@@ -478,13 +446,6 @@ extension ScenarioWriterView {
             mainCanvasHorizontalOffset: resolvedHorizontalOffset,
             mainColumnViewportOffsets: mainColumnViewportOffsetByKey
         )
-        indexBoardRestoreTrace(
-            "board_capture_entry_snapshot",
-            "active=\(debugRestoreUUID(snapshot.activeCardID)) editing=\(debugRestoreUUID(snapshot.editingCardID)) " +
-            "selectionCount=\(snapshot.selectedCardIDs.count) visibleLevel=\(snapshot.visibleMainCanvasLevel.map(String.init) ?? "nil") " +
-            "offset=\(debugRestoreCGFloat(snapshot.mainCanvasHorizontalOffset)) viewportCount=\(snapshot.mainColumnViewportOffsets.count) " +
-            "viewportOffsets=\(debugRestoreViewportOffsets(snapshot.mainColumnViewportOffsets))"
-        )
         return snapshot
     }
 
@@ -494,14 +455,6 @@ extension ScenarioWriterView {
         let hasStoredHorizontalViewport = snapshot.mainCanvasHorizontalOffset != nil
         let hasStoredVerticalViewport = !snapshot.mainColumnViewportOffsets.isEmpty
         let hasStoredViewport = hasStoredHorizontalViewport || hasStoredVerticalViewport
-        indexBoardRestoreTrace(
-            "board_restore_entry_snapshot_begin",
-            "active=\(debugRestoreUUID(snapshot.activeCardID)) editing=\(debugRestoreUUID(snapshot.editingCardID)) " +
-            "selectionCount=\(validSelection.count) hasStoredViewport=\(hasStoredViewport) " +
-            "offset=\(debugRestoreCGFloat(snapshot.mainCanvasHorizontalOffset)) " +
-            "viewportCount=\(snapshot.mainColumnViewportOffsets.count) " +
-            "currentLiveOffset=\(debugRestoreCGFloat(resolvedMainCanvasHorizontalViewportSnapshotOffset()))"
-        )
         if let visibleLevel = snapshot.visibleMainCanvasLevel {
             lastScrolledLevel = max(0, visibleLevel)
         }
@@ -510,18 +463,9 @@ extension ScenarioWriterView {
             suppressHorizontalAutoScroll = true
             let restoreGraceDuration: TimeInterval = hasStoredHorizontalViewport ? 0.35 : 1.4
             mainColumnViewportRestoreUntil = Date().addingTimeInterval(restoreGraceDuration)
-            indexBoardRestoreTrace(
-                "board_restore_entry_snapshot_flags",
-                "suppressAutoScrollOnce=\(suppressAutoScrollOnce) suppressHorizontalAutoScroll=\(suppressHorizontalAutoScroll) " +
-                "restoreUntil=\(String(format: "%.3f", mainColumnViewportRestoreUntil.timeIntervalSince1970))"
-            )
             if !hasStoredHorizontalViewport {
                 DispatchQueue.main.asyncAfter(deadline: .now() + restoreGraceDuration) {
                     suppressHorizontalAutoScroll = false
-                    indexBoardRestoreTrace(
-                        "board_restore_entry_snapshot_flags_release",
-                        "reason=noStoredHorizontalOffset suppressHorizontalAutoScroll=\(suppressHorizontalAutoScroll)"
-                    )
                 }
             }
         }
@@ -533,10 +477,6 @@ extension ScenarioWriterView {
             ?? fallbackCard
 
         if let restoredActiveCard {
-            indexBoardRestoreTrace(
-                "board_restore_entry_snapshot_active",
-                "restoredActive=\(debugRestoreUUID(restoredActiveCard.id))"
-            )
             changeActiveCard(
                 to: restoredActiveCard,
                 shouldFocusMain: false,
@@ -548,10 +488,6 @@ extension ScenarioWriterView {
         }
 
         if let editingID = snapshot.editingCardID, let editingCard = findCard(by: editingID) {
-            indexBoardRestoreTrace(
-                "board_restore_entry_snapshot_editing",
-                "restoredEditing=\(debugRestoreUUID(editingCard.id)) caret=\(snapshot.editingCaretLocation.map(String.init) ?? "nil")"
-            )
             changeActiveCard(
                 to: editingCard,
                 shouldFocusMain: false,
@@ -571,19 +507,10 @@ extension ScenarioWriterView {
         }
 
         if let targetOffsetX = snapshot.mainCanvasHorizontalOffset {
-            indexBoardRestoreTrace(
-                "board_restore_entry_snapshot_horizontal_restore",
-                "targetOffset=\(debugRestoreCGFloat(targetOffsetX))"
-            )
             restoreMainCanvasHorizontalViewport(to: targetOffsetX)
         }
 
         if !snapshot.mainColumnViewportOffsets.isEmpty {
-            indexBoardRestoreTrace(
-                "board_restore_entry_snapshot_column_restore",
-                "viewportCount=\(snapshot.mainColumnViewportOffsets.count) " +
-                "viewportOffsets=\(debugRestoreViewportOffsets(snapshot.mainColumnViewportOffsets))"
-            )
             scheduleMainCanvasRestoreRetries {
                 applyStoredMainColumnViewportOffsets(snapshot.mainColumnViewportOffsets)
             }
@@ -591,10 +518,6 @@ extension ScenarioWriterView {
 
         if !hasStoredHorizontalViewport, let targetCardID = restoredActiveCard?.id {
             DispatchQueue.main.async {
-                indexBoardRestoreTrace(
-                    "board_restore_entry_snapshot_semantic_restore",
-                    "targetCard=\(debugRestoreUUID(targetCardID)) visibleLevel=\(snapshot.visibleMainCanvasLevel.map(String.init) ?? "nil")"
-                )
                 scheduleMainCanvasRestoreRequest(
                     targetCardID: targetCardID,
                     visibleLevel: snapshot.visibleMainCanvasLevel,
@@ -604,7 +527,6 @@ extension ScenarioWriterView {
         }
 
         DispatchQueue.main.async {
-            indexBoardRestoreTrace("board_restore_entry_snapshot_focus_restore")
             restoreMainKeyboardFocus()
         }
     }
@@ -1833,6 +1755,8 @@ extension ScenarioWriterView {
                 scrollOffset: scrollOffset,
                 revealCardID: revealCardID,
                 revealRequestToken: revealRequestToken,
+                inlineEditRequestCardID: indexBoardInlineEditRequestCardID,
+                inlineEditRequestToken: indexBoardInlineEditRequestToken,
                 editorDraftBinding: Binding(
                     get: { indexBoardEditorDraft },
                     set: { newValue in
@@ -1968,10 +1892,10 @@ extension ScenarioWriterView {
                     )
                 },
                 onCancelEditor: {
-                    saveIndexBoardEditor()
+                    requestIndexBoardEditorSave()
                 },
                 onSaveEditor: {
-                    saveIndexBoardEditor()
+                    requestIndexBoardEditorSave()
                 }
             )
         } else if let session = activeIndexBoardSession {

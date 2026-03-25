@@ -153,12 +153,6 @@ final class MainCanvasScrollCoordinator: ObservableObject {
     func registerMainCanvasHorizontalScrollView(_ scrollView: NSScrollView) {
         mainCanvasHorizontalScrollView = scrollView
         mainCanvasHorizontalOffsetSnapshot = max(0, scrollView.contentView.bounds.origin.x)
-        indexBoardRestoreTrace(
-            "coordinator_register_horizontal_scroll_view",
-            "offset=\(debugRestoreCGFloat(scrollView.contentView.bounds.origin.x)) " +
-            "visibleWidth=\(String(format: "%.2f", scrollView.documentVisibleRect.width)) " +
-            "documentWidth=\(String(format: "%.2f", scrollView.documentView?.bounds.width ?? 0))"
-        )
         applyPendingMainCanvasHorizontalRestoreIfNeeded(to: scrollView)
     }
 
@@ -195,10 +189,6 @@ final class MainCanvasScrollCoordinator: ObservableObject {
 
     func scheduleMainCanvasHorizontalRestore(offsetX: CGFloat) {
         pendingMainCanvasHorizontalRestoreX = max(0, offsetX)
-        indexBoardRestoreTrace(
-            "coordinator_schedule_horizontal_restore",
-            "targetOffset=\(debugRestoreCGFloat(offsetX)) hasLiveScrollView=\(self.mainCanvasHorizontalScrollView != nil)"
-        )
         if let scrollView = mainCanvasHorizontalScrollView {
             applyPendingMainCanvasHorizontalRestoreIfNeeded(to: scrollView)
         }
@@ -227,19 +217,10 @@ final class MainCanvasScrollCoordinator: ObservableObject {
         let visibleRect = scrollView.documentVisibleRect
         let documentWidth = scrollView.documentView?.bounds.width ?? 0
         let maxX = max(0, documentWidth - visibleRect.width)
-        indexBoardRestoreTrace(
-            "coordinator_apply_pending_horizontal_restore_begin",
-            "targetOffset=\(debugRestoreCGFloat(targetX)) currentOffset=\(debugRestoreCGFloat(scrollView.contentView.bounds.origin.x)) " +
-            "visibleWidth=\(String(format: "%.2f", visibleRect.width)) documentWidth=\(String(format: "%.2f", documentWidth)) maxX=\(String(format: "%.2f", maxX))"
-        )
 
         // Wait until the recreated canvas can actually scroll horizontally;
         // otherwise an early restore clamps to zero and strands the viewport at root.
         if targetX > 1, maxX <= 1 {
-            indexBoardRestoreTrace(
-                "coordinator_apply_pending_horizontal_restore_deferred",
-                "reason=documentNotScrollableYet targetOffset=\(debugRestoreCGFloat(targetX)) maxX=\(String(format: "%.2f", maxX))"
-            )
             return
         }
 
@@ -260,19 +241,10 @@ final class MainCanvasScrollCoordinator: ObservableObject {
             snapToPixel: true
         )
         mainCanvasHorizontalOffsetSnapshot = max(0, scrollView.contentView.bounds.origin.x)
-        indexBoardRestoreTrace(
-            "coordinator_apply_pending_horizontal_restore_applied",
-            "targetOffset=\(debugRestoreCGFloat(targetX)) resolvedTarget=\(debugRestoreCGFloat(resolvedTargetX)) " +
-            "currentOffset=\(debugRestoreCGFloat(scrollView.contentView.bounds.origin.x))"
-        )
 
         let targetReachable = maxX + 0.5 >= targetX
         if targetReachable, abs(resolvedTargetX - scrollView.contentView.bounds.origin.x) <= 0.5 {
             pendingMainCanvasHorizontalRestoreX = nil
-            indexBoardRestoreTrace(
-                "coordinator_apply_pending_horizontal_restore_cleared",
-                "targetOffset=\(debugRestoreCGFloat(targetX))"
-            )
         }
     }
 }

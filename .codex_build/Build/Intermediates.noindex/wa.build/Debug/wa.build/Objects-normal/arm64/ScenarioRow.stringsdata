@@ -1,0 +1,40 @@
+{
+  "source": "/Users/three/app_build/wa/wa/ScenarioRow.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "템플릿",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 14
+        }
+      },
+      {
+        "comment": "",
+        "key": "이름 변경",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 25
+        }
+      },
+      {
+        "comment": "",
+        "key": "템플릿으로 만들기",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 26
+        }
+      },
+      {
+        "comment": "",
+        "key": "삭제",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 27
+        }
+      }
+    ]
+  },
+  "version": 1
+}

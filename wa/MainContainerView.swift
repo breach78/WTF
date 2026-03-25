@@ -149,7 +149,6 @@ struct MainContainerView: View {
             scheduleAutoHideSidebar()
         }
         .onAppear {
-            bounceDebugLog("MainContainer onAppear workspace=\(currentWorkspaceName)")
             restoreSelectedScenarioIfNeeded()
             startSidebarEscapeMonitor()
             refreshMainWindowFullscreenState()
@@ -158,41 +157,28 @@ struct MainContainerView: View {
             restoreSelectedScenarioIfNeeded()
         }
         .onDisappear {
-            bounceDebugLog("MainContainer onDisappear workspace=\(currentWorkspaceName)")
             stopSidebarEscapeMonitor()
         }
-        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didEnterFullScreenNotification)) { notification in
-            let windowNumber = (notification.object as? NSWindow)?.windowNumber ?? -1
-            bounceDebugLog("MainContainer windowDidEnterFullScreen window=\(windowNumber)")
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didEnterFullScreenNotification)) { _ in
             refreshMainWindowFullscreenState()
         }
-        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didExitFullScreenNotification)) { notification in
-            let windowNumber = (notification.object as? NSWindow)?.windowNumber ?? -1
-            bounceDebugLog("MainContainer windowDidExitFullScreen window=\(windowNumber)")
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didExitFullScreenNotification)) { _ in
             refreshMainWindowFullscreenState()
         }
-        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeMainNotification)) { notification in
-            let windowNumber = (notification.object as? NSWindow)?.windowNumber ?? -1
-            bounceDebugLog("MainContainer windowDidBecomeMain window=\(windowNumber)")
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeMainNotification)) { _ in
             refreshMainWindowFullscreenState()
         }
-        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { notification in
-            let windowNumber = (notification.object as? NSWindow)?.windowNumber ?? -1
-            bounceDebugLog("MainContainer windowDidBecomeKey window=\(windowNumber)")
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
             refreshMainWindowFullscreenState()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-            bounceDebugLog("MainContainer appDidBecomeActive")
             refreshMainWindowFullscreenState()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
-            bounceDebugLog("MainContainer appDidResignActive")
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didHideNotification)) { _ in
-            bounceDebugLog("MainContainer appDidHide")
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didUnhideNotification)) { _ in
-            bounceDebugLog("MainContainer appDidUnhide")
             refreshMainWindowFullscreenState()
         }
         .onReceive(NotificationCenter.default.publisher(for: .waOpenReferenceWindowRequested)) { _ in

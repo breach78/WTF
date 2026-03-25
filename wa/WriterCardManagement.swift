@@ -172,9 +172,6 @@ extension ScenarioWriterView {
             targetCardID: targetCardID
         )
         mainVerticalScrollAuthorityByViewportKey[viewportKey] = authority
-        bounceDebugLog(
-            "beginMainVerticalScrollAuthority key=\(viewportKey) kind=\(kind.rawValue) target=\(debugCardIDString(targetCardID)) id=\(authority.id)"
-        )
         return authority
     }
 
@@ -226,10 +223,6 @@ extension ScenarioWriterView {
 
     func restoreMainCanvasHorizontalViewport(to storedOffsetX: CGFloat) {
         guard !showFocusMode else { return }
-        indexBoardRestoreTrace(
-            "main_canvas_restore_horizontal_viewport",
-            "targetOffset=\(debugRestoreCGFloat(storedOffsetX)) currentOffset=\(debugRestoreCGFloat(mainCanvasScrollCoordinator.resolvedMainCanvasHorizontalOffset()))"
-        )
         suppressHorizontalAutoScroll = true
         mainCanvasScrollCoordinator.scheduleMainCanvasHorizontalRestore(offsetX: storedOffsetX)
         scheduleMainCanvasRestoreRetries {
@@ -247,19 +240,10 @@ extension ScenarioWriterView {
                 deadZone: 0.5,
                 snapToPixel: true
             )
-            indexBoardRestoreTrace(
-                "main_canvas_restore_horizontal_viewport_retry",
-                "targetOffset=\(debugRestoreCGFloat(storedOffsetX)) currentOffset=\(debugRestoreCGFloat(scrollView.contentView.bounds.origin.x)) " +
-                "maxX=\(String(format: "%.2f", maxX))"
-            )
         }
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.24) {
             suppressHorizontalAutoScroll = false
-            indexBoardRestoreTrace(
-                "main_canvas_restore_horizontal_viewport_release",
-                "targetOffset=\(debugRestoreCGFloat(storedOffsetX)) suppressHorizontalAutoScroll=\(suppressHorizontalAutoScroll)"
-            )
         }
     }
 
@@ -293,10 +277,6 @@ extension ScenarioWriterView {
             guard !isPreviewingHistory else { return }
             guard let activeID = activeCardID, findCard(by: activeID) != nil else { return }
             mainColumnLastFocusRequestByKey = [:]
-            bounceDebugLog(
-                "mainArrowNavigationSettle target=\(debugCardIDString(activeID)) " +
-                "\(debugFocusStateSummary())"
-            )
             _ = mainCanvasScrollCoordinator.publishIntent(
                 kind: .settleRecovery,
                 scope: .allColumns,
@@ -727,8 +707,6 @@ extension ScenarioWriterView {
     func column(for cards: [SceneCard], level: Int, parent: SceneCard?, screenHeight: CGFloat) -> some View {
         let childListSignature = scenario.childListSignature(parentID: parent?.id)
         let viewportKey = mainColumnViewportStorageKey(level: level)
-        let containsActiveCard = cards.contains { $0.id == activeCardID }
-        let containsActiveAncestor = cards.contains { activeAncestorIDs.contains($0.id) }
         let observedCardIDs = mainColumnGeometryObservationCardIDs(
             in: cards,
             viewportKey: viewportKey,
@@ -943,16 +921,11 @@ extension ScenarioWriterView {
         guard isMainVerticalScrollAuthorityCurrent(authority, viewportKey: viewportKey) else { return }
 
         guard let idToScroll = resolvedMainColumnFocusTargetID(in: cards) else {
-            bounceDebugLog(
-                "scrollToFocus noTarget reason=\(reason) key=\(requestKey) viewportKey=\(viewportKey) " +
-                "\(debugFocusStateSummary())"
-            )
             mainColumnLastFocusRequestByKey.removeValue(forKey: requestKey)
             cancelPendingMainColumnFocusVerificationWorkItem(for: viewportKey)
             return
         }
 
-        let currentOffsetY = resolvedMainColumnCurrentOffsetY(viewportKey: viewportKey)
         let targetLayout = resolvedMainColumnTargetLayout(
             in: cards,
             targetID: idToScroll,
@@ -974,13 +947,6 @@ extension ScenarioWriterView {
         )
         if !forceAlignment,
            mainColumnLastFocusRequestByKey[requestKey] == request {
-            bounceDebugLog(
-                "scrollToFocus skipped reason=\(reason) key=\(requestKey) viewportKey=\(viewportKey) " +
-                "target=\(debugCardIDString(idToScroll)) offset=\(debugCGFloat(currentOffsetY)) " +
-                "\(debugMainColumnEstimatedTargetSummary(targetLayout)) " +
-                "\(debugMainColumnObservedTargetSummary(viewportKey: viewportKey, targetID: idToScroll, offsetY: currentOffsetY)) " +
-                "visible=\(debugMainColumnVisibleCardSummary(viewportKey: viewportKey, cards: cards, viewportHeight: viewportHeight, offsetY: currentOffsetY))"
-            )
             scheduleMainColumnFocusVerification(
                 viewportKey: viewportKey,
                 cards: cards,
@@ -1031,12 +997,6 @@ extension ScenarioWriterView {
             viewportHeight: viewportHeight,
             prefersTopAnchor: prefersTopAnchor
         ) {
-            bounceDebugLog(
-                "scrollToFocus preserved reason=\(reason) key=\(requestKey) viewportKey=\(viewportKey) " +
-                "target=\(debugCardIDString(idToScroll)) offset=\(debugCGFloat(currentOffsetY)) top=\(prefersTopAnchor) " +
-                "\(debugMainColumnEstimatedTargetSummary(targetLayout)) " +
-                "\(debugMainColumnObservedTargetSummary(viewportKey: viewportKey, targetID: idToScroll, offsetY: currentOffsetY))"
-            )
             scheduleMainColumnFocusVerification(
                 viewportKey: viewportKey,
                 cards: cards,
@@ -1054,15 +1014,6 @@ extension ScenarioWriterView {
             return
         }
 
-        bounceDebugLog(
-            "scrollToFocus reason=\(reason) key=\(requestKey) viewportKey=\(viewportKey) " +
-            "target=\(debugCardToken(findCard(by: idToScroll))) height=\(debugCGFloat(targetHeight)) " +
-            "viewport=\(debugCGFloat(viewportHeight)) offset=\(debugCGFloat(currentOffsetY)) " +
-            "top=\(prefersTopAnchor) keepVisible=\(keepVisibleOnly) force=\(forceAlignment) edge=\(String(describing: editingRevealEdge)) animated=\(animated) " +
-            "\(debugMainColumnEstimatedTargetSummary(targetLayout)) " +
-            "\(debugMainColumnObservedTargetSummary(viewportKey: viewportKey, targetID: idToScroll, offsetY: currentOffsetY)) " +
-            "visible=\(debugMainColumnVisibleCardSummary(viewportKey: viewportKey, cards: cards, viewportHeight: viewportHeight, offsetY: currentOffsetY))"
-        )
         if keepVisibleOnly {
             applyMainColumnFocusVisibility(
                 viewportKey: viewportKey,
@@ -1183,11 +1134,6 @@ extension ScenarioWriterView {
             kind: .columnNavigation,
             targetCardID: activeCardID
         )
-        bounceDebugLog(
-            "\(trigger) level=\(level) viewportKey=\(viewportKey) " +
-            "offset=\(debugCGFloat(mainColumnViewportOffsetByKey[viewportKey] ?? 0)) " +
-            "visible=\(debugMainColumnVisibleCardSummary(viewportKey: viewportKey, cards: cards, viewportHeight: viewportHeight, offsetY: mainColumnViewportOffsetByKey[viewportKey] ?? 0))"
-        )
         scrollToFocus(
             in: cards,
             level: level,
@@ -1219,10 +1165,6 @@ extension ScenarioWriterView {
         let cardHeight = resolvedMainCardHeight(for: requestedCard)
         guard cardHeight > viewportHeight else { return }
 
-        bounceDebugLog(
-            "\(trigger) viewportKey=\(viewportKey) target=\(debugCardToken(requestedCard)) " +
-            "offset=\(debugCGFloat(mainColumnViewportOffsetByKey[viewportKey] ?? 0)) height=\(debugCGFloat(cardHeight))"
-        )
         _ = beginMainVerticalScrollAuthority(
             viewportKey: viewportKey,
             kind: .columnNavigation,
@@ -1241,26 +1183,10 @@ extension ScenarioWriterView {
 
         suspendMainColumnViewportCapture(for: animated ? 0.32 : 0.12)
         if animated {
-            MainCanvasNavigationDiagnostics.shared.beginScrollAnimation(
-                ownerKey: mainCanvasDiagnosticsOwnerKey,
-                axis: "vertical",
-                engine: "proxy",
-                animated: true,
-                target: "\(viewportKey)|\(requestedID.uuidString)",
-                expectedDuration: 0.24
-            )
             withAnimation(quickEaseAnimation) {
                 proxy.scrollTo(requestedID, anchor: .bottom)
             }
         } else {
-            MainCanvasNavigationDiagnostics.shared.beginScrollAnimation(
-                ownerKey: mainCanvasDiagnosticsOwnerKey,
-                axis: "vertical",
-                engine: "proxy",
-                animated: false,
-                target: "\(viewportKey)|\(requestedID.uuidString)",
-                expectedDuration: 0
-            )
             performWithoutAnimation {
                 proxy.scrollTo(requestedID, anchor: .bottom)
             }
@@ -1298,10 +1224,6 @@ extension ScenarioWriterView {
             resolvedMainColumnFocusTargetID(in: cards) != nil
         guard containsActiveCard || containsActiveAncestor || containsPreferredDescendantTarget else { return }
 
-        let activeCardNeedsTopReveal = containsActiveCard && {
-            guard let newActiveID, let targetCard = findCard(by: newActiveID) else { return false }
-            return resolvedMainCardHeight(for: targetCard) > viewportHeight
-        }()
         let editDrivenKeepVisible = containsActiveCard && pendingMainEditingViewportKeepVisibleCardID == newActiveID
         let editingRevealEdge = editDrivenKeepVisible ? pendingMainEditingViewportRevealEdge : nil
         if editDrivenKeepVisible {
@@ -1321,15 +1243,6 @@ extension ScenarioWriterView {
             viewportKey: viewportKey,
             kind: editDrivenKeepVisible ? .editingTransition : .columnNavigation,
             targetCardID: newActiveID
-        )
-
-        bounceDebugLog(
-            "\(trigger) level=\(level) viewportKey=\(viewportKey) " +
-            "newID=\(newActiveID?.uuidString ?? "nil") activeColumn=\(containsActiveCard) " +
-            "ancestorColumn=\(containsActiveAncestor) descendantColumn=\(containsPreferredDescendantTarget) topReveal=\(activeCardNeedsTopReveal) " +
-            "editKeepVisible=\(editDrivenKeepVisible) forceClick=\(forceClickAlignment) animate=\(shouldAnimate) " +
-            "offset=\(debugCGFloat(mainColumnViewportOffsetByKey[viewportKey] ?? 0)) " +
-            "visible=\(debugMainColumnVisibleCardSummary(viewportKey: viewportKey, cards: cards, viewportHeight: viewportHeight, offsetY: mainColumnViewportOffsetByKey[viewportKey] ?? 0))"
         )
         scheduleMainColumnActiveCardFocus(
             viewportKey: viewportKey,
@@ -1533,14 +1446,6 @@ extension ScenarioWriterView {
                 targetY: resolvedTargetY,
                 viewportHeight: resolvedViewportHeight
             )
-            MainCanvasNavigationDiagnostics.shared.beginScrollAnimation(
-                ownerKey: mainCanvasDiagnosticsOwnerKey,
-                axis: "vertical",
-                engine: "native",
-                animated: true,
-                target: "\(viewportKey)|\(targetID.uuidString)",
-                expectedDuration: appliedDuration
-            )
             suspendMainColumnViewportCapture(for: appliedDuration + 0.06)
             _ = CaretScrollCoordinator.applyAnimatedVerticalScrollIfNeeded(
                 scrollView: scrollView,
@@ -1552,24 +1457,11 @@ extension ScenarioWriterView {
                 snapToPixel: true,
                 duration: appliedDuration
             )
-            bounceDebugLog(
-                "nativeMainColumnFocusScroll key=\(viewportKey) target=\(debugCardIDString(targetID)) " +
-                "targetY=\(debugCGFloat(resolvedTargetY)) visibleY=\(debugCGFloat(visible.origin.y)) " +
-                "duration=\(String(format: "%.2f", appliedDuration)) viewport=\(debugCGFloat(resolvedViewportHeight))"
-            )
             return true
         }
 
-        MainCanvasNavigationDiagnostics.shared.beginScrollAnimation(
-            ownerKey: mainCanvasDiagnosticsOwnerKey,
-            axis: "vertical",
-            engine: "native",
-            animated: false,
-            target: "\(viewportKey)|\(targetID.uuidString)",
-            expectedDuration: 0
-        )
         suspendMainColumnViewportCapture(for: 0.12)
-        let applied = CaretScrollCoordinator.applyVerticalScrollIfNeeded(
+        _ = CaretScrollCoordinator.applyVerticalScrollIfNeeded(
             scrollView: scrollView,
             visibleRect: visible,
             targetY: targetOffsetY,
@@ -1578,12 +1470,6 @@ extension ScenarioWriterView {
             deadZone: 0.5,
             snapToPixel: true
         )
-        if applied {
-            bounceDebugLog(
-                "nativeMainColumnFocusScroll immediate key=\(viewportKey) target=\(debugCardIDString(targetID)) " +
-                "targetY=\(debugCGFloat(targetOffsetY)) visibleY=\(debugCGFloat(visible.origin.y))"
-            )
-        }
         let resolvedTargetY = CaretScrollCoordinator.resolvedVerticalTargetY(
             visibleRect: visible,
             targetY: targetOffsetY,
@@ -1619,14 +1505,6 @@ extension ScenarioWriterView {
         let deadZone: CGFloat = 3
         let delta = frame.minY - visibleRect.origin.y
         let shouldSkip = abs(delta) <= deadZone
-        if shouldSkip {
-            bounceDebugLog(
-                "shouldSkipMainColumnFocusScroll target=\(debugCardIDString(targetID)) viewportKey=\(viewportKey) " +
-                "offset=\(debugCGFloat(visibleRect.origin.y)) targetMin=\(debugCGFloat(frame.minY)) " +
-                "delta=\(debugCGFloat(delta)) " +
-                "\(debugMainColumnObservedTargetSummary(viewportKey: viewportKey, targetID: targetID, offsetY: visibleRect.origin.y))"
-            )
-        }
         return shouldSkip
     }
 
@@ -1645,7 +1523,6 @@ extension ScenarioWriterView {
         in cards: [SceneCard],
         viewportHeight: CGFloat
     ) -> MainColumnLayoutSnapshot {
-        let layoutResolveStartedAt = CACurrentMediaTime()
         let cardIDs = cards.map(\.id)
         let editingCardInColumn = editingCardID.flatMap { editingID in
             cards.first(where: { $0.id == editingID })
@@ -1664,16 +1541,7 @@ extension ScenarioWriterView {
             editingHeightBucket: editingHeightBucket,
             cardIDs: cardIDs
         )
-        let containsEditingCard = editingCardInColumn != nil
         if let cached = mainColumnLayoutSnapshotByKey[layoutKey] {
-            MainCanvasNavigationDiagnostics.shared.recordColumnLayoutResolve(
-                ownerKey: mainCanvasDiagnosticsOwnerKey,
-                cardCount: cards.count,
-                viewportHeight: viewportHeight,
-                cacheHit: true,
-                containsEditingCard: containsEditingCard,
-                durationMilliseconds: (CACurrentMediaTime() - layoutResolveStartedAt) * 1000
-            )
             return cached
         }
 
@@ -1709,14 +1577,6 @@ extension ScenarioWriterView {
             contentBottomY: cursorY
         )
         mainColumnLayoutSnapshotByKey[layoutKey] = snapshot
-        MainCanvasNavigationDiagnostics.shared.recordColumnLayoutResolve(
-            ownerKey: mainCanvasDiagnosticsOwnerKey,
-            cardCount: cards.count,
-            viewportHeight: viewportHeight,
-            cacheHit: false,
-            containsEditingCard: containsEditingCard,
-            durationMilliseconds: (CACurrentMediaTime() - layoutResolveStartedAt) * 1000
-        )
         return snapshot
     }
 
@@ -1751,42 +1611,19 @@ extension ScenarioWriterView {
             guard !showFocusMode else { return }
             let previous = mainColumnViewportOffsetByKey[viewportKey] ?? 0
             let suspended = Date() < mainColumnViewportCaptureSuspendedUntil
-            let visibleSummary = debugMainColumnVisibleCardSummary(
-                viewportKey: viewportKey,
-                cards: cards,
-                viewportHeight: viewportHeight,
-                offsetY: originY
-            )
             if suspended, abs(previous - originY) > 0.5 {
-                bounceDebugLog(
-                    "viewportOffset ignored level=\(level) key=\(viewportKey) requestKey=\(mainColumnScrollCacheKey(level: level, parent: parent)) " +
-                    "prev=\(debugCGFloat(previous)) new=\(debugCGFloat(originY)) " +
-                    "suspendedUntil=\(mainColumnViewportCaptureSuspendedUntil.timeIntervalSince1970) " +
-                    "\(debugFocusStateSummary()) visible=\(visibleSummary)"
-                )
                 return
             }
             if abs(previous - originY) > 0.5 {
                 mainColumnViewportOffsetByKey[viewportKey] = originY
-                bounceDebugLog(
-                    "viewportOffset level=\(level) key=\(viewportKey) requestKey=\(mainColumnScrollCacheKey(level: level, parent: parent)) " +
-                    "prev=\(debugCGFloat(previous)) new=\(debugCGFloat(originY)) " +
-                    "\(debugFocusStateSummary()) visible=\(visibleSummary)"
-                )
             }
         }
     }
 
     func suspendMainColumnViewportCapture(for duration: TimeInterval) {
-        let previous = mainColumnViewportCaptureSuspendedUntil
         let until = Date().addingTimeInterval(duration)
         if until > mainColumnViewportCaptureSuspendedUntil {
             mainColumnViewportCaptureSuspendedUntil = until
-            bounceDebugLog(
-                "suspendMainColumnViewportCapture duration=\(String(format: "%.2f", duration)) " +
-                "previousUntil=\(previous.timeIntervalSince1970) newUntil=\(until.timeIntervalSince1970) " +
-                "\(debugFocusStateSummary())"
-            )
         }
     }
 
@@ -1804,12 +1641,6 @@ extension ScenarioWriterView {
         guard mainColumnViewportRestoreUntil > Date() else { return false }
         guard !shouldSuppressMainArrowRepeatAnimation() else { return false }
         guard let newActiveID, scenario.rootCards.contains(where: { $0.id == newActiveID }) else { return false }
-        bounceDebugLog(
-            "preserveMainColumnViewportOnReveal level=\(level) key=\(storageKey) " +
-            "offset=\(debugCGFloat(mainColumnViewportOffsetByKey[storageKey] ?? 0)) " +
-            "restoreUntil=\(mainColumnViewportRestoreUntil.timeIntervalSince1970) newActive=\(debugCardIDString(newActiveID)) " +
-            "\(debugFocusStateSummary())"
-        )
         return true
     }
 
@@ -1818,17 +1649,11 @@ extension ScenarioWriterView {
     }
 
     func cancelPendingMainColumnFocusWorkItem(for viewportKey: String) {
-        if mainColumnPendingFocusWorkItemByKey[viewportKey] != nil {
-            bounceDebugLog("cancelPendingMainColumnFocusWorkItem key=\(viewportKey)")
-        }
         mainColumnPendingFocusWorkItemByKey[viewportKey]?.cancel()
         mainColumnPendingFocusWorkItemByKey[viewportKey] = nil
     }
 
     func cancelPendingMainColumnFocusVerificationWorkItem(for viewportKey: String) {
-        if mainColumnPendingFocusVerificationWorkItemByKey[viewportKey] != nil {
-            bounceDebugLog("cancelPendingMainColumnFocusVerificationWorkItem key=\(viewportKey)")
-        }
         mainColumnPendingFocusVerificationWorkItemByKey[viewportKey]?.cancel()
         mainColumnPendingFocusVerificationWorkItemByKey[viewportKey] = nil
     }
@@ -1941,26 +1766,10 @@ extension ScenarioWriterView {
 
         suspendMainColumnViewportCapture(for: animated ? 0.32 : 0.12)
         if animated {
-            MainCanvasNavigationDiagnostics.shared.beginScrollAnimation(
-                ownerKey: mainCanvasDiagnosticsOwnerKey,
-                axis: "vertical",
-                engine: "proxy",
-                animated: true,
-                target: "\(viewportKey)|\(targetID.uuidString)",
-                expectedDuration: 0.24
-            )
             withAnimation(quickEaseAnimation) {
                 proxy.scrollTo(targetID, anchor: focusAnchor)
             }
         } else {
-            MainCanvasNavigationDiagnostics.shared.beginScrollAnimation(
-                ownerKey: mainCanvasDiagnosticsOwnerKey,
-                axis: "vertical",
-                engine: "proxy",
-                animated: false,
-                target: "\(viewportKey)|\(targetID.uuidString)",
-                expectedDuration: 0
-            )
             performWithoutAnimation {
                 proxy.scrollTo(targetID, anchor: focusAnchor)
             }
@@ -2240,23 +2049,8 @@ extension ScenarioWriterView {
                 return
             }
 
-            bounceDebugLog(
-                "verifyMainColumnFocus retry level=\(level) viewportKey=\(viewportKey) " +
-                "attempt=\(attempt) target=\(debugCardIDString(targetID)) " +
-                "observed=\(hasObservedTargetFrame) " +
-                "offset=\(debugCGFloat(resolvedMainColumnCurrentOffsetY(viewportKey: viewportKey))) " +
-                "\(debugMainColumnObservedTargetSummary(viewportKey: viewportKey, targetID: targetID, offsetY: resolvedMainColumnCurrentOffsetY(viewportKey: viewportKey)))"
-            )
             mainColumnLastFocusRequestByKey.removeValue(forKey: requestKey)
             let retryAnimated = animated && hasObservedTargetFrame
-            MainCanvasNavigationDiagnostics.shared.recordVerificationRetry(
-                ownerKey: mainCanvasDiagnosticsOwnerKey,
-                viewportKey: viewportKey,
-                attempt: attempt,
-                targetID: targetID,
-                observedFrame: hasObservedTargetFrame,
-                animatedRetry: retryAnimated
-            )
             if keepVisibleOnly {
                 applyMainColumnFocusVisibility(
                     viewportKey: viewportKey,
@@ -2321,12 +2115,6 @@ extension ScenarioWriterView {
             kind: .columnNavigation,
             targetCardID: activeCardID
         )
-        bounceDebugLog(
-            "navigationSettle level=\(level) viewportKey=\(viewportKey) " +
-            "active=\(debugCardIDString(activeCardID)) " +
-            "offset=\(debugCGFloat(mainColumnViewportOffsetByKey[viewportKey] ?? 0)) " +
-            "visible=\(debugMainColumnVisibleCardSummary(viewportKey: viewportKey, cards: cards, viewportHeight: viewportHeight, offsetY: mainColumnViewportOffsetByKey[viewportKey] ?? 0))"
-        )
         scrollToFocus(
             in: cards,
             level: level,
@@ -2356,38 +2144,17 @@ extension ScenarioWriterView {
         authority: MainVerticalScrollAuthority? = nil
     ) {
         cancelPendingMainColumnFocusWorkItem(for: viewportKey)
-        bounceDebugLog(
-            "scheduleMainColumnActiveCardFocus level=\(level) viewportKey=\(viewportKey) " +
-            "expected=\(debugCardIDString(expectedActiveID)) parent=\(debugCardToken(parent)) " +
-            "cards=\(cards.count) force=\(forceAlignment) animated=\(animated) " +
-            "delay=\(debugCGFloat(focusDelayOverride ?? (animated ? 0.01 : 0.0))) \(debugFocusStateSummary())"
-        )
         let focusDelay: TimeInterval = focusDelayOverride ?? (animated ? 0.01 : 0.0)
         let workItem = DispatchWorkItem {
             defer { mainColumnPendingFocusWorkItemByKey[viewportKey] = nil }
-            bounceDebugLog(
-                "executeMainColumnActiveCardFocus level=\(level) viewportKey=\(viewportKey) " +
-                "expected=\(debugCardIDString(expectedActiveID)) current=\(debugCardIDString(activeCardID)) " +
-                "\(debugFocusStateSummary())"
-            )
             if let intentID,
                !mainCanvasScrollCoordinator.isIntentCurrent(intentID, for: viewportKey) {
-                bounceDebugLog(
-                    "activeCardFocus staleIntent level=\(level) viewportKey=\(viewportKey) intent=\(intentID)"
-                )
                 return
             }
             guard isMainVerticalScrollAuthorityCurrent(authority, viewportKey: viewportKey) else {
-                bounceDebugLog(
-                    "activeCardFocus staleAuthority level=\(level) viewportKey=\(viewportKey)"
-                )
                 return
             }
             guard activeCardID == expectedActiveID else {
-                bounceDebugLog(
-                    "activeCardFocus stale level=\(level) viewportKey=\(viewportKey) " +
-                    "expected=\(expectedActiveID?.uuidString ?? "nil") current=\(activeCardID?.uuidString ?? "nil")"
-                )
                 return
             }
             scrollToFocus(
@@ -2419,7 +2186,6 @@ extension ScenarioWriterView {
     ) -> Bool {
         guard currentIndex == currentLevel.count - 1 else { return false }
         guard activeCardID == card.id else { return false }
-        bounceDebugLog("requestMainBottomRevealIfNeeded target=\(debugCardToken(card)) levelCount=\(currentLevel.count)")
         mainBottomRevealCardID = card.id
         mainBottomRevealTick += 1
         return true
@@ -3088,11 +2854,6 @@ extension ScenarioWriterView {
     ) {
         if !acceptsKeyboardInput && !force { return }
         guard let targetLevel = displayedMainCardLocationByID(targetCardID)?.level else { return }
-        indexBoardRestoreTrace(
-            "main_canvas_scroll_to_column_if_needed",
-            "target=\(debugRestoreUUID(targetCardID)) targetLevel=\(targetLevel) force=\(force) animated=\(animated) " +
-            "lastScrolledLevel=\(lastScrolledLevel) mode=\(mainCanvasHorizontalScrollMode.rawValue)"
-        )
         let resolvedAvailableWidth = max(1, availableWidth)
         let scrollMode = mainCanvasHorizontalScrollMode
         let performScroll: (Int) -> Void = { level in
@@ -3106,26 +2867,10 @@ extension ScenarioWriterView {
 
             let hAnchor = resolvedMainCanvasHorizontalAnchor(availableWidth: resolvedAvailableWidth)
             if animated {
-                MainCanvasNavigationDiagnostics.shared.beginScrollAnimation(
-                    ownerKey: mainCanvasDiagnosticsOwnerKey,
-                    axis: "horizontal",
-                    engine: "proxy",
-                    animated: true,
-                    target: "level:\(level)",
-                    expectedDuration: 0.24
-                )
                 withAnimation(quickEaseAnimation) {
                     proxy.scrollTo(level, anchor: hAnchor)
                 }
             } else {
-                MainCanvasNavigationDiagnostics.shared.beginScrollAnimation(
-                    ownerKey: mainCanvasDiagnosticsOwnerKey,
-                    axis: "horizontal",
-                    engine: "proxy",
-                    animated: false,
-                    target: "level:\(level)",
-                    expectedDuration: 0
-                )
                 performWithoutAnimation {
                     proxy.scrollTo(level, anchor: hAnchor)
                 }
@@ -3189,10 +2934,6 @@ extension ScenarioWriterView {
         animated: Bool
     ) -> Bool {
         guard let scrollView = mainCanvasScrollCoordinator.resolvedMainCanvasHorizontalScrollView() else {
-            indexBoardRestoreTrace(
-                "main_canvas_perform_horizontal_scroll_skip",
-                "level=\(level) reason=noScrollView animated=\(animated)"
-            )
             return false
         }
 
@@ -3205,11 +2946,6 @@ extension ScenarioWriterView {
             visibleWidth: visibleRect.width
         )
         let targetReachable = maxX + 0.5 >= targetX
-        indexBoardRestoreTrace(
-            "main_canvas_perform_horizontal_scroll_begin",
-            "level=\(level) animated=\(animated) currentX=\(debugRestoreCGFloat(visibleRect.origin.x)) " +
-            "targetX=\(debugRestoreCGFloat(targetX)) maxX=\(String(format: "%.2f", maxX)) targetReachable=\(targetReachable)"
-        )
 
         if animated {
             guard targetReachable || targetX <= 0.5 else { return false }
@@ -3226,14 +2962,6 @@ extension ScenarioWriterView {
                 targetX: resolvedTargetX,
                 viewportWidth: visibleRect.width
             )
-            MainCanvasNavigationDiagnostics.shared.beginScrollAnimation(
-                ownerKey: mainCanvasDiagnosticsOwnerKey,
-                axis: "horizontal",
-                engine: "native",
-                animated: true,
-                target: "level:\(level)",
-                expectedDuration: appliedDuration
-            )
             _ = CaretScrollCoordinator.applyAnimatedHorizontalScrollIfNeeded(
                 scrollView: scrollView,
                 visibleRect: visibleRect,
@@ -3244,28 +2972,10 @@ extension ScenarioWriterView {
                 snapToPixel: true,
                 duration: appliedDuration
             )
-            indexBoardRestoreTrace(
-                "main_canvas_perform_horizontal_scroll_applied",
-                "level=\(level) animated=true resolvedTargetX=\(debugRestoreCGFloat(resolvedTargetX)) " +
-                "currentXAfter=\(debugRestoreCGFloat(scrollView.contentView.bounds.origin.x)) duration=\(String(format: "%.2f", appliedDuration))"
-            )
-            bounceDebugLog(
-                "nativeMainCanvasHorizontalScroll level=\(level) " +
-                "targetX=\(debugCGFloat(resolvedTargetX)) visibleX=\(debugCGFloat(visibleRect.origin.x)) " +
-                "duration=\(String(format: "%.2f", appliedDuration)) viewport=\(debugCGFloat(visibleRect.width))"
-            )
             return true
         }
 
-        MainCanvasNavigationDiagnostics.shared.beginScrollAnimation(
-            ownerKey: mainCanvasDiagnosticsOwnerKey,
-            axis: "horizontal",
-            engine: "native",
-            animated: false,
-            target: "level:\(level)",
-            expectedDuration: 0
-        )
-        let applied = CaretScrollCoordinator.applyHorizontalScrollIfNeeded(
+        _ = CaretScrollCoordinator.applyHorizontalScrollIfNeeded(
             scrollView: scrollView,
             visibleRect: visibleRect,
             targetX: targetX,
@@ -3274,17 +2984,6 @@ extension ScenarioWriterView {
             deadZone: 0.5,
             snapToPixel: true
         )
-        indexBoardRestoreTrace(
-            "main_canvas_perform_horizontal_scroll_applied",
-            "level=\(level) animated=false applied=\(applied) targetX=\(debugRestoreCGFloat(targetX)) " +
-            "currentXAfter=\(debugRestoreCGFloat(scrollView.contentView.bounds.origin.x))"
-        )
-        if applied {
-            bounceDebugLog(
-                "nativeMainCanvasHorizontalScroll immediate level=\(level) " +
-                "targetX=\(debugCGFloat(targetX)) visibleX=\(debugCGFloat(visibleRect.origin.x))"
-            )
-        }
         let resolvedTargetX = CaretScrollCoordinator.resolvedHorizontalTargetX(
             visibleRect: visibleRect,
             targetX: targetX,
@@ -3326,9 +3025,6 @@ extension ScenarioWriterView {
     }
 
     func resetActiveRelationStateCache() {
-        if !activeAncestorIDs.isEmpty || !activeSiblingIDs.isEmpty || !activeDescendantIDs.isEmpty || activeRelationSourceCardID != nil {
-            bounceDebugLog("resetActiveRelationStateCache \(debugFocusStateSummary())")
-        }
         activeAncestorIDs = []
         activeSiblingIDs = []
         activeDescendantIDs = []
@@ -3344,7 +3040,6 @@ extension ScenarioWriterView {
     }
 
     func synchronizeActiveRelationState(for activeID: UUID?) {
-        let relationSyncStartedAt = CACurrentMediaTime()
         if activeRelationSourceCardID == activeID,
            activeRelationSourceCardsVersion == scenario.cardsVersion {
             return
@@ -3365,12 +3060,6 @@ extension ScenarioWriterView {
         let siblings = card.parent?.children ?? scenario.rootCards
         let siblingIDs = Set(siblings.map { $0.id }).filter { $0 != card.id }
         let descendantIDs = scenario.descendantIDs(for: card.id)
-        let relationChanged =
-            activeAncestorIDs != ancestors ||
-            activeSiblingIDs != siblingIDs ||
-            activeDescendantIDs != descendantIDs ||
-            activeRelationSourceCardID != activeID ||
-            activeRelationSourceCardsVersion != scenario.cardsVersion
 
         if activeAncestorIDs != ancestors { activeAncestorIDs = ancestors }
         if activeSiblingIDs != siblingIDs { activeSiblingIDs = siblingIDs }
@@ -3384,21 +3073,6 @@ extension ScenarioWriterView {
             siblings: siblingIDs,
             descendants: descendantIDs
         )
-        if relationChanged {
-            bounceDebugLog(
-                "synchronizeActiveRelationState active=\(debugCardToken(card)) " +
-                "ancestors=\(debugUUIDListSummary(ancestors.sorted { $0.uuidString < $1.uuidString }, limit: 8)) " +
-                "siblings=\(siblingIDs.count) descendants=\(descendantIDs.count) version=\(scenario.cardsVersion)"
-            )
-        }
-        MainCanvasNavigationDiagnostics.shared.recordRelationSync(
-            ownerKey: mainCanvasDiagnosticsOwnerKey,
-            activeCardID: activeID,
-            durationMilliseconds: (CACurrentMediaTime() - relationSyncStartedAt) * 1000,
-            ancestorCount: ancestors.count,
-            siblingCount: siblingIDs.count,
-            descendantCount: descendantIDs.count
-        )
     }
 
     func changeActiveCard(
@@ -3407,24 +3081,13 @@ extension ScenarioWriterView {
         deferToMainAsync: Bool = true,
         force: Bool = false
     ) {
-        let debugStack = Thread.callStackSymbols
-            .filter { $0.contains("/wa/") || $0.contains("WTF") }
-            .prefix(6)
-            .joined(separator: " | ")
-        bounceDebugLog(
-            "changeActiveCard requested target=\(card.id.uuidString) current=\(activeCardID?.uuidString ?? "nil") " +
-            "pending=\(pendingActiveCardID?.uuidString ?? "nil") force=\(force) async=\(deferToMainAsync) " +
-            "stack=\(debugStack)"
-        )
         cleanupEmptyEditingCardIfNeeded(beforeSwitchingTo: card.id)
         if !force {
             if activeCardID == card.id, pendingActiveCardID == nil {
-                bounceDebugLog("changeActiveCard ignoredAlreadyActive target=\(debugCardToken(card)) shouldFocus=\(shouldFocusMain)")
                 if shouldFocusMain { isMainViewFocused = true }
                 return
             }
             if pendingActiveCardID == card.id {
-                bounceDebugLog("changeActiveCard ignoredPending target=\(debugCardToken(card)) shouldFocus=\(shouldFocusMain)")
                 if shouldFocusMain { isMainViewFocused = true }
                 return
             }
@@ -3434,8 +3097,6 @@ extension ScenarioWriterView {
         pendingActiveCardID = card.id
         let apply = {
             defer { pendingActiveCardID = nil }
-            let previousActiveID = activeCardID
-            let previousRememberedChildID = card.parent?.lastSelectedChildID
             if activeCardID != card.id {
                 lastActiveCardID = activeCardID
             }
@@ -3448,12 +3109,6 @@ extension ScenarioWriterView {
             if shouldFocusMain { isMainViewFocused = true }
             let levelCount = scenario.allLevels.count
             if levelCount > maxLevelCount { maxLevelCount = levelCount }
-            bounceDebugLog(
-                "changeActiveCard applied target=\(debugCardToken(card)) previous=\(debugCardIDString(previousActiveID)) " +
-                "parent=\(debugCardToken(card.parent)) parentRememberedBefore=\(debugCardIDString(previousRememberedChildID)) " +
-                "parentRememberedAfter=\(debugCardIDString(card.parent?.lastSelectedChildID)) " +
-                "levelCount=\(levelCount) \(debugFocusStateSummary())"
-            )
         }
         if deferToMainAsync || !Thread.isMainThread {
             DispatchQueue.main.async { apply() }
