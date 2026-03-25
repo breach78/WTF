@@ -2868,8 +2868,22 @@ extension ScenarioWriterView {
             activeCategory: activeCategory,
             isActiveCardRoot: isActiveCardRoot
         )
+        if displayedMainLevelsMultiCacheVersion != scenario.cardsVersion {
+            displayedMainLevelsMultiCacheVersion = scenario.cardsVersion
+            displayedMainLevelsCacheByKey = [:]
+            displayedMainCardLocationByIDCacheByKey = [:]
+            displayedMainLevelsCacheKey = nil
+            displayedMainLevelsCache = []
+            displayedMainCardLocationByIDCache = [:]
+        }
         if displayedMainLevelsCacheKey == cacheKey {
             return displayedMainLevelsCache
+        }
+        if let cachedLevels = displayedMainLevelsCacheByKey[cacheKey] {
+            displayedMainLevelsCacheKey = cacheKey
+            displayedMainLevelsCache = cachedLevels
+            displayedMainCardLocationByIDCache = displayedMainCardLocationByIDCacheByKey[cacheKey] ?? [:]
+            return cachedLevels
         }
 
         let resolved = levelsData.enumerated().map { index, data in
@@ -2884,6 +2898,9 @@ extension ScenarioWriterView {
                 locationByID[card.id] = (levelIndex, index)
             }
         }
+        displayedMainLevelsMultiCacheVersion = scenario.cardsVersion
+        displayedMainLevelsCacheByKey[cacheKey] = resolved
+        displayedMainCardLocationByIDCacheByKey[cacheKey] = locationByID
         displayedMainLevelsCacheKey = cacheKey
         displayedMainLevelsCache = resolved
         displayedMainCardLocationByIDCache = locationByID
@@ -3026,12 +3043,13 @@ extension ScenarioWriterView {
         let targetReachable = maxX + 0.5 >= targetX
 
         if animated {
-            guard targetReachable || targetX <= 0.5 else {
+            if !targetReachable && targetX > 0.5 {
+                mainCanvasScrollCoordinator.scheduleMainCanvasHorizontalRestore(offsetX: targetX)
                 MainWorkspaceNavigationDiagnostics.shared.recordHorizontalScroll(
                     animated: true,
-                    success: false
+                    success: true
                 )
-                return false
+                return true
             }
             let resolvedTargetX = CaretScrollCoordinator.resolvedHorizontalTargetX(
                 visibleRect: visibleRect,
@@ -3087,6 +3105,14 @@ extension ScenarioWriterView {
         )
         let currentX = scrollView.contentView.bounds.origin.x
         let success = targetReachable && abs(resolvedTargetX - currentX) <= 0.5
+        if !success && !targetReachable && targetX > 0.5 {
+            mainCanvasScrollCoordinator.scheduleMainCanvasHorizontalRestore(offsetX: targetX)
+            MainWorkspaceNavigationDiagnostics.shared.recordHorizontalScroll(
+                animated: false,
+                success: true
+            )
+            return true
+        }
         MainWorkspaceNavigationDiagnostics.shared.recordHorizontalScroll(
             animated: false,
             success: success

@@ -157,7 +157,7 @@ struct LevelData {
     let parent: SceneCard?
 }
 
-struct DisplayedMainLevelsCacheKey: Equatable {
+struct DisplayedMainLevelsCacheKey: Hashable {
     let cardsVersion: Int
     let activeCategory: String?
     let isActiveCardRoot: Bool
@@ -293,6 +293,9 @@ final class WriterInteractionRuntime {
     var resolvedLevelsWithParentsCache: [LevelData] = []
     var mainNavigationGraphCache: MainNavigationGraphSnapshot? = nil
     var mainPreferredNavigationChildCache: [MainPreferredNavigationChildCacheKey: MainPreferredNavigationChildCacheEntry] = [:]
+    var displayedMainLevelsMultiCacheVersion: Int = -1
+    var displayedMainLevelsCacheByKey: [DisplayedMainLevelsCacheKey: [LevelData]] = [:]
+    var displayedMainCardLocationByIDCacheByKey: [DisplayedMainLevelsCacheKey: [UUID: (level: Int, index: Int)]] = [:]
     var displayedMainLevelsCacheKey: DisplayedMainLevelsCacheKey? = nil
     var displayedMainLevelsCache: [LevelData] = []
     var displayedMainCardLocationByIDCache: [UUID: (level: Int, index: Int)] = [:]

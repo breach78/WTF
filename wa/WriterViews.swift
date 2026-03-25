@@ -511,6 +511,21 @@ struct ScenarioWriterView: View {
         nonmutating set { interactionRuntime.mainPreferredNavigationChildCache = newValue }
     }
 
+    var displayedMainLevelsMultiCacheVersion: Int {
+        get { interactionRuntime.displayedMainLevelsMultiCacheVersion }
+        nonmutating set { interactionRuntime.displayedMainLevelsMultiCacheVersion = newValue }
+    }
+
+    var displayedMainLevelsCacheByKey: [DisplayedMainLevelsCacheKey: [LevelData]] {
+        get { interactionRuntime.displayedMainLevelsCacheByKey }
+        nonmutating set { interactionRuntime.displayedMainLevelsCacheByKey = newValue }
+    }
+
+    var displayedMainCardLocationByIDCacheByKey: [DisplayedMainLevelsCacheKey: [UUID: (level: Int, index: Int)]] {
+        get { interactionRuntime.displayedMainCardLocationByIDCacheByKey }
+        nonmutating set { interactionRuntime.displayedMainCardLocationByIDCacheByKey = newValue }
+    }
+
     var displayedMainLevelsCacheKey: DisplayedMainLevelsCacheKey? {
         get { interactionRuntime.displayedMainLevelsCacheKey }
         nonmutating set { interactionRuntime.displayedMainLevelsCacheKey = newValue }
