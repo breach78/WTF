@@ -2400,19 +2400,43 @@ extension ScenarioWriterView {
         let hasLinkedCards = scenario.hasLinkedCards(card.id)
         let isLinkedCard = scenario.isLinkedCard(card.id)
         let clonePeerDestinations = isCloneLinked ? clonePeerMenuDestinations(for: card) : []
-        CardItem(
+        let isActive = activeCardID == card.id
+        let isSelected = selectedCardIDs.contains(card.id)
+        let isMultiSelected = selectedCardIDs.count > 1 && isSelected
+        let isAncestor = activeAncestorIDs.contains(card.id) || activeSiblingIDs.contains(card.id)
+        let isDescendant = activeDescendantIDs.contains(card.id)
+        let isEditing = !showFocusMode && acceptsKeyboardInput && editingCardID == card.id
+        let isSummarizingChildren = aiChildSummaryLoadingCardIDs.contains(card.id)
+        let isTranscriptionBusy = dictationIsRecording || dictationIsProcessing
+        MainWorkspaceCardItemHost(
+            renderState: MainWorkspaceCardItemRenderState(
+                cardID: card.id,
+                renderSettings: mainCardRenderSettings,
+                isActive: isActive,
+                isSelected: isSelected,
+                isMultiSelected: isMultiSelected,
+                isArchived: card.isArchived,
+                isAncestor: isAncestor,
+                isDescendant: isDescendant,
+                isEditing: isEditing,
+                preferredTextMeasureWidthBucket: Int((MainCanvasLayoutMetrics.textWidth * 10).rounded()),
+                forceNamedSnapshotNoteStyle: false,
+                forceCustomColorVisibility: isAICandidate,
+                canCreateUpperCard: canCreateUpperCard,
+                canSummarizeChildren: canSummarizeChildren,
+                aiPlotActionsEnabled: isPlotLineCard,
+                hasApplyAICandidateAction: isAICandidate,
+                isSummarizingChildren: isSummarizingChildren,
+                isAIBusy: aiIsGenerating,
+                isTranscriptionBusy: isTranscriptionBusy,
+                isCloneLinked: isCloneLinked,
+                hasLinkedCards: hasLinkedCards,
+                isLinkedCard: isLinkedCard,
+                clonePeerDestinationsFingerprint: mainWorkspaceClonePeerDestinationsFingerprint(clonePeerDestinations)
+            ),
             card: card,
-            renderSettings: mainCardRenderSettings,
-            isActive: activeCardID == card.id,
-            isSelected: selectedCardIDs.contains(card.id),
-            isMultiSelected: selectedCardIDs.count > 1 && selectedCardIDs.contains(card.id),
-            isArchived: card.isArchived,
-            isAncestor: activeAncestorIDs.contains(card.id) || activeSiblingIDs.contains(card.id),
-            isDescendant: activeDescendantIDs.contains(card.id),
-            isEditing: !showFocusMode && acceptsKeyboardInput && editingCardID == card.id,
             preferredTextMeasureWidth: MainCanvasLayoutMetrics.textWidth,
-            forceNamedSnapshotNoteStyle: false,
-            forceCustomColorVisibility: isAICandidate,
+            clonePeerDestinations: clonePeerDestinations,
             onInsertSiblingAbove: { insertSibling(relativeTo: card, above: true) },
             onInsertSiblingBelow: { insertSibling(relativeTo: card, above: false) },
             onAddChildCard: { addChildCard(to: card) },
@@ -2471,22 +2495,15 @@ extension ScenarioWriterView {
             onAISummarizeCurrent: {
                 runAICardActionFromContextMenu(for: card, action: .summary)
             },
-            aiPlotActionsEnabled: isPlotLineCard,
             onApplyAICandidate: isAICandidate ? {
                 applyAICandidateFromCardContextMenu(cardID: card.id)
             } : nil,
-            isSummarizingChildren: aiChildSummaryLoadingCardIDs.contains(card.id),
-            isAIBusy: aiIsGenerating,
             onHardDelete: { performHardDelete(card) },
             onTranscriptionMode: { startDictationMode(from: card) },
-            isTranscriptionBusy: dictationIsRecording || dictationIsProcessing,
-            isCloneLinked: isCloneLinked,
-            hasLinkedCards: hasLinkedCards,
-            isLinkedCard: isLinkedCard,
             onCloneCard: { copyCardsAsCloneFromContext(card) },
-            clonePeerDestinations: clonePeerDestinations,
             onNavigateToClonePeer: { targetID in navigateToCloneCard(targetID) }
         )
+        .equatable()
         .id(card.id)
         .onDrag {
             MainCardDragSessionTracker.shared.begin()

@@ -583,6 +583,130 @@ struct FocusModeCardEditor: View {
 
 // MARK: - 메인 카드 아이템
 
+struct MainWorkspaceCardItemRenderState: Equatable {
+    let cardID: UUID
+    let renderSettings: MainCardRenderSettings
+    let isActive: Bool
+    let isSelected: Bool
+    let isMultiSelected: Bool
+    let isArchived: Bool
+    let isAncestor: Bool
+    let isDescendant: Bool
+    let isEditing: Bool
+    let preferredTextMeasureWidthBucket: Int
+    let forceNamedSnapshotNoteStyle: Bool
+    let forceCustomColorVisibility: Bool
+    let canCreateUpperCard: Bool
+    let canSummarizeChildren: Bool
+    let aiPlotActionsEnabled: Bool
+    let hasApplyAICandidateAction: Bool
+    let isSummarizingChildren: Bool
+    let isAIBusy: Bool
+    let isTranscriptionBusy: Bool
+    let isCloneLinked: Bool
+    let hasLinkedCards: Bool
+    let isLinkedCard: Bool
+    let clonePeerDestinationsFingerprint: Int
+}
+
+func mainWorkspaceClonePeerDestinationsFingerprint(
+    _ destinations: [ClonePeerMenuDestination]
+) -> Int {
+    var hasher = Hasher()
+    hasher.combine(destinations.count)
+    for destination in destinations {
+        hasher.combine(destination.id)
+        hasher.combine(destination.title)
+    }
+    return hasher.finalize()
+}
+
+struct MainWorkspaceCardItemHost: View, Equatable {
+    let renderState: MainWorkspaceCardItemRenderState
+    @ObservedObject var card: SceneCard
+    let preferredTextMeasureWidth: CGFloat
+    let clonePeerDestinations: [ClonePeerMenuDestination]
+    var onInsertSiblingAbove: (() -> Void)? = nil
+    var onInsertSiblingBelow: (() -> Void)? = nil
+    var onAddChildCard: (() -> Void)? = nil
+    var onDropBefore: (([NSItemProvider], Bool) -> Void)? = nil
+    var onDropAfter: (([NSItemProvider], Bool) -> Void)? = nil
+    var onDropOnto: (([NSItemProvider], Bool) -> Void)? = nil
+    var onSelect: () -> Void
+    var onDoubleClick: () -> Void
+    var onEndEdit: () -> Void
+    var onSelectAtLocation: ((CGPoint) -> Void)? = nil
+    var onContentChange: ((String, String) -> Void)? = nil
+    var onColorChange: ((String?) -> Void)? = nil
+    var onOpenIndexBoard: (() -> Void)? = nil
+    var onReferenceCard: (() -> Void)? = nil
+    var onCreateUpperCardFromSelection: (() -> Void)? = nil
+    var onSummarizeChildren: (() -> Void)? = nil
+    var onAIElaborate: (() -> Void)? = nil
+    var onAINextScene: (() -> Void)? = nil
+    var onAIAlternative: (() -> Void)? = nil
+    var onAISummarizeCurrent: (() -> Void)? = nil
+    var onApplyAICandidate: (() -> Void)? = nil
+    var onHardDelete: (() -> Void)? = nil
+    var onTranscriptionMode: (() -> Void)? = nil
+    var onCloneCard: (() -> Void)? = nil
+    var onNavigateToClonePeer: ((UUID) -> Void)? = nil
+
+    static func == (lhs: MainWorkspaceCardItemHost, rhs: MainWorkspaceCardItemHost) -> Bool {
+        lhs.renderState == rhs.renderState
+    }
+
+    var body: some View {
+        CardItem(
+            card: card,
+            renderSettings: renderState.renderSettings,
+            isActive: renderState.isActive,
+            isSelected: renderState.isSelected,
+            isMultiSelected: renderState.isMultiSelected,
+            isArchived: renderState.isArchived,
+            isAncestor: renderState.isAncestor,
+            isDescendant: renderState.isDescendant,
+            isEditing: renderState.isEditing,
+            preferredTextMeasureWidth: preferredTextMeasureWidth,
+            forceNamedSnapshotNoteStyle: renderState.forceNamedSnapshotNoteStyle,
+            forceCustomColorVisibility: renderState.forceCustomColorVisibility,
+            onInsertSiblingAbove: onInsertSiblingAbove,
+            onInsertSiblingBelow: onInsertSiblingBelow,
+            onAddChildCard: onAddChildCard,
+            onDropBefore: onDropBefore,
+            onDropAfter: onDropAfter,
+            onDropOnto: onDropOnto,
+            onSelect: onSelect,
+            onDoubleClick: onDoubleClick,
+            onEndEdit: onEndEdit,
+            onSelectAtLocation: onSelectAtLocation,
+            onContentChange: onContentChange,
+            onColorChange: onColorChange,
+            onOpenIndexBoard: onOpenIndexBoard,
+            onReferenceCard: onReferenceCard,
+            onCreateUpperCardFromSelection: onCreateUpperCardFromSelection,
+            onSummarizeChildren: onSummarizeChildren,
+            onAIElaborate: onAIElaborate,
+            onAINextScene: onAINextScene,
+            onAIAlternative: onAIAlternative,
+            onAISummarizeCurrent: onAISummarizeCurrent,
+            aiPlotActionsEnabled: renderState.aiPlotActionsEnabled,
+            onApplyAICandidate: onApplyAICandidate,
+            isSummarizingChildren: renderState.isSummarizingChildren,
+            isAIBusy: renderState.isAIBusy,
+            onHardDelete: onHardDelete,
+            onTranscriptionMode: onTranscriptionMode,
+            isTranscriptionBusy: renderState.isTranscriptionBusy,
+            isCloneLinked: renderState.isCloneLinked,
+            hasLinkedCards: renderState.hasLinkedCards,
+            isLinkedCard: renderState.isLinkedCard,
+            onCloneCard: onCloneCard,
+            clonePeerDestinations: clonePeerDestinations,
+            onNavigateToClonePeer: onNavigateToClonePeer
+        )
+    }
+}
+
 struct CardItem: View {
     private enum InlineInsertZoneEdge {
         case top
