@@ -707,6 +707,409 @@ final class MainWorkspaceNavigationDiagnostics {
 }
 
 @MainActor
+final class WorkspaceModeParityDiagnostics {
+    private struct PendingTypingMutation {
+        let requestID: Int
+        let cardID: UUID
+        let oldLength: Int
+        let newLength: Int
+        let startedAt: CFTimeInterval
+    }
+
+    private struct PendingCardTransition {
+        let targetID: UUID
+        let source: String
+        let startedAt: CFTimeInterval
+    }
+
+    private struct PendingAxisAlignment {
+        let targetID: UUID
+        let trigger: String
+        let animated: Bool
+        let startedAt: CFTimeInterval
+    }
+
+    private struct Session {
+        let scenarioID: UUID
+        let cardsVersionAtStart: Int
+        let startedAt: Date
+        let startedTimestamp: CFTimeInterval
+
+        var typingMutationCount = 0
+        var typingSupersededCount = 0
+        var typingMissCount = 0
+        var typingLatency = MainWorkspaceNavigationTimingMetric()
+
+        var activeCardTransitionCount = 0
+        var activeCardDuplicateCount = 0
+        var activeCardIncompleteCount = 0
+        var activeCardCancelCount = 0
+        var activeCardToCaret = MainWorkspaceNavigationTimingMetric()
+
+        var horizontalAlignCount = 0
+        var horizontalDuplicateRequestCount = 0
+        var horizontalRetryCount = 0
+        var horizontalFallbackCount = 0
+        var horizontalLateNudgeCount = 0
+        var horizontalIncompleteCount = 0
+        var horizontalAlignTiming = MainWorkspaceNavigationTimingMetric()
+
+        var verticalAlignCount = 0
+        var verticalDuplicateRequestCount = 0
+        var verticalRetryCount = 0
+        var verticalFallbackCount = 0
+        var verticalLateNudgeCount = 0
+        var verticalIncompleteCount = 0
+        var verticalAlignTiming = MainWorkspaceNavigationTimingMetric()
+    }
+
+    static let shared = WorkspaceModeParityDiagnostics()
+
+    private static let baselineLogURL = URL(fileURLWithPath: NSTemporaryDirectory())
+        .appendingPathComponent("wa_workspace_mode_parity_baseline.log")
+
+    private let logger = Logger(
+        subsystem: Bundle.main.bundleIdentifier ?? "com.riwoong.wa",
+        category: "WorkspaceModeParity"
+    )
+
+    private var session: Session? = nil
+    private var typingSequence: Int = 0
+    private var pendingTypingByCardID: [UUID: PendingTypingMutation] = [:]
+    private var pendingCardTransition: PendingCardTransition? = nil
+    private var pendingHorizontalAlignment: PendingAxisAlignment? = nil
+    private var pendingVerticalAlignmentByViewportKey: [String: PendingAxisAlignment] = [:]
+
+    private init() {}
+
+    private var isEnabled: Bool {
+#if DEBUG
+        true
+#else
+        ProcessInfo.processInfo.environment["WA_WORKSPACE_MODE_PARITY_DIAGNOSTICS"] == "1"
+#endif
+    }
+
+    private func clearPendingState() {
+        pendingTypingByCardID = [:]
+        pendingCardTransition = nil
+        pendingHorizontalAlignment = nil
+        pendingVerticalAlignmentByViewportKey = [:]
+    }
+
+    private static func appendBaselineLog(
+        session: Session,
+        reason: String,
+        activeCardID: UUID?,
+        cardsVersion: Int,
+        openTypingCount: Int,
+        openActiveCardTransitionCount: Int,
+        openHorizontalCount: Int,
+        openVerticalCount: Int
+    ) {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let durationMilliseconds = max(0.001, CACurrentMediaTime() - session.startedTimestamp) * 1000
+
+        func timingLine(_ name: String, _ metric: MainWorkspaceNavigationTimingMetric) -> String {
+            "\(name): count=\(metric.count) avg_ms=\(String(format: "%.3f", metric.averageMilliseconds)) max_ms=\(String(format: "%.3f", metric.maxMilliseconds))"
+        }
+
+        let lines = [
+            "[WorkspaceModeParityBaseline] started_at=\(formatter.string(from: session.startedAt)) reason=\(reason) scenario=\(session.scenarioID.uuidString) active_card=\(activeCardID?.uuidString ?? "nil")",
+            "context: cards_version_start=\(session.cardsVersionAtStart) cards_version_end=\(cardsVersion) duration_ms=\(String(format: "%.3f", durationMilliseconds))",
+            timingLine("typing_screen_reflect", session.typingLatency),
+            "typing_counts: started=\(session.typingMutationCount) completed=\(session.typingLatency.count) superseded=\(session.typingSupersededCount) misses=\(session.typingMissCount) open=\(openTypingCount)",
+            timingLine("active_card_to_caret", session.activeCardToCaret),
+            "active_card_counts: started=\(session.activeCardTransitionCount) completed=\(session.activeCardToCaret.count) duplicates=\(session.activeCardDuplicateCount) cancelled=\(session.activeCardCancelCount) incomplete=\(session.activeCardIncompleteCount) open=\(openActiveCardTransitionCount)",
+            timingLine("horizontal_align", session.horizontalAlignTiming),
+            "horizontal_counts: started=\(session.horizontalAlignCount) completed=\(session.horizontalAlignTiming.count) duplicate_requests=\(session.horizontalDuplicateRequestCount) retries=\(session.horizontalRetryCount) fallbacks=\(session.horizontalFallbackCount) late_nudges=\(session.horizontalLateNudgeCount) incomplete=\(session.horizontalIncompleteCount) open=\(openHorizontalCount)",
+            timingLine("vertical_align", session.verticalAlignTiming),
+            "vertical_counts: started=\(session.verticalAlignCount) completed=\(session.verticalAlignTiming.count) duplicate_requests=\(session.verticalDuplicateRequestCount) retries=\(session.verticalRetryCount) fallbacks=\(session.verticalFallbackCount) late_nudges=\(session.verticalLateNudgeCount) incomplete=\(session.verticalIncompleteCount) open=\(openVerticalCount)",
+            "---"
+        ]
+        let entry = lines.joined(separator: "\n") + "\n"
+        guard let data = entry.data(using: .utf8) else { return }
+
+        if FileManager.default.fileExists(atPath: baselineLogURL.path),
+           let handle = try? FileHandle(forWritingTo: baselineLogURL) {
+            defer { try? handle.close() }
+            handle.seekToEndOfFile()
+            handle.write(data)
+        } else {
+            try? data.write(to: baselineLogURL, options: .atomic)
+        }
+    }
+
+    func reset(scenarioID: UUID, cardsVersion: Int) {
+        typingSequence = 0
+        clearPendingState()
+        guard isEnabled else {
+            session = nil
+            return
+        }
+
+        session = Session(
+            scenarioID: scenarioID,
+            cardsVersionAtStart: cardsVersion,
+            startedAt: Date(),
+            startedTimestamp: CACurrentMediaTime()
+        )
+        logger.notice(
+            "session_start scenario=\(scenarioID.uuidString, privacy: .public) cards_version=\(cardsVersion)"
+        )
+    }
+
+    @discardableResult
+    func beginTypingMutation(cardID: UUID, oldLength: Int, newLength: Int) -> Int {
+        typingSequence &+= 1
+        let requestID = typingSequence
+        guard isEnabled, var session else { return requestID }
+
+        session.typingMutationCount += 1
+        if pendingTypingByCardID[cardID] != nil {
+            session.typingSupersededCount += 1
+        }
+        pendingTypingByCardID[cardID] = PendingTypingMutation(
+            requestID: requestID,
+            cardID: cardID,
+            oldLength: oldLength,
+            newLength: newLength,
+            startedAt: CACurrentMediaTime()
+        )
+        self.session = session
+        return requestID
+    }
+
+    func finishTypingMutation(cardID: UUID, requestID: Int, didReflect: Bool) {
+        guard isEnabled, var session else { return }
+        guard let pending = pendingTypingByCardID[cardID], pending.requestID == requestID else { return }
+
+        pendingTypingByCardID.removeValue(forKey: cardID)
+        if didReflect {
+            session.typingLatency.record(CACurrentMediaTime() - pending.startedAt)
+        } else {
+            session.typingMissCount += 1
+        }
+        self.session = session
+    }
+
+    func beginActiveCardTransition(targetCardID: UUID, source: String) {
+        guard isEnabled, var session else { return }
+        if let pendingCardTransition {
+            if pendingCardTransition.targetID == targetCardID {
+                session.activeCardDuplicateCount += 1
+                self.session = session
+                return
+            }
+            session.activeCardIncompleteCount += 1
+        }
+        session.activeCardTransitionCount += 1
+        pendingCardTransition = PendingCardTransition(
+            targetID: targetCardID,
+            source: source,
+            startedAt: CACurrentMediaTime()
+        )
+        self.session = session
+    }
+
+    func cancelActiveCardTransition(targetCardID: UUID? = nil, reason: String) {
+        guard isEnabled, var session else {
+            pendingCardTransition = nil
+            return
+        }
+        guard let pendingCardTransition else { return }
+        if let targetCardID, pendingCardTransition.targetID != targetCardID {
+            return
+        }
+        session.activeCardCancelCount += 1
+        self.session = session
+        self.pendingCardTransition = nil
+        logger.debug(
+            "active_card_transition_cancelled reason=\(reason, privacy: .public) target=\(pendingCardTransition.targetID.uuidString, privacy: .public)"
+        )
+    }
+
+    func finishActiveCardTransition(targetCardID: UUID) {
+        guard isEnabled, var session else { return }
+        guard let pendingCardTransition, pendingCardTransition.targetID == targetCardID else { return }
+
+        session.activeCardToCaret.record(CACurrentMediaTime() - pendingCardTransition.startedAt)
+        self.session = session
+        self.pendingCardTransition = nil
+    }
+
+    func beginHorizontalAlignment(targetCardID: UUID, trigger: String, animated: Bool) {
+        guard isEnabled, var session else { return }
+        if let pendingHorizontalAlignment {
+            if pendingHorizontalAlignment.targetID == targetCardID {
+                session.horizontalDuplicateRequestCount += 1
+                self.session = session
+                return
+            }
+            session.horizontalIncompleteCount += 1
+        }
+        session.horizontalAlignCount += 1
+        pendingHorizontalAlignment = PendingAxisAlignment(
+            targetID: targetCardID,
+            trigger: trigger,
+            animated: animated,
+            startedAt: CACurrentMediaTime()
+        )
+        self.session = session
+    }
+
+    func noteHorizontalDuplicateRequest(targetCardID: UUID, trigger: String) {
+        _ = targetCardID
+        _ = trigger
+        guard isEnabled, var session else { return }
+        session.horizontalDuplicateRequestCount += 1
+        self.session = session
+    }
+
+    func noteHorizontalRetry(targetCardID: UUID) {
+        guard isEnabled, var session else { return }
+        guard pendingHorizontalAlignment?.targetID == targetCardID else { return }
+        session.horizontalRetryCount += 1
+        self.session = session
+    }
+
+    func noteHorizontalFallback(targetCardID: UUID) {
+        guard isEnabled, var session else { return }
+        guard pendingHorizontalAlignment?.targetID == targetCardID else { return }
+        session.horizontalFallbackCount += 1
+        self.session = session
+    }
+
+    func noteHorizontalLateNudge(targetCardID: UUID) {
+        guard isEnabled, var session else { return }
+        guard pendingHorizontalAlignment?.targetID == targetCardID else { return }
+        session.horizontalLateNudgeCount += 1
+        self.session = session
+    }
+
+    func finishHorizontalAlignment(targetCardID: UUID) {
+        guard isEnabled, var session else { return }
+        guard let pendingHorizontalAlignment, pendingHorizontalAlignment.targetID == targetCardID else { return }
+
+        session.horizontalAlignTiming.record(CACurrentMediaTime() - pendingHorizontalAlignment.startedAt)
+        self.session = session
+        self.pendingHorizontalAlignment = nil
+    }
+
+    func beginVerticalAlignment(
+        viewportKey: String,
+        targetCardID: UUID,
+        trigger: String,
+        animated: Bool
+    ) {
+        guard isEnabled, var session else { return }
+        if let pendingVerticalAlignment = pendingVerticalAlignmentByViewportKey[viewportKey] {
+            if pendingVerticalAlignment.targetID == targetCardID {
+                session.verticalDuplicateRequestCount += 1
+                self.session = session
+                return
+            }
+            session.verticalIncompleteCount += 1
+        }
+        session.verticalAlignCount += 1
+        pendingVerticalAlignmentByViewportKey[viewportKey] = PendingAxisAlignment(
+            targetID: targetCardID,
+            trigger: trigger,
+            animated: animated,
+            startedAt: CACurrentMediaTime()
+        )
+        self.session = session
+    }
+
+    func noteVerticalDuplicateRequest(viewportKey: String, targetCardID: UUID, trigger: String) {
+        _ = viewportKey
+        _ = targetCardID
+        _ = trigger
+        guard isEnabled, var session else { return }
+        session.verticalDuplicateRequestCount += 1
+        self.session = session
+    }
+
+    func noteVerticalRetry(viewportKey: String, targetCardID: UUID) {
+        guard isEnabled, var session else { return }
+        guard pendingVerticalAlignmentByViewportKey[viewportKey]?.targetID == targetCardID else { return }
+        session.verticalRetryCount += 1
+        self.session = session
+    }
+
+    func noteVerticalFallback(viewportKey: String, targetCardID: UUID) {
+        guard isEnabled, var session else { return }
+        guard pendingVerticalAlignmentByViewportKey[viewportKey]?.targetID == targetCardID else { return }
+        session.verticalFallbackCount += 1
+        self.session = session
+    }
+
+    func noteVerticalLateNudge(viewportKey: String, targetCardID: UUID) {
+        guard isEnabled, var session else { return }
+        guard pendingVerticalAlignmentByViewportKey[viewportKey]?.targetID == targetCardID else { return }
+        session.verticalLateNudgeCount += 1
+        self.session = session
+    }
+
+    func finishVerticalAlignment(viewportKey: String, targetCardID: UUID) {
+        guard isEnabled, var session else { return }
+        guard let pendingVerticalAlignment = pendingVerticalAlignmentByViewportKey[viewportKey],
+              pendingVerticalAlignment.targetID == targetCardID else { return }
+
+        session.verticalAlignTiming.record(CACurrentMediaTime() - pendingVerticalAlignment.startedAt)
+        self.session = session
+        pendingVerticalAlignmentByViewportKey.removeValue(forKey: viewportKey)
+    }
+
+    func emitSummary(
+        reason: String,
+        activeCardID: UUID?,
+        cardsVersion: Int
+    ) {
+        guard isEnabled, let session else { return }
+
+        let openTypingCount = pendingTypingByCardID.count
+        let openActiveCardTransitionCount = pendingCardTransition == nil ? 0 : 1
+        let openHorizontalCount = pendingHorizontalAlignment == nil ? 0 : 1
+        let openVerticalCount = pendingVerticalAlignmentByViewportKey.count
+        let duration = max(0.001, CACurrentMediaTime() - session.startedTimestamp)
+
+        logger.notice(
+            """
+            session_summary reason=\(reason, privacy: .public) scenario=\(session.scenarioID.uuidString, privacy: .public) \
+            active_card=\(activeCardID?.uuidString ?? "nil", privacy: .public) cards_version_start=\(session.cardsVersionAtStart) \
+            cards_version_end=\(cardsVersion) duration_s=\(String(format: "%.3f", duration), privacy: .public) \
+            typing_started=\(session.typingMutationCount) typing_completed=\(session.typingLatency.count) typing_avg_ms=\(String(format: "%.3f", session.typingLatency.averageMilliseconds), privacy: .public) \
+            typing_max_ms=\(String(format: "%.3f", session.typingLatency.maxMilliseconds), privacy: .public) typing_superseded=\(session.typingSupersededCount) typing_misses=\(session.typingMissCount) typing_open=\(openTypingCount) \
+            active_started=\(session.activeCardTransitionCount) active_completed=\(session.activeCardToCaret.count) active_avg_ms=\(String(format: "%.3f", session.activeCardToCaret.averageMilliseconds), privacy: .public) \
+            active_max_ms=\(String(format: "%.3f", session.activeCardToCaret.maxMilliseconds), privacy: .public) active_duplicates=\(session.activeCardDuplicateCount) \
+            active_cancelled=\(session.activeCardCancelCount) active_incomplete=\(session.activeCardIncompleteCount) active_open=\(openActiveCardTransitionCount) \
+            horizontal_started=\(session.horizontalAlignCount) horizontal_completed=\(session.horizontalAlignTiming.count) horizontal_avg_ms=\(String(format: "%.3f", session.horizontalAlignTiming.averageMilliseconds), privacy: .public) \
+            horizontal_max_ms=\(String(format: "%.3f", session.horizontalAlignTiming.maxMilliseconds), privacy: .public) horizontal_duplicates=\(session.horizontalDuplicateRequestCount) \
+            horizontal_retries=\(session.horizontalRetryCount) horizontal_fallbacks=\(session.horizontalFallbackCount) horizontal_late_nudges=\(session.horizontalLateNudgeCount) \
+            horizontal_incomplete=\(session.horizontalIncompleteCount) horizontal_open=\(openHorizontalCount) vertical_started=\(session.verticalAlignCount) \
+            vertical_completed=\(session.verticalAlignTiming.count) vertical_avg_ms=\(String(format: "%.3f", session.verticalAlignTiming.averageMilliseconds), privacy: .public) \
+            vertical_max_ms=\(String(format: "%.3f", session.verticalAlignTiming.maxMilliseconds), privacy: .public) vertical_duplicates=\(session.verticalDuplicateRequestCount) \
+            vertical_retries=\(session.verticalRetryCount) vertical_fallbacks=\(session.verticalFallbackCount) vertical_late_nudges=\(session.verticalLateNudgeCount) \
+            vertical_incomplete=\(session.verticalIncompleteCount) vertical_open=\(openVerticalCount)
+            """
+        )
+
+        Self.appendBaselineLog(
+            session: session,
+            reason: reason,
+            activeCardID: activeCardID,
+            cardsVersion: cardsVersion,
+            openTypingCount: openTypingCount,
+            openActiveCardTransitionCount: openActiveCardTransitionCount,
+            openHorizontalCount: openHorizontalCount,
+            openVerticalCount: openVerticalCount
+        )
+    }
+}
+
+@MainActor
 final class WriterAIFeatureState: ObservableObject {
     @Published var chatThreads: [AIChatThread] = []
     @Published var activeThreadID: UUID? = nil

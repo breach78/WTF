@@ -81,6 +81,16 @@ final class MainCanvasScrollCoordinator: ObservableObject {
         animated: Bool,
         trigger: String
     ) -> NavigationIntent {
+        if let latestIntent = latestPublishedIntent(for: scope),
+           latestIntent.kind == kind,
+           latestIntent.scope == scope,
+           latestIntent.targetCardID == targetCardID,
+           latestIntent.expectedActiveCardID == expectedActiveCardID,
+           latestIntent.animated == animated,
+           latestIntent.trigger == trigger {
+            return latestIntent
+        }
+
         intentSequence &+= 1
         let intent = NavigationIntent(
             id: intentSequence,
@@ -205,6 +215,17 @@ final class MainCanvasScrollCoordinator: ObservableObject {
             return scoped
         case (nil, nil):
             return nil
+        }
+    }
+
+    private func latestPublishedIntent(
+        for scope: NavigationIntentScope
+    ) -> NavigationIntent? {
+        switch scope {
+        case .allColumns:
+            return latestGlobalIntent
+        case .viewport(let viewportKey):
+            return latestScopedIntentByViewportKey[viewportKey]
         }
     }
 

@@ -49,10 +49,40 @@ extension ScenarioWriterView {
         if mainLineSpacingAppliedResponderID != context.responderID || mainLineSpacingAppliedCardID != context.editingID {
             applyMainEditorLineSpacingIfNeeded()
         }
+        guard !shouldSuppressMainSelectionFollowUp(context) else { return }
         normalizeMainEditorTextViewOffsetIfNeeded(context.textView, reason: "selection-change")
 
         guard !context.textView.hasMarkedText() else { return }
-        requestCoalescedMainCaretEnsure(minInterval: mainCaretSelectionEnsureMinInterval, delay: 0.0)
+        requestCoalescedMainCaretEnsure(
+            minInterval: resolvedMainTypingCaretEnsureMinInterval(for: context.editingID),
+            delay: 0.0
+        )
+    }
+
+    private func noteMainTypingPostMutation(for cardID: UUID) {
+        mainTypingPostMutationCardID = cardID
+        mainTypingPostMutationUntil = Date().addingTimeInterval(mainTypingPostMutationWindow)
+    }
+
+    private func isMainTypingPostMutationActive(for cardID: UUID) -> Bool {
+        guard mainTypingPostMutationCardID == cardID else { return false }
+        if Date() < mainTypingPostMutationUntil {
+            return true
+        }
+        mainTypingPostMutationCardID = nil
+        return false
+    }
+
+    private func shouldSuppressMainSelectionFollowUp(_ context: MainSelectionChangeContext) -> Bool {
+        guard context.selected.length == 0 else { return false }
+        return isMainTypingPostMutationActive(for: context.editingID)
+    }
+
+    private func resolvedMainTypingCaretEnsureMinInterval(for cardID: UUID) -> TimeInterval {
+        guard isMainTypingPostMutationActive(for: cardID) else {
+            return mainCaretSelectionEnsureMinInterval
+        }
+        return max(mainCaretSelectionEnsureMinInterval, mainTypingCaretEnsureBurstMinInterval)
     }
 
     private func shouldIgnoreMainProgrammaticSelection(_ context: MainSelectionChangeContext) -> Bool {
@@ -434,6 +464,12 @@ extension ScenarioWriterView {
     func handleMainEditorContentChange(cardID: UUID, oldValue: String, newValue: String) {
         guard !showFocusMode else { return }
         guard editingCardID == cardID else { return }
+        noteMainTypingPostMutation(for: cardID)
+        let typingRequestID = WorkspaceModeParityDiagnostics.shared.beginTypingMutation(
+            cardID: cardID,
+            oldLength: (oldValue as NSString).length,
+            newLength: (newValue as NSString).length
+        )
         markEditingSessionTextMutation()
         handleMainTypingContentChange(cardID: cardID, oldValue: oldValue, newValue: newValue)
         applyMainEditorLineSpacingIfNeeded()
@@ -442,7 +478,22 @@ extension ScenarioWriterView {
            textView.string == newValue {
             normalizeMainEditorTextViewOffsetIfNeeded(textView, reason: "content-change")
         }
-        requestCoalescedMainCaretEnsure(minInterval: mainCaretSelectionEnsureMinInterval, delay: 0.0)
+        requestCoalescedMainCaretEnsure(
+            minInterval: resolvedMainTypingCaretEnsureMinInterval(for: cardID),
+            delay: 0.0,
+            preservePendingWorkItem: true
+        )
+        DispatchQueue.main.async {
+            let reflectedInEditor =
+                editingCardID == cardID &&
+                (NSApp.keyWindow?.firstResponder as? NSTextView)?.string == newValue
+            let reflectedInModel = findCard(by: cardID)?.content == newValue
+            WorkspaceModeParityDiagnostics.shared.finishTypingMutation(
+                cardID: cardID,
+                requestID: typingRequestID,
+                didReflect: reflectedInEditor || reflectedInModel
+            )
+        }
     }
 
     // MARK: - Main Caret Ensure Visible
@@ -459,7 +510,14 @@ extension ScenarioWriterView {
         DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
     }
 
-    func requestCoalescedMainCaretEnsure(minInterval: TimeInterval, delay: Double = 0.0) {
+    func requestCoalescedMainCaretEnsure(
+        minInterval: TimeInterval,
+        delay: Double = 0.0,
+        preservePendingWorkItem: Bool = false
+    ) {
+        if preservePendingWorkItem, mainCaretEnsureWorkItem != nil {
+            return
+        }
         let now = Date()
         let elapsed = now.timeIntervalSince(mainCaretEnsureLastScheduledAt)
         let extraDelay = max(0, minInterval - elapsed)
@@ -788,6 +846,9 @@ extension ScenarioWriterView {
             if !suppressInitialEnsure {
                 requestCoalescedMainCaretEnsure(minInterval: 0, delay: 0.0)
             }
+            WorkspaceModeParityDiagnostics.shared.finishActiveCardTransition(
+                targetCardID: expectedCardID
+            )
             return
         }
         textView.setSelectedRange(NSRange(location: safeLocation, length: 0))
@@ -795,6 +856,9 @@ extension ScenarioWriterView {
         if !suppressInitialEnsure {
             requestCoalescedMainCaretEnsure(minInterval: 0, delay: 0.0)
         }
+        WorkspaceModeParityDiagnostics.shared.finishActiveCardTransition(
+            targetCardID: expectedCardID
+        )
     }
 
     private func scheduleMainCaretRestoreRetry(

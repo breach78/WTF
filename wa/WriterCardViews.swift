@@ -585,6 +585,7 @@ struct FocusModeCardEditor: View {
 
 struct MainWorkspaceCardItemRenderState: Equatable {
     let cardID: UUID
+    let cardObjectIdentifier: ObjectIdentifier
     let renderSettings: MainCardRenderSettings
     let isActive: Bool
     let isSelected: Bool
@@ -779,6 +780,7 @@ struct CardItem: View {
     private let mainEditorVerticalPadding: CGFloat = 24
     private let mainEditorLineFragmentPadding: CGFloat = MainEditorLayoutMetrics.mainEditorLineFragmentPadding
     private let mainEditingMeasureMinInterval: TimeInterval = 0.033
+    private let mainEditingMeasureTypingMinInterval: TimeInterval = 0.05
     private let mainEditingMeasureUpdateThreshold: CGFloat = 0.5
     private var mainEditorHorizontalPadding: CGFloat {
         MainEditorLayoutMetrics.mainEditorHorizontalPadding
@@ -963,9 +965,17 @@ struct CardItem: View {
             set: { newValue in
                 let oldValue = card.content
                 guard oldValue != newValue else { return }
+                let delta = sharedUTF16ChangeDeltaValue(oldValue: oldValue, newValue: newValue)
+                let shouldRefreshImmediately =
+                    delta.inserted.contains("\n") ||
+                    delta.oldChangedLength > 1 ||
+                    delta.newChangedLength > 1
                 card.content = newValue
                 onContentChange?(oldValue, newValue)
-                scheduleMainEditingMeasuredBodyHeightRefresh()
+                scheduleMainEditingMeasuredBodyHeightRefresh(
+                    immediate: shouldRefreshImmediately,
+                    typingMutation: !shouldRefreshImmediately
+                )
             }
         )
     }
@@ -999,7 +1009,10 @@ struct CardItem: View {
         }
     }
 
-    private func scheduleMainEditingMeasuredBodyHeightRefresh(immediate: Bool = false) {
+    private func scheduleMainEditingMeasuredBodyHeightRefresh(
+        immediate: Bool = false,
+        typingMutation: Bool = false
+    ) {
         if immediate {
             mainEditingMeasureWorkItem?.cancel()
             mainEditingMeasureWorkItem = nil
@@ -1009,12 +1022,19 @@ struct CardItem: View {
 
         let now = Date()
         let elapsed = now.timeIntervalSince(mainEditingMeasureLastAt)
-        let delay = max(0, mainEditingMeasureMinInterval - elapsed)
+        let minimumInterval =
+            typingMutation
+            ? max(mainEditingMeasureMinInterval, mainEditingMeasureTypingMinInterval)
+            : mainEditingMeasureMinInterval
+        let delay = max(0, minimumInterval - elapsed)
         guard delay > 0.001 else {
             refreshMainEditingMeasuredBodyHeight()
             return
         }
 
+        if typingMutation, mainEditingMeasureWorkItem != nil {
+            return
+        }
         mainEditingMeasureWorkItem?.cancel()
         let work = DispatchWorkItem {
             mainEditingMeasureWorkItem = nil

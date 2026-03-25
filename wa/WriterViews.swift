@@ -192,6 +192,12 @@ struct ScenarioWriterView: View {
     @State var mainTypingIdleFinalizeWorkItem: DispatchWorkItem? = nil
     @State var mainPendingReturnBoundary: Bool = false
     @State var mainLastCommittedContentByCard: [UUID: String] = [:]
+    @State var mainCanvasTransitionShellSnapshot: MainCanvasTransitionShellSnapshot? = nil
+    @State var mainCanvasTransitionShellReleaseWorkItem: DispatchWorkItem? = nil
+    @State var mainCanvasHorizontalBaselineCompletionWorkItem: DispatchWorkItem? = nil
+    @State var mainCanvasHorizontalBaselineCompletionTargetID: UUID? = nil
+    @State var mainTypingPostMutationCardID: UUID? = nil
+    @State var mainTypingPostMutationUntil: Date = .distantPast
     @State var mainProgrammaticContentSuppressUntil: Date = .distantPast
     @State var pendingMainUndoCaretHint: (cardID: UUID, location: Int)? = nil
     @State var focusUndoStack: [ScenarioState] = []
@@ -255,6 +261,9 @@ struct ScenarioWriterView: View {
     let focusOffsetNormalizationMinInterval: TimeInterval = 0.08
     let focusCaretSelectionEnsureMinInterval: TimeInterval = 0.016
     let mainCaretSelectionEnsureMinInterval: TimeInterval = 0.016
+    let mainCanvasTransitionShellDuration: TimeInterval = 0.18
+    let mainTypingPostMutationWindow: TimeInterval = 0.05
+    let mainTypingCaretEnsureBurstMinInterval: TimeInterval = 0.05
     let mainEditDoubleTabInterval: TimeInterval = 0.45
     let mainNoChildRightDoublePressInterval: TimeInterval = 0.55
     let maxUndoCount: Int = 200
@@ -941,6 +950,12 @@ struct ScenarioWriterView: View {
         let interactionFingerprint: Int
     }
 
+    struct MainCanvasTransitionShellSnapshot {
+        let displayedLevelsData: [LevelData]
+        let visualMaxLevelCount: Int
+        let locationByID: [UUID: (level: Int, index: Int)]
+    }
+
     struct MainCanvasHost: View, Equatable {
         let renderState: MainCanvasRenderState
         @ObservedObject var viewState: MainCanvasViewState
@@ -1187,8 +1202,8 @@ struct ScenarioWriterView: View {
             .onChange(of: Int(historyIndex)) { _, _ in
                 handleHistoryIndexChange()
             }
-            .onChange(of: activeCardID) { _, newID in
-                handleActiveCardIDChange(newID)
+            .onChange(of: activeCardID) { oldID, newID in
+                handleActiveCardIDChange(oldID: oldID, newID: newID)
             }
             .onChange(of: mainCanvasInteractionFingerprint()) { oldValue, newValue in
                 guard oldValue != newValue else { return }
@@ -1380,6 +1395,10 @@ struct ScenarioWriterView: View {
             scenarioID: scenario.id,
             cardsVersion: scenario.cardsVersion
         )
+        WorkspaceModeParityDiagnostics.shared.reset(
+            scenarioID: scenario.id,
+            cardsVersion: scenario.cardsVersion
+        )
         mainCanvasScrollCoordinator.reset()
         syncMainCanvasInteractionState()
         syncScenarioObservedState()
@@ -1515,7 +1534,27 @@ struct ScenarioWriterView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: workItem)
     }
 
-    func handleActiveCardIDChange(_ newID: UUID?) {
+    func handleActiveCardIDChange(oldID: UUID?, newID: UUID?) {
+        if oldID != newID {
+            cancelMainCanvasHorizontalBaselineCompletionCheck()
+        }
+        if let newID, oldID != newID {
+            let transitionSource =
+                pendingMainClickFocusTargetID == newID ||
+                pendingMainClickHorizontalFocusTargetID == newID
+                ? "clickFocus"
+                : "activeCardChange"
+            beginMainCanvasTransitionShell()
+            WorkspaceModeParityDiagnostics.shared.beginActiveCardTransition(
+                targetCardID: newID,
+                source: transitionSource
+            )
+        } else if newID == nil {
+            clearMainCanvasTransitionShellSnapshot()
+            WorkspaceModeParityDiagnostics.shared.cancelActiveCardTransition(
+                reason: "activeCardCleared"
+            )
+        }
         mainColumnLastFocusRequestByKey = [:]
         if let newID, scenario.rootCards.contains(where: { $0.id == newID }) {
             mainColumnViewportRestoreUntil = Date().addingTimeInterval(0.35)
@@ -1556,12 +1595,21 @@ struct ScenarioWriterView: View {
             syncMainCanvasInteractionState()
             return
         }
-        let clickFocusedTarget = pendingMainClickHorizontalFocusTargetID == newID
+        let clickFocusedColumnTarget = pendingMainClickFocusTargetID == newID
+        let clickFocusedTarget =
+            clickFocusedColumnTarget ||
+            pendingMainClickHorizontalFocusTargetID == newID
         if mainColumnViewportRestoreUntil > Date(), !clickFocusedTarget {
             syncMainCanvasInteractionState()
             return
         }
-        publishMainColumnFocusNavigationIntent(for: newID)
+        publishMainColumnFocusNavigationIntent(
+            for: newID,
+            trigger: clickFocusedColumnTarget ? "clickFocus" : "activeCardChange"
+        )
+        if clickFocusedColumnTarget {
+            pendingMainClickFocusTargetID = nil
+        }
         syncMainCanvasInteractionState(emitNavigationEvent: true)
     }
 
@@ -1618,6 +1666,11 @@ struct ScenarioWriterView: View {
     func handleWorkspaceDisappear() {
         cancelDeferredMainActiveSideEffects()
         MainWorkspaceNavigationDiagnostics.shared.emitSummary(
+            reason: "workspaceDisappear",
+            activeCardID: activeCardID,
+            cardsVersion: scenario.cardsVersion
+        )
+        WorkspaceModeParityDiagnostics.shared.emitSummary(
             reason: "workspaceDisappear",
             activeCardID: activeCardID,
             cardsVersion: scenario.cardsVersion
@@ -2662,9 +2715,9 @@ struct ScenarioWriterView: View {
 
     @ViewBuilder
     func mainCanvasLevelColumns(screenHeight: CGFloat) -> some View {
-        let baseLevelsData = displayedLevelsData()
-        let levelsData = displayedMainLevelsData(from: baseLevelsData)
-        let visualMaxLevelCount = displayedMaxLevelCount(for: baseLevelsData)
+        let renderSnapshot = resolvedMainCanvasLevelColumnsSnapshot()
+        let levelsData = renderSnapshot.displayedLevelsData
+        let visualMaxLevelCount = renderSnapshot.visualMaxLevelCount
         ForEach(Array(levelsData.enumerated()), id: \.offset) { index, data in
             if index <= 1 || !data.cards.isEmpty {
                 column(for: data.cards, level: index, parent: data.parent, screenHeight: screenHeight)
@@ -2936,6 +2989,15 @@ struct ScenarioWriterView: View {
                 return
             }
         }
+        if !clickFocusedTarget && isMainCanvasHorizontallyAlignedForClickFocus(
+            targetCardID: id,
+            availableWidth: availableWidth
+        ) {
+            if let targetLevel = displayedMainCardLocationByID(id)?.level {
+                lastScrolledLevel = targetLevel
+            }
+            return
+        }
         let animated =
             focusNavigationAnimationEnabled &&
             (pendingMainHorizontalScrollAnimation ?? !shouldSuppressMainArrowRepeatAnimation())
@@ -2946,7 +3008,8 @@ struct ScenarioWriterView: View {
                 proxy: hProxy,
                 availableWidth: availableWidth,
                 force: mainCanvasHorizontalScrollMode == .oneStep,
-                animated: animated
+                animated: animated,
+                trigger: "clickFocus"
             )
             if pendingMainClickHorizontalFocusTargetID == id {
                 pendingMainClickHorizontalFocusTargetID = nil
@@ -2959,7 +3022,8 @@ struct ScenarioWriterView: View {
                 proxy: hProxy,
                 availableWidth: availableWidth,
                 force: clickFocusedTarget && mainCanvasHorizontalScrollMode == .oneStep,
-                animated: animated
+                animated: animated,
+                trigger: "activeCardChange"
             )
         }
     }
@@ -2991,6 +3055,15 @@ struct ScenarioWriterView: View {
                     return
                 }
 
+                if index > 0 {
+                    WorkspaceModeParityDiagnostics.shared.noteHorizontalRetry(
+                        targetCardID: targetCardID
+                    )
+                    WorkspaceModeParityDiagnostics.shared.noteHorizontalLateNudge(
+                        targetCardID: targetCardID
+                    )
+                }
+
                 if mainCanvasHorizontalScrollMode == .oneStep,
                    let targetLevel = displayedMainCardLocationByID(targetCardID)?.level,
                    let scrollView = mainCanvasScrollCoordinator.resolvedMainCanvasHorizontalScrollView() {
@@ -3007,13 +3080,18 @@ struct ScenarioWriterView: View {
                         availableWidth: max(1, availableWidth),
                         animated: index == 0 ? animated : false
                     )
+                    scheduleMainCanvasHorizontalBaselineCompletionCheck(
+                        targetCardID: targetCardID,
+                        availableWidth: max(1, availableWidth)
+                    )
                 } else {
                     scrollToColumnIfNeeded(
                         targetCardID: targetCardID,
                         proxy: hProxy,
                         availableWidth: availableWidth,
                         force: false,
-                        animated: index == 0 ? animated : false
+                        animated: index == 0 ? animated : false,
+                        trigger: "clickFocusRetry"
                     )
                 }
 
@@ -3021,6 +3099,9 @@ struct ScenarioWriterView: View {
                     targetCardID: targetCardID,
                     availableWidth: availableWidth
                 ) {
+                    WorkspaceModeParityDiagnostics.shared.finishHorizontalAlignment(
+                        targetCardID: targetCardID
+                    )
                     if pendingMainClickHorizontalFocusTargetID == targetCardID {
                         pendingMainClickHorizontalFocusTargetID = nil
                     }
@@ -3066,12 +3147,26 @@ struct ScenarioWriterView: View {
         guard acceptsKeyboardInput else { return }
         guard !isPreviewingHistory else { return }
         guard let targetID = activeCardID, findCard(by: targetID) != nil else { return }
+        clearMainCanvasTransitionShellSnapshot()
+        if hasPendingMainCanvasHorizontalBaselineCompletionCheck(targetCardID: targetID) {
+            return
+        }
+        if isMainCanvasHorizontallyAlignedForClickFocus(
+            targetCardID: targetID,
+            availableWidth: availableWidth
+        ) {
+            return
+        }
+        WorkspaceModeParityDiagnostics.shared.noteHorizontalLateNudge(
+            targetCardID: targetID
+        )
         scrollToColumnIfNeeded(
             targetCardID: targetID,
             proxy: hProxy,
             availableWidth: availableWidth,
             force: true,
-            animated: false
+            animated: false,
+            trigger: "navigationSettle"
         )
     }
 
@@ -3158,11 +3253,90 @@ struct ScenarioWriterView: View {
         return resolvedLevelsWithParents()
     }
 
+    private func resolvedMainCanvasLevelColumnsSnapshot() -> MainCanvasTransitionShellSnapshot {
+        if let snapshot = mainCanvasTransitionShellSnapshot,
+           !showFocusMode,
+           editingCardID == nil,
+           !isPreviewingHistory {
+            return snapshot
+        }
+        let baseLevelsData = displayedLevelsData()
+        let displayedLevels = displayedMainLevelsData(from: baseLevelsData)
+        var locationByID: [UUID: (level: Int, index: Int)] = [:]
+        for (levelIndex, data) in displayedLevels.enumerated() {
+            for (index, card) in data.cards.enumerated() {
+                locationByID[card.id] = (levelIndex, index)
+            }
+        }
+        return MainCanvasTransitionShellSnapshot(
+            displayedLevelsData: displayedLevels,
+            visualMaxLevelCount: displayedMaxLevelCount(for: baseLevelsData),
+            locationByID: locationByID
+        )
+    }
+
     private func displayedMaxLevelCount(for levelsData: [LevelData]) -> Int {
         if isInactiveSplitPane {
             return max(inactivePaneSnapshotState.maxLevelCount, levelsData.count)
         }
         return maxLevelCount
+    }
+
+    private func cancelMainCanvasTransitionShellRelease() {
+        mainCanvasTransitionShellReleaseWorkItem?.cancel()
+        mainCanvasTransitionShellReleaseWorkItem = nil
+    }
+
+    private func clearMainCanvasTransitionShellSnapshot() {
+        cancelMainCanvasTransitionShellRelease()
+        mainCanvasTransitionShellSnapshot = nil
+    }
+
+    private func captureMainCanvasTransitionShellSnapshot() {
+        guard !showFocusMode else {
+            clearMainCanvasTransitionShellSnapshot()
+            return
+        }
+        guard editingCardID == nil else {
+            clearMainCanvasTransitionShellSnapshot()
+            return
+        }
+        guard !isPreviewingHistory else {
+            clearMainCanvasTransitionShellSnapshot()
+            return
+        }
+        guard !isInactiveSplitPane else {
+            clearMainCanvasTransitionShellSnapshot()
+            return
+        }
+        let baseLevelsData = resolvedLevelsWithParents()
+        let displayedLevels = displayedMainLevelsData(from: baseLevelsData)
+        var locationByID: [UUID: (level: Int, index: Int)] = [:]
+        for (levelIndex, data) in displayedLevels.enumerated() {
+            for (index, card) in data.cards.enumerated() {
+                locationByID[card.id] = (levelIndex, index)
+            }
+        }
+        mainCanvasTransitionShellSnapshot = MainCanvasTransitionShellSnapshot(
+            displayedLevelsData: displayedLevels,
+            visualMaxLevelCount: displayedMaxLevelCount(for: baseLevelsData),
+            locationByID: locationByID
+        )
+    }
+
+    private func beginMainCanvasTransitionShell() {
+        captureMainCanvasTransitionShellSnapshot()
+        guard mainCanvasTransitionShellSnapshot != nil else { return }
+        cancelMainCanvasTransitionShellRelease()
+        let workItem = DispatchWorkItem {
+            mainCanvasTransitionShellReleaseWorkItem = nil
+            mainCanvasTransitionShellSnapshot = nil
+        }
+        mainCanvasTransitionShellReleaseWorkItem = workItem
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + mainCanvasTransitionShellDuration,
+            execute: workItem
+        )
     }
 
     private func cancelInactivePaneSnapshotRefresh() {
