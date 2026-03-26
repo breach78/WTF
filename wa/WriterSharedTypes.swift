@@ -12,6 +12,68 @@ func bounceDebugLog(_ message: @autoclosure () -> String) {}
 func bounceDebugLog(_ message: @autoclosure () -> String) {}
 #endif
 
+private enum MainWorkspacePhase0Diagnostics {
+    static let logURL = URL(fileURLWithPath: "/tmp/wa_main_workspace_phase0.log")
+    static let queue = DispatchQueue(label: "wa.main-workspace-phase0")
+    static let formatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+}
+
+func mainWorkspacePhase0Mark(_ label: String) {
+    let line = "\n========== \(label) ==========\n"
+    let data = Data(line.utf8)
+    MainWorkspacePhase0Diagnostics.queue.async {
+        if FileManager.default.fileExists(atPath: MainWorkspacePhase0Diagnostics.logURL.path),
+           let handle = try? FileHandle(forWritingTo: MainWorkspacePhase0Diagnostics.logURL) {
+            defer { try? handle.close() }
+            try? handle.seekToEnd()
+            try? handle.write(contentsOf: data)
+            return
+        }
+        try? data.write(to: MainWorkspacePhase0Diagnostics.logURL, options: .atomic)
+    }
+}
+
+func mainWorkspacePhase0Log(
+    _ event: String,
+    _ details: @autoclosure @escaping () -> String = ""
+) {
+    let timestamp = MainWorkspacePhase0Diagnostics.formatter.string(from: Date())
+    let line = "[\(timestamp)] \(event) \(details())\n"
+    let data = Data(line.utf8)
+    MainWorkspacePhase0Diagnostics.queue.async {
+        if FileManager.default.fileExists(atPath: MainWorkspacePhase0Diagnostics.logURL.path),
+           let handle = try? FileHandle(forWritingTo: MainWorkspacePhase0Diagnostics.logURL) {
+            defer { try? handle.close() }
+            try? handle.seekToEnd()
+            try? handle.write(contentsOf: data)
+            return
+        }
+        try? data.write(to: MainWorkspacePhase0Diagnostics.logURL, options: .atomic)
+    }
+}
+
+func mainWorkspacePhase0CardID(_ id: UUID?) -> String {
+    guard let id else { return "nil" }
+    return id.uuidString
+}
+
+func mainWorkspacePhase0ResponderSummary(expectedText: String? = nil) -> String {
+    guard let textView = NSApp.keyWindow?.firstResponder as? NSTextView else { return "none" }
+    let selected = textView.selectedRange()
+    let textLength = (textView.string as NSString).length
+    let matchSummary: String
+    if let expectedText {
+        matchSummary = textView.string == expectedText ? "match" : "mismatch"
+    } else {
+        matchSummary = "n/a"
+    }
+    return "textView=\(ObjectIdentifier(textView).hashValue) len=\(textLength) sel=\(selected.location):\(selected.length) match=\(matchSummary)"
+}
+
 enum SoftBoundaryFeedbackSound {
     @MainActor static let shared: AVAudioPlayer? = {
         let url = URL(fileURLWithPath: "/System/Library/Sounds/Pop.aiff")

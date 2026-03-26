@@ -347,6 +347,55 @@ extension ScenarioWriterView {
         )
     }
 
+    func publishPreemptiveMainColumnFocusNavigationIntent(
+        for targetID: UUID?,
+        trigger: String = "arrowPreview"
+    ) {
+        guard let targetID else { return }
+        let shouldAnimate =
+            focusNavigationAnimationEnabled &&
+            !shouldSuppressMainArrowRepeatAnimation()
+        pendingMainPreemptiveFocusNavigationTargetID = targetID
+        _ = publishMainColumnNavigationIntent(
+            kind: .focusChange,
+            scope: .allColumns,
+            targetCardID: targetID,
+            expectedActiveCardID: targetID,
+            animated: shouldAnimate,
+            trigger: trigger
+        )
+        preemptivelyAlignMainCanvasHorizontally(to: targetID, animated: shouldAnimate)
+        mainWorkspacePhase0Log(
+            "preemptive-focus-intent",
+            "target=\(mainWorkspacePhase0CardID(targetID)) animated=\(shouldAnimate) trigger=\(trigger)"
+        )
+    }
+
+    func preemptivelyAlignMainCanvasHorizontally(
+        to targetCardID: UUID,
+        animated: Bool
+    ) {
+        guard !showFocusMode else { return }
+        guard acceptsKeyboardInput else { return }
+        guard !isPreviewingHistory else { return }
+        guard mainCanvasHorizontalScrollMode == .oneStep else { return }
+        guard let targetLevel = displayedMainCardLocationByID(targetCardID)?.level else { return }
+        guard let scrollView = mainCanvasScrollCoordinator.resolvedMainCanvasHorizontalScrollView() else { return }
+
+        let availableWidth = max(1, scrollView.documentVisibleRect.width)
+        guard lastScrolledLevel != targetLevel else { return }
+        lastScrolledLevel = targetLevel
+        let applied = performMainCanvasHorizontalScroll(
+            level: targetLevel,
+            availableWidth: availableWidth,
+            animated: animated
+        )
+        mainWorkspacePhase0Log(
+            "preemptive-horizontal-scroll",
+            "target=\(mainWorkspacePhase0CardID(targetCardID)) level=\(targetLevel) animated=\(animated) applied=\(applied)"
+        )
+    }
+
     // MARK: - Debug Helpers
 
     func debugCGFloat(_ value: CGFloat) -> String {
@@ -587,6 +636,11 @@ extension ScenarioWriterView {
     // MARK: - Timeline & Column View Builders
 
     func beginCardEditing(_ card: SceneCard, explicitCaretLocation: Int? = nil) {
+        mainWorkspacePhase0Log(
+            "begin-card-edit-request",
+            "card=\(mainWorkspacePhase0CardID(card.id)) activeBefore=\(mainWorkspacePhase0CardID(activeCardID)) " +
+            "editingBefore=\(mainWorkspacePhase0CardID(editingCardID)) explicitCaret=\(explicitCaretLocation.map(String.init) ?? "nil")"
+        )
         finishEditing()
         pendingMainEditingSiblingNavigationTargetID = nil
         if let explicitCaretLocation {
@@ -613,6 +667,12 @@ extension ScenarioWriterView {
         editingStartState = captureScenarioState()
         editingIsNewCard = false
         selectedCardIDs = [card.id]
+        mainWorkspacePhase0Log(
+            "begin-card-edit-applied",
+            "card=\(mainWorkspacePhase0CardID(card.id)) active=\(mainWorkspacePhase0CardID(activeCardID)) " +
+            "editing=\(mainWorkspacePhase0CardID(editingCardID)) keepVisible=\(mainWorkspacePhase0CardID(pendingMainEditingViewportKeepVisibleCardID)) " +
+            "revealEdge=\(String(describing: pendingMainEditingViewportRevealEdge)) responder=\(mainWorkspacePhase0ResponderSummary(expectedText: card.content))"
+        )
     }
 
     @ViewBuilder
@@ -941,6 +1001,13 @@ extension ScenarioWriterView {
         let requestKey = mainColumnScrollCacheKey(level: level, parent: parent)
         let viewportKey = mainColumnViewportStorageKey(level: level)
         guard isMainVerticalScrollAuthorityCurrent(authority, viewportKey: viewportKey) else { return }
+        mainWorkspacePhase0Log(
+            "scroll-to-focus-request",
+            "reason=\(reason) level=\(level) active=\(mainWorkspacePhase0CardID(activeCardID)) " +
+            "editing=\(mainWorkspacePhase0CardID(editingCardID)) keepVisible=\(keepVisibleOnly) " +
+            "edge=\(String(describing: editingRevealEdge)) force=\(forceAlignment) animated=\(animated) " +
+            "authority=\(authority?.id ?? -1):\(authority?.kind.rawValue ?? "nil")"
+        )
 
         guard let idToScroll = resolvedMainColumnFocusTargetID(in: cards) else {
             bounceDebugLog(
@@ -1557,6 +1624,11 @@ extension ScenarioWriterView {
                 "targetY=\(debugCGFloat(resolvedTargetY)) visibleY=\(debugCGFloat(visible.origin.y)) " +
                 "duration=\(String(format: "%.2f", appliedDuration)) viewport=\(debugCGFloat(resolvedViewportHeight))"
             )
+            mainWorkspacePhase0Log(
+                "native-focus-scroll",
+                "mode=animated key=\(viewportKey) target=\(mainWorkspacePhase0CardID(targetID)) " +
+                "visibleY=\(visible.origin.y) targetY=\(resolvedTargetY) duration=\(appliedDuration) viewport=\(resolvedViewportHeight)"
+            )
             return true
         }
 
@@ -1582,6 +1654,11 @@ extension ScenarioWriterView {
             bounceDebugLog(
                 "nativeMainColumnFocusScroll immediate key=\(viewportKey) target=\(debugCardIDString(targetID)) " +
                 "targetY=\(debugCGFloat(targetOffsetY)) visibleY=\(debugCGFloat(visible.origin.y))"
+            )
+            mainWorkspacePhase0Log(
+                "native-focus-scroll",
+                "mode=immediate key=\(viewportKey) target=\(mainWorkspacePhase0CardID(targetID)) " +
+                "visibleY=\(visible.origin.y) targetY=\(targetOffsetY) viewport=\(resolvedViewportHeight)"
             )
         }
         let resolvedTargetY = CaretScrollCoordinator.resolvedVerticalTargetY(
@@ -3454,6 +3531,11 @@ extension ScenarioWriterView {
                 "parentRememberedAfter=\(debugCardIDString(card.parent?.lastSelectedChildID)) " +
                 "levelCount=\(levelCount) \(debugFocusStateSummary())"
             )
+            mainWorkspacePhase0Log(
+                "active-card-change",
+                "previous=\(mainWorkspacePhase0CardID(previousActiveID)) active=\(mainWorkspacePhase0CardID(activeCardID)) " +
+                "editing=\(mainWorkspacePhase0CardID(editingCardID)) shouldFocusMain=\(shouldFocusMain)"
+            )
         }
         if deferToMainAsync || !Thread.isMainThread {
             DispatchQueue.main.async { apply() }
@@ -3506,6 +3588,11 @@ extension ScenarioWriterView {
             startState: editingStartState,
             wasNewCard: editingIsNewCard,
             newCardPrevState: pendingNewCardPrevState
+        )
+        mainWorkspacePhase0Log(
+            "take-finish-editing-context",
+            "card=\(mainWorkspacePhase0CardID(id)) active=\(mainWorkspacePhase0CardID(activeCardID)) " +
+            "skipMainFocusRestore=\(skipMainFocusRestore) responder=\(mainWorkspacePhase0ResponderSummary(expectedText: findCard(by: id)?.content))"
         )
         resetEditingTransientState()
         return context

@@ -103,6 +103,7 @@ struct ScenarioWriterView: View {
     @State var activeCardID: UUID? = nil
     @State var selectedCardIDs: Set<UUID> = []
     @State var editingCardID: UUID? = nil
+    @State var pendingMainPreemptiveFocusNavigationTargetID: UUID? = nil
     @State var indexBoardEditorDraft: IndexBoardEditorDraft? = nil
     @State var isIndexBoardInlineEditing: Bool = false
     @State var pendingIndexBoardCreationPrevStateByCardID: [UUID: ScenarioState] = [:]
@@ -1210,6 +1211,11 @@ struct ScenarioWriterView: View {
 
     func workspaceEditorBoundRoot<Content: View>(_ root: Content) -> some View {
         root
+            .onAppear {
+                mainWorkspacePhase0Mark(
+                    "main-workspace-phase0 scenario=\(scenario.id.uuidString) pane=\(splitPaneID)"
+                )
+            }
             .onChange(of: editingCardID) { oldID, newID in
                 handleEditingCardIDChange(oldID: oldID, newID: newID)
             }
@@ -1476,6 +1482,10 @@ struct ScenarioWriterView: View {
             return
         }
         let clickFocusedTarget = pendingMainClickHorizontalFocusTargetID == newID
+        let preemptivelyFocusedTarget = pendingMainPreemptiveFocusNavigationTargetID == newID
+        if preemptivelyFocusedTarget {
+            pendingMainPreemptiveFocusNavigationTargetID = nil
+        }
         if mainColumnViewportRestoreUntil > Date(), !clickFocusedTarget {
             indexBoardRestoreTrace(
                 "main_canvas_handle_active_card_change_preserve_viewport",
@@ -1484,7 +1494,9 @@ struct ScenarioWriterView: View {
             syncMainCanvasInteractionState()
             return
         }
-        publishMainColumnFocusNavigationIntent(for: newID)
+        if !preemptivelyFocusedTarget {
+            publishMainColumnFocusNavigationIntent(for: newID)
+        }
         syncMainCanvasInteractionState(emitNavigationEvent: true)
     }
 
@@ -1653,6 +1665,13 @@ struct ScenarioWriterView: View {
     }
 
     func handleEditingCardIDChange(oldID: UUID?, newID: UUID?) {
+        let expectedText = newID.flatMap { findCard(by: $0)?.content }
+        mainWorkspacePhase0Log(
+            "editing-card-change",
+            "old=\(mainWorkspacePhase0CardID(oldID)) new=\(mainWorkspacePhase0CardID(newID)) " +
+            "active=\(mainWorkspacePhase0CardID(activeCardID)) focusMode=\(showFocusMode) " +
+            "responder=\(mainWorkspacePhase0ResponderSummary(expectedText: expectedText))"
+        )
         if let newID {
             persistLastEditedCard(newID)
             if !showFocusMode {

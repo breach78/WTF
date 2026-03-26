@@ -866,12 +866,19 @@ struct CardItem: View {
     }
 
     private func refreshMainEditingMeasuredBodyHeight() {
-        let measured = liveMainResponderBodyHeight()
+        let liveBodyHeight = liveMainResponderBodyHeight()
+        let measured = liveBodyHeight
             ?? measureMainEditorBodyHeight(text: card.content, width: mainEditingTextMeasureWidth)
         mainEditingMeasureLastAt = Date()
         let previous = mainEditingMeasuredBodyHeight
         if abs(previous - measured) > mainEditingMeasureUpdateThreshold {
             mainEditingMeasuredBodyHeight = measured
+            mainWorkspacePhase0Log(
+                "inline-editor-row-height",
+                "card=\(mainWorkspacePhase0CardID(card.id)) source=\(liveBodyHeight != nil ? "liveResponder" : "fallbackMeasure") " +
+                "body=\(measured) row=\(measured + (mainEditorVerticalPadding * 2)) previous=\(previous) " +
+                "editorFocus=\(editorFocus) responder=\(mainWorkspacePhase0ResponderSummary(expectedText: card.content))"
+            )
         }
     }
 
@@ -1049,6 +1056,11 @@ struct CardItem: View {
                         .foregroundStyle(appearance == "light" ? .black : .white)
                         .focused($editorFocus)
                         .onAppear {
+                            mainWorkspacePhase0Log(
+                                "inline-editor-appear",
+                                "card=\(mainWorkspacePhase0CardID(card.id)) active=\(isActive) selected=\(isSelected) " +
+                                "measuredBody=\(mainEditingMeasuredBodyHeight) responder=\(mainWorkspacePhase0ResponderSummary(expectedText: card.content))"
+                            )
                             scheduleMainEditingMeasuredBodyHeightRefresh(immediate: true)
                             DispatchQueue.main.async {
                                 let alreadyFocusedHere: Bool = {
@@ -1058,12 +1070,29 @@ struct CardItem: View {
                                 if !alreadyFocusedHere {
                                     editorFocus = true
                                 }
+                                mainWorkspacePhase0Log(
+                                    "inline-editor-focus-request",
+                                    "card=\(mainWorkspacePhase0CardID(card.id)) alreadyFocused=\(alreadyFocusedHere) " +
+                                    "editorFocus=\(editorFocus) responder=\(mainWorkspacePhase0ResponderSummary(expectedText: card.content))"
+                                )
                                 scheduleMainEditingMeasuredBodyHeightRefresh(immediate: true)
                             }
                         }
                         .onDisappear {
+                            mainWorkspacePhase0Log(
+                                "inline-editor-disappear",
+                                "card=\(mainWorkspacePhase0CardID(card.id)) measuredBody=\(mainEditingMeasuredBodyHeight) " +
+                                "responder=\(mainWorkspacePhase0ResponderSummary(expectedText: card.content))"
+                            )
                             mainEditingMeasureWorkItem?.cancel()
                             mainEditingMeasureWorkItem = nil
+                        }
+                        .onChange(of: editorFocus) { _, newValue in
+                            mainWorkspacePhase0Log(
+                                "inline-editor-focus-state",
+                                "card=\(mainWorkspacePhase0CardID(card.id)) focused=\(newValue) " +
+                                "responder=\(mainWorkspacePhase0ResponderSummary(expectedText: card.content))"
+                            )
                         }
                         .onChange(of: fontSize) { _, _ in
                             scheduleMainEditingMeasuredBodyHeightRefresh(immediate: true)
@@ -1199,6 +1228,11 @@ struct CardItem: View {
             }
         }
         .onChange(of: isEditing) { _, newValue in
+            mainWorkspacePhase0Log(
+                "card-editing-flag-change",
+                "card=\(mainWorkspacePhase0CardID(card.id)) isEditing=\(newValue) active=\(isActive) " +
+                "measuredBody=\(mainEditingMeasuredBodyHeight) responder=\(mainWorkspacePhase0ResponderSummary(expectedText: card.content))"
+            )
             if newValue {
                 scheduleMainEditingMeasuredBodyHeightRefresh(immediate: true)
             } else {

@@ -1438,6 +1438,10 @@ extension ScenarioWriterView {
         guard let id = activeCardID else {
             if let first = scenario.rootCards.first {
                 clearMainBoundaryFeedbackGate()
+                publishPreemptiveMainColumnFocusNavigationIntent(
+                    for: first.id,
+                    trigger: "arrowPreview.initial"
+                )
                 changeActiveCard(to: first, deferToMainAsync: false)
                 selectedCardIDs = [first.id]
                 if seedRangeAnchorWhenNoActive && isShiftPressed {
@@ -1493,6 +1497,10 @@ extension ScenarioWriterView {
                 return true
             }
             clearMainBoundaryFeedbackGate()
+            publishPreemptiveMainColumnFocusNavigationIntent(
+                for: target.id,
+                trigger: "arrowPreview.up"
+            )
             changeActiveCard(to: target, deferToMainAsync: false)
             if isShiftPressed {
                 updateKeyboardRangeSelection(
@@ -1527,6 +1535,10 @@ extension ScenarioWriterView {
                     return true
                 }
                 clearMainBoundaryFeedbackGate()
+                publishPreemptiveMainColumnFocusNavigationIntent(
+                    for: target.id,
+                    trigger: "arrowPreview.down"
+                )
                 changeActiveCard(to: target, deferToMainAsync: false)
                 if isShiftPressed {
                     updateKeyboardRangeSelection(from: card, to: target, in: currentLevel)
@@ -1558,6 +1570,10 @@ extension ScenarioWriterView {
                 return true
             }
             clearMainBoundaryFeedbackGate()
+            publishPreemptiveMainColumnFocusNavigationIntent(
+                for: target.id,
+                trigger: "arrowPreview.downBoundary"
+            )
             changeActiveCard(to: target, deferToMainAsync: false)
             if isShiftPressed {
                 updateKeyboardRangeSelection(
@@ -1587,6 +1603,10 @@ extension ScenarioWriterView {
             )
             if case .target(let target) = result {
                 clearMainBoundaryFeedbackGate()
+                publishPreemptiveMainColumnFocusNavigationIntent(
+                    for: target.id,
+                    trigger: "arrowPreview.right"
+                )
                 changeActiveCard(to: target, deferToMainAsync: false)
                 selectedCardIDs = [target.id]
                 clearKeyboardRangeSelectionAnchor()
@@ -1601,6 +1621,10 @@ extension ScenarioWriterView {
             clearMainNoChildRightArm()
             guard let parent = card.parent else { return false }
             clearMainBoundaryFeedbackGate()
+            publishPreemptiveMainColumnFocusNavigationIntent(
+                for: parent.id,
+                trigger: "arrowPreview.left"
+            )
             changeActiveCard(to: parent, deferToMainAsync: false)
             selectedCardIDs = [parent.id]
             clearKeyboardRangeSelectionAnchor()
@@ -1749,6 +1773,13 @@ extension ScenarioWriterView {
         isRepeat: Bool
     ) {
         guard let direction else { return }
+
+        mainWorkspacePhase0Log(
+            "focus-intent",
+            "direction=\(String(describing: direction)) repeat=\(isRepeat) " +
+            "from=\(mainWorkspacePhase0CardID(previousActiveID)) to=\(mainWorkspacePhase0CardID(activeCardID)) " +
+            "editing=\(mainWorkspacePhase0CardID(editingCardID))"
+        )
 
         MainCanvasNavigationDiagnostics.shared.beginFocusIntent(
             ownerKey: mainCanvasDiagnosticsOwnerKey,
