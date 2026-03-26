@@ -344,6 +344,236 @@ private struct FocusModeEditableTextRenderer: NSViewRepresentable {
     }
 }
 
+private struct MainWorkspaceEditableTextRenderer: NSViewRepresentable {
+    struct Signature: Equatable {
+        let textWidthBucket: Int
+        let bodyHeightBucket: Int
+        let fontSizeBucket: Int
+        let lineSpacingBucket: Int
+        let isLightAppearance: Bool
+        let wantsFocus: Bool
+    }
+
+    final class TextView: NSTextView {
+        var focusStateHandler: ((Bool) -> Void)?
+
+        override func becomeFirstResponder() -> Bool {
+            let accepted = super.becomeFirstResponder()
+            if accepted {
+                focusStateHandler?(true)
+            }
+            return accepted
+        }
+
+        override func resignFirstResponder() -> Bool {
+            let accepted = super.resignFirstResponder()
+            if accepted {
+                focusStateHandler?(false)
+            }
+            return accepted
+        }
+    }
+
+    final class Coordinator: NSObject, NSTextViewDelegate {
+        var parent: MainWorkspaceEditableTextRenderer
+        var suppressBindingPropagation = false
+        var lastSignature: Signature?
+        var pendingFocusRetry: DispatchWorkItem?
+
+        init(_ parent: MainWorkspaceEditableTextRenderer) {
+            self.parent = parent
+        }
+
+        deinit {
+            pendingFocusRetry?.cancel()
+        }
+
+        func textDidChange(_ notification: Notification) {
+            guard let textView = notification.object as? NSTextView else { return }
+            reportLayout(from: textView)
+            guard !suppressBindingPropagation else { return }
+            let updated = textView.string
+            if parent.text != updated {
+                parent.text = updated
+            }
+        }
+
+        func textViewDidChangeSelection(_ notification: Notification) {
+            guard let textView = notification.object as? NSTextView else { return }
+            reportLayout(from: textView)
+        }
+
+        func reportLayout(from textView: NSTextView) {
+            parent.onMeasuredBodyHeightChange(sharedLiveTextViewBodyHeight(textView))
+        }
+
+        func requestFocus(for textView: NSTextView, remainingRetries: Int = 4) {
+            pendingFocusRetry?.cancel()
+            let work = DispatchWorkItem { [weak textView, weak self] in
+                guard let self, let textView else { return }
+                guard self.parent.isFocused else { return }
+                guard let window = textView.window else {
+                    if remainingRetries > 0 {
+                        self.requestFocus(for: textView, remainingRetries: remainingRetries - 1)
+                    }
+                    return
+                }
+                if window.firstResponder !== textView {
+                    window.makeFirstResponder(textView)
+                }
+                if window.firstResponder !== textView, remainingRetries > 0 {
+                    self.requestFocus(for: textView, remainingRetries: remainingRetries - 1)
+                }
+            }
+            pendingFocusRetry = work
+            DispatchQueue.main.async(execute: work)
+        }
+    }
+
+    @Binding var text: String
+    let textWidth: CGFloat
+    let bodyHeight: CGFloat
+    let fontSize: CGFloat
+    let lineSpacing: CGFloat
+    let appearance: String
+    let isFocused: Bool
+    let onFocusStateChange: (Bool) -> Void
+    let onMeasuredBodyHeightChange: (CGFloat?) -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+
+    func makeNSView(context: Context) -> NSTextView {
+        let textView = TextView(frame: NSRect(x: 0, y: 0, width: textWidth, height: bodyHeight))
+        textView.delegate = context.coordinator
+        textView.focusStateHandler = onFocusStateChange
+        textView.isEditable = true
+        textView.isSelectable = true
+        textView.isRichText = false
+        textView.importsGraphics = false
+        textView.usesFontPanel = false
+        textView.usesFindBar = false
+        textView.allowsUndo = true
+        textView.drawsBackground = false
+        textView.backgroundColor = .clear
+        textView.textContainerInset = .zero
+        textView.isHorizontallyResizable = false
+        textView.isVerticallyResizable = false
+        textView.minSize = .zero
+        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+
+        if let textContainer = textView.textContainer {
+            textContainer.lineFragmentPadding = MainEditorLayoutMetrics.mainEditorLineFragmentPadding
+            textContainer.lineBreakMode = .byWordWrapping
+            textContainer.maximumNumberOfLines = 0
+            textContainer.widthTracksTextView = false
+            textContainer.heightTracksTextView = false
+            textContainer.containerSize = CGSize(width: textWidth, height: .greatestFiniteMagnitude)
+        }
+
+        updateTextView(textView, coordinator: context.coordinator)
+        return textView
+    }
+
+    func updateNSView(_ textView: NSTextView, context: Context) {
+        context.coordinator.parent = self
+        if textView.delegate !== context.coordinator {
+            textView.delegate = context.coordinator
+        }
+        if let textView = textView as? TextView {
+            textView.focusStateHandler = onFocusStateChange
+        }
+        updateTextView(textView, coordinator: context.coordinator)
+    }
+
+    private func updateTextView(_ textView: NSTextView, coordinator: Coordinator) {
+        let signature = Signature(
+            textWidthBucket: Int((textWidth * 10).rounded()),
+            bodyHeightBucket: Int((bodyHeight * 10).rounded()),
+            fontSizeBucket: Int((fontSize * 10).rounded()),
+            lineSpacingBucket: Int((lineSpacing * 10).rounded()),
+            isLightAppearance: appearance == "light",
+            wantsFocus: isFocused
+        )
+
+        let resolvedWidth = max(1, textWidth)
+        let resolvedHeight = max(1, bodyHeight)
+        textView.frame = NSRect(x: 0, y: 0, width: resolvedWidth, height: resolvedHeight)
+        textView.textContainerInset = .zero
+
+        if let textContainer = textView.textContainer {
+            if abs(textContainer.containerSize.width - resolvedWidth) > 0.5 {
+                textContainer.containerSize = CGSize(width: resolvedWidth, height: .greatestFiniteMagnitude)
+            }
+            if abs(textContainer.lineFragmentPadding - MainEditorLayoutMetrics.mainEditorLineFragmentPadding) > 0.01 {
+                textContainer.lineFragmentPadding = MainEditorLayoutMetrics.mainEditorLineFragmentPadding
+            }
+            textContainer.lineBreakMode = .byWordWrapping
+            textContainer.maximumNumberOfLines = 0
+            textContainer.widthTracksTextView = false
+            textContainer.heightTracksTextView = false
+        }
+
+        let font = resolveFocusModeTextFont(fontSize)
+        let color = resolveFocusModeTextColor(appearance)
+        let paragraph = makeFocusModeRenderParagraphStyle(lineSpacing)
+
+        if textView.string != text {
+            let selected = textView.selectedRange()
+            coordinator.suppressBindingPropagation = true
+            if text.isEmpty {
+                textView.string = ""
+            } else {
+                textView.textStorage?.setAttributedString(
+                    makeFocusModeAttributedString(
+                        text,
+                        fontSize: fontSize,
+                        lineSpacing: lineSpacing,
+                        appearance: appearance
+                    )
+                )
+            }
+            let length = (text as NSString).length
+            let clampedLocation = min(selected.location, length)
+            let clampedLength = min(selected.length, max(0, length - clampedLocation))
+            textView.setSelectedRange(NSRange(location: clampedLocation, length: clampedLength))
+            coordinator.suppressBindingPropagation = false
+        }
+
+        if coordinator.lastSignature != signature {
+            coordinator.lastSignature = signature
+            textView.font = font
+            textView.textColor = color
+            textView.insertionPointColor = color
+            textView.defaultParagraphStyle = paragraph
+            if let storage = textView.textStorage, storage.length > 0 {
+                storage.beginEditing()
+                storage.addAttributes(
+                    [
+                        .font: font,
+                        .foregroundColor: color,
+                        .paragraphStyle: paragraph
+                    ],
+                    range: NSRange(location: 0, length: storage.length)
+                )
+                storage.endEditing()
+            }
+            var typing = textView.typingAttributes
+            typing[.font] = font
+            typing[.foregroundColor] = color
+            typing[.paragraphStyle] = paragraph
+            textView.typingAttributes = typing
+        }
+
+        if isFocused {
+            coordinator.requestFocus(for: textView)
+        }
+
+        coordinator.reportLayout(from: textView)
+    }
+}
+
 // MARK: - 카드 사이 및 열 상/하단 빈 공간 드롭 영역
 
 struct DropSpacer: View {
@@ -641,7 +871,7 @@ struct CardItem: View {
     @State private var isBottomInsertZoneDropTargeted: Bool = false
     @State private var isTrailingInsertZoneDropTargeted: Bool = false
     @State private var isBodyDropTargeted: Bool = false
-    @FocusState private var editorFocus: Bool
+    @State private var editorFocus: Bool = false
     private var fontSize: CGFloat { renderSettings.fontSize }
     private var appearance: String { renderSettings.appearance }
     private var cardBaseColorHex: String { renderSettings.cardBaseColorHex }
@@ -882,6 +1112,21 @@ struct CardItem: View {
         }
     }
 
+    private func updateMainEditingMeasuredBodyHeight(_ measured: CGFloat?, source: String) {
+        guard let measured, measured > 0 else { return }
+        mainEditingMeasureLastAt = Date()
+        let previous = mainEditingMeasuredBodyHeight
+        if abs(previous - measured) > mainEditingMeasureUpdateThreshold {
+            mainEditingMeasuredBodyHeight = measured
+            mainWorkspacePhase0Log(
+                "inline-editor-row-height",
+                "card=\(mainWorkspacePhase0CardID(card.id)) source=\(source) " +
+                "body=\(measured) row=\(measured + (mainEditorVerticalPadding * 2)) previous=\(previous) " +
+                "editorFocus=\(editorFocus) responder=\(mainWorkspacePhase0ResponderSummary(expectedText: card.content))"
+            )
+        }
+    }
+
     private func scheduleMainEditingMeasuredBodyHeightRefresh(immediate: Bool = false) {
         if immediate {
             mainEditingMeasureWorkItem?.cancel()
@@ -1044,17 +1289,35 @@ struct CardItem: View {
                 }
 
                 if isEditing {
-                    TextEditor(text: mainEditorTextBinding)
-                        .font(.custom("SansMonoCJKFinalDraft", size: fontSize))
-                        .lineSpacing(mainCardLineSpacing)
-                        .scrollContentBackground(.hidden)
-                        .scrollDisabled(true)
-                        .scrollIndicators(.never)
+                    MainWorkspaceEditableTextRenderer(
+                        text: mainEditorTextBinding,
+                        textWidth: mainEditingTextMeasureWidth,
+                        bodyHeight: resolvedMainEditingBodyHeight,
+                        fontSize: fontSize,
+                        lineSpacing: mainCardLineSpacing,
+                        appearance: appearance,
+                        isFocused: editorFocus,
+                        onFocusStateChange: { isFocused in
+                            if editorFocus != isFocused {
+                                editorFocus = isFocused
+                            }
+                            mainWorkspacePhase0Log(
+                                "inline-editor-focus-state",
+                                "card=\(mainWorkspacePhase0CardID(card.id)) focused=\(isFocused) " +
+                                "responder=\(mainWorkspacePhase0ResponderSummary(expectedText: card.content))"
+                            )
+                            if isFocused {
+                                scheduleMainEditingMeasuredBodyHeightRefresh(immediate: true)
+                            }
+                        },
+                        onMeasuredBodyHeightChange: { measured in
+                            updateMainEditingMeasuredBodyHeight(measured, source: "appkitRenderer")
+                        }
+                    )
                         .frame(height: resolvedMainEditingBodyHeight, alignment: .topLeading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, mainEditorHorizontalPadding)
                         .padding(.vertical, mainEditorVerticalPadding)
-                        .foregroundStyle(appearance == "light" ? .black : .white)
-                        .focused($editorFocus)
                         .onAppear {
                             mainWorkspacePhase0Log(
                                 "inline-editor-appear",
@@ -1079,6 +1342,7 @@ struct CardItem: View {
                             }
                         }
                         .onDisappear {
+                            editorFocus = false
                             mainWorkspacePhase0Log(
                                 "inline-editor-disappear",
                                 "card=\(mainWorkspacePhase0CardID(card.id)) measuredBody=\(mainEditingMeasuredBodyHeight) " +
@@ -1086,13 +1350,6 @@ struct CardItem: View {
                             )
                             mainEditingMeasureWorkItem?.cancel()
                             mainEditingMeasureWorkItem = nil
-                        }
-                        .onChange(of: editorFocus) { _, newValue in
-                            mainWorkspacePhase0Log(
-                                "inline-editor-focus-state",
-                                "card=\(mainWorkspacePhase0CardID(card.id)) focused=\(newValue) " +
-                                "responder=\(mainWorkspacePhase0ResponderSummary(expectedText: card.content))"
-                            )
                         }
                         .onChange(of: fontSize) { _, _ in
                             scheduleMainEditingMeasuredBodyHeightRefresh(immediate: true)
