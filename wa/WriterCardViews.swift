@@ -1017,7 +1017,7 @@ struct CardItem: View {
     }
 
     @ViewBuilder
-    private var cardSurface: some View {
+    private var cardShellContent: some View {
         ZStack(alignment: .topLeading) {
             baseBackgroundColor
 
@@ -1101,36 +1101,12 @@ struct CardItem: View {
                             scheduleMainEditingMeasuredBodyHeightRefresh(immediate: true)
                         }
                 }
-
-                if isCandidateVisualCard {
-                    VStack {
-                        HStack(spacing: 6) {
-                            Spacer()
-                            Text("AI 후보")
-                                .font(.system(size: 9, weight: .bold))
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 3)
-                                .background(appearance == "light" ? Color.black.opacity(0.12) : Color.white.opacity(0.20))
-                                .clipShape(Capsule())
-                            if let onApplyAICandidate {
-                                Button("선택") {
-                                    onApplyAICandidate()
-                                }
-                                .font(.system(size: 9, weight: .semibold))
-                                .buttonStyle(.plain)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 3)
-                                .background(appearance == "light" ? Color.accentColor.opacity(0.22) : Color.accentColor.opacity(0.32))
-                                .clipShape(Capsule())
-                                .disabled(isAIBusy)
-                            }
-                        }
-                        Spacer()
-                    }
-                    .padding(8)
-                }
             }
         }
+    }
+
+    private func cardChromeApplied<Content: View>(to content: Content) -> some View {
+        content
         .overlay {
             if let onDropOnto {
                 cardBodyDropZone(onDrop: onDropOnto)
@@ -1187,6 +1163,33 @@ struct CardItem: View {
         }
         .overlay(alignment: .topTrailing) {
             ZStack(alignment: .topTrailing) {
+                if isCandidateVisualCard {
+                    VStack {
+                        HStack(spacing: 6) {
+                            Spacer()
+                            Text("AI 후보")
+                                .font(.system(size: 9, weight: .bold))
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 3)
+                                .background(appearance == "light" ? Color.black.opacity(0.12) : Color.white.opacity(0.20))
+                                .clipShape(Capsule())
+                            if let onApplyAICandidate {
+                                Button("선택") {
+                                    onApplyAICandidate()
+                                }
+                                .font(.system(size: 9, weight: .semibold))
+                                .buttonStyle(.plain)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 3)
+                                .background(appearance == "light" ? Color.accentColor.opacity(0.22) : Color.accentColor.opacity(0.32))
+                                .clipShape(Capsule())
+                                .disabled(isAIBusy)
+                            }
+                        }
+                        Spacer()
+                    }
+                    .padding(8)
+                }
                 HStack(spacing: 3) {
                     if hasLinkedCards {
                         Rectangle()
@@ -1244,6 +1247,11 @@ struct CardItem: View {
             mainEditingMeasureWorkItem?.cancel()
             mainEditingMeasureWorkItem = nil
         }
+    }
+
+    @ViewBuilder
+    private var cardSurface: some View {
+        cardChromeApplied(to: cardShellContent)
     }
 
     var body: some View {
