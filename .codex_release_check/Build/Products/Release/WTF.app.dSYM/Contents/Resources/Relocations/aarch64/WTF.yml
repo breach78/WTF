@@ -1,5 +1,0 @@
----
-triple:          'arm64-apple-darwin'
-binary-path:     '/Users/three/app_build/wa/.codex_release_check/Build/Products/Release/WTF.app/Contents/MacOS/WTF'
-relocations:     []
-...

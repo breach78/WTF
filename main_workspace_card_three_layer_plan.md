@@ -162,6 +162,14 @@ mounted 이후에는 다른 fallback이 경쟁하면 안 된다.
 - `observed body height`
 - `isFirstResponderReady`
 
+가능하면 세션 단계도 아래처럼 분리한다.
+
+- `idle`
+- `requesting`
+- `mounting`
+- `active`
+- `teardown`
+
 ### 원칙 4. Scroll authority를 분리한다
 
 - ordinary focus scroll
@@ -284,22 +292,27 @@ mounted 이후에는 다른 fallback이 경쟁하면 안 된다.
 
 - main workspace 편집 관련 코드가 `firstResponder + string 비교` 없이 mounted session을 우선 사용한다.
 
-## Phase 3. AppKit engine swap on stable host
+## Phase 3. Persistent single host ownership + AppKit engine swap
 
 목적:
 
-- baseline `TextEditor`를 버리고, 메인 작업창 편집을 stable host 위의 AppKit editor로 교체한다.
+- baseline `TextEditor`를 버리고, 메인 작업창 편집을 `stable host가 명시적으로 소유하는 단일 AppKit editor`로 교체한다.
 
 범위:
 
+- 메인 작업창 전용 persistent host/controller 1개
+- 같은 `NSTextView` 인스턴스를 host가 명시적으로 계속 소유
+- 카드 전환 시 remount가 아니라 `rebind(cardID, text, caret seed, slot frame)` 수행
 - Enter/재클릭 편집 진입
 - mounted editor identity
 - first responder 획득 성공 기준
 - 메인 작업창 전용 arrow/caret routing
+- row 내부 `TextEditor` fallback 제거
 
 금지:
 
-- same `NSTextView`가 카드 사이를 암묵적으로 재사용하는 구조
+- SwiftUI 생명주기에 기대어 same `NSTextView`가 카드 사이를 암묵적으로 재사용하는 구조
+- 카드 변경마다 host view 자체가 새로 mount/dismantle되는 구조
 - edit entry 중 host attach/detach churn
 
 완료 기준:
@@ -307,6 +320,7 @@ mounted 이후에는 다른 fallback이 경쟁하면 안 된다.
 - edit entry 직후 subtree/attachment churn이 없다
 - caret이 즉시 보인다
 - 포커스 정렬 회귀가 없다
+- 동일 editor identity는 편집 카드가 바뀌어도 host ownership 아래에서만 유지된다
 
 ## Phase 3.5. Height truth 단일화
 
@@ -345,6 +359,8 @@ mounted 이후에는 다른 fallback이 경쟁하면 안 된다.
 
 - mounted editor 준비 전 caret reveal 금지
 - edit entry 중 ordinary verification 금지
+- `requesting/mounting` 단계에서는 ordinary focus scroll과 caret ensure를 모두 정지
+- `active` 단계에 들어간 뒤에만 caret reveal 허용
 - edit exit 후 stale transition state 즉시 정리
 
 완료 기준:
@@ -391,17 +407,17 @@ mounted 이후에는 다른 fallback이 경쟁하면 안 된다.
 
 - 편집 진입/종료 시 줄바꿈 차이와 잔상이 줄어든다.
 
-## Phase 6. Single reusable editor ownership
+## Phase 6. Persistent host 최적화
 
 목적:
 
-- live editor를 하나로 줄이되, geometry owner는 여전히 row로 유지한다.
+- Phase 3에서 도입한 persistent single host를 최적화하되, geometry owner는 여전히 row로 유지한다.
 
 권장 방식:
 
-- 같은 `NSTextView` 인스턴스를 카드 사이에서 재사용
-- 하지만 mount 위치는 항상 active row의 editor slot
-- 즉 `single editor`, `row-owned geometry`
+- host/controller는 계속 1개 유지
+- mount 위치는 항상 active row의 editor slot
+- 재측정/invalidations/scroll sync 비용만 줄이고 ownership 계약은 바꾸지 않음
 
 이 단계에서 얻는 것:
 
@@ -411,7 +427,7 @@ mounted 이후에는 다른 fallback이 경쟁하면 안 된다.
 
 완료 기준:
 
-- live editor 인스턴스는 하나
+- live editor host/controller는 이미 하나이며 추가 최적화 후에도 ownership churn이 없다
 - 포커스 정렬과 카드 높이 회귀 없음
 
 ## Phase 7. Detached overlay 검토
@@ -445,6 +461,7 @@ mounted 이후에는 다른 fallback이 경쟁하면 안 된다.
 
 - Enter/재클릭 직후 caret 표시
 - edit entry 중 subtree churn 없음
+- row 내부 fallback editor 없이 동일 host/controller 경로만 사용
 - 화살표 입력 시 main workspace navigation 계약 유지
 
 ### Gate C. Phase 4 종료 후
@@ -455,14 +472,15 @@ mounted 이후에는 다른 fallback이 경쟁하면 안 된다.
 
 ## 현재 판단
 
-지금 기준으로 다음 단계는 `Phase 2`의 재시도가 아니라, 기존 `Phase 2` 가정을 폐기하고 `Phase 2 = slot 분리`, `Phase 2.5A = stable host scaffold`로 재시작하는 것이다.
+지금 기준으로 다음 단계는 `Phase 4`의 미세 조정이 아니라, `Phase 3`를 더 강하게 다시 정의해 `persistent single host ownership`을 먼저 닫는 것이다.
 
 이유:
 
-- `row 내부 live AppKit editor`는 incremental step이 아니라, `LazyVStack`와 충돌하는 구조였다.
-- 그래서 기존 `Phase 2`는 작은 lake가 아니라 잘못 잡은 intermediate state였다.
-- 이제는 `geometry owner는 row`, `live editor ownership은 stable host`라는 경계를 먼저 세운 뒤에만 AppKit engine swap을 다시 시도해야 한다.
+- stable host scaffold와 explicit session은 이미 들어왔지만, 실제 구현에는 아직 `row 내부 TextEditor fallback`과 `카드별 host remount` 흔적이 남아 있다.
+- 최신 로그에서도 `main-editor-host-appear` 직후 `inline-editor-disappear`, `appkit-inline-dismantle`, 동일 `textView identity`의 다중 카드 재사용이 계속 보인다.
+- 따라서 지금 남은 상위 원인은 `height truth`보다 `editor ownership churn`이다.
+- 이제는 `geometry owner는 row`, `live editor ownership은 stable host`, `host ownership은 persistent single controller`라는 경계를 먼저 닫아야 한다.
 
 ## 한 줄 결론
 
-이번 계획의 핵심 수정은 `single editor` 목표는 유지하되, `row 내부 live AppKit editor` 단계를 버리고 `row-owned geometry + stable host ownership + single height truth + explicit editor session` 순서로 다시 밟는 것이다.
+이번 계획의 핵심 수정은 `single editor` 목표를 후반 단계로 미루지 않고, `row-owned geometry + persistent single host ownership + single height truth + explicit editor session + staged scroll authority` 순서로 바로 닫는 것이다.
