@@ -61,8 +61,15 @@ func mainWorkspacePhase0CardID(_ id: UUID?) -> String {
     return id.uuidString
 }
 
-func mainWorkspacePhase0ResponderSummary(expectedText: String? = nil) -> String {
-    guard let textView = NSApp.keyWindow?.firstResponder as? NSTextView else { return "none" }
+private func mainWorkspacePhase0RectSummary(_ rect: NSRect) -> String {
+    "(\(Int(rect.origin.x.rounded())),\(Int(rect.origin.y.rounded())),\(Int(rect.size.width.rounded())),\(Int(rect.size.height.rounded())))"
+}
+
+func mainWorkspacePhase0TextViewSummary(
+    _ textView: NSTextView?,
+    expectedText: String? = nil
+) -> String {
+    guard let textView else { return "nil" }
     let selected = textView.selectedRange()
     let textLength = (textView.string as NSString).length
     let matchSummary: String
@@ -71,7 +78,37 @@ func mainWorkspacePhase0ResponderSummary(expectedText: String? = nil) -> String 
     } else {
         matchSummary = "n/a"
     }
-    return "textView=\(ObjectIdentifier(textView).hashValue) len=\(textLength) sel=\(selected.location):\(selected.length) match=\(matchSummary)"
+    let windowSummary: String
+    if let window = textView.window {
+        windowSummary = "win=\(ObjectIdentifier(window).hashValue) key=\(window.isKeyWindow)"
+    } else {
+        windowSummary = "win=nil"
+    }
+    let scrollSummary: String
+    if let scrollView = textView.enclosingScrollView {
+        scrollSummary = "scroll=\(ObjectIdentifier(scrollView).hashValue) frame=\(mainWorkspacePhase0RectSummary(scrollView.frame))"
+    } else {
+        scrollSummary = "scroll=nil"
+    }
+    let superviewSummary: String
+    if let superview = textView.superview {
+        superviewSummary = "super=\(String(describing: type(of: superview)))#\(ObjectIdentifier(superview).hashValue)"
+    } else {
+        superviewSummary = "super=nil"
+    }
+    return
+        "textView=\(ObjectIdentifier(textView).hashValue) class=\(String(describing: type(of: textView))) " +
+        "frame=\(mainWorkspacePhase0RectSummary(textView.frame)) bounds=\(mainWorkspacePhase0RectSummary(textView.bounds)) " +
+        "\(windowSummary) \(scrollSummary) \(superviewSummary) " +
+        "len=\(textLength) sel=\(selected.location):\(selected.length) match=\(matchSummary)"
+}
+
+func mainWorkspacePhase0ResponderSummary(expectedText: String? = nil) -> String {
+    guard let responder = NSApp.keyWindow?.firstResponder else { return "none" }
+    if let textView = responder as? NSTextView {
+        return mainWorkspacePhase0TextViewSummary(textView, expectedText: expectedText)
+    }
+    return "responder=\(String(describing: type(of: responder)))"
 }
 
 enum SoftBoundaryFeedbackSound {
@@ -405,6 +442,7 @@ final class WriterInteractionRuntime {
     var mainColumnLastFocusRequestByKey: [String: MainColumnFocusRequest] = [:]
     var mainColumnViewportOffsetByKey: [String: CGFloat] = [:]
     var mainColumnObservedCardFramesByKey: [String: [UUID: CGRect]] = [:]
+    var mainColumnObservedEditorSlotFramesByKey: [String: [UUID: CGRect]] = [:]
     var mainColumnLayoutSnapshotByKey: [MainColumnLayoutCacheKey: MainColumnLayoutSnapshot] = [:]
     var mainCardHeightRecordByKey: [MainCardHeightCacheKey: MainCardHeightRecord] = [:]
     var mainColumnPendingFocusVerificationWorkItemByKey: [String: DispatchWorkItem] = [:]
@@ -2130,6 +2168,13 @@ struct FocusModeCardFramePreferenceKey: PreferenceKey {
 }
 
 struct MainColumnCardFramePreferenceKey: PreferenceKey {
+    static var defaultValue: [UUID: CGRect] = [:]
+    static func reduce(value: inout [UUID: CGRect], nextValue: () -> [UUID: CGRect]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, new in new })
+    }
+}
+
+struct MainColumnEditorSlotPreferenceKey: PreferenceKey {
     static var defaultValue: [UUID: CGRect] = [:]
     static func reduce(value: inout [UUID: CGRect], nextValue: () -> [UUID: CGRect]) {
         value.merge(nextValue(), uniquingKeysWith: { _, new in new })

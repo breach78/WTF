@@ -5,6 +5,49 @@ import UniformTypeIdentifiers
 
 extension ScenarioWriterView {
 
+    private struct MainWorkspaceEditorHostScaffold: View {
+        let viewportKey: String
+        let targetCardID: UUID?
+        let hostFrame: CGRect?
+
+        var body: some View {
+            ZStack(alignment: .topLeading) {
+                if let hostFrame {
+                    Color.clear
+                        .frame(
+                            width: max(1, hostFrame.width),
+                            height: max(1, hostFrame.height),
+                            alignment: .topLeading
+                        )
+                        .offset(x: hostFrame.minX, y: hostFrame.minY)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .allowsHitTesting(false)
+            .onAppear {
+                mainWorkspacePhase0Log(
+                    "main-editor-host-scaffold",
+                    "viewportKey=\(viewportKey) target=\(mainWorkspacePhase0CardID(targetCardID)) " +
+                    "frame=\(hostFrame.map { NSStringFromRect($0) } ?? "nil") phase=appear"
+                )
+            }
+            .onChange(of: hostFrame) { _, newFrame in
+                mainWorkspacePhase0Log(
+                    "main-editor-host-scaffold",
+                    "viewportKey=\(viewportKey) target=\(mainWorkspacePhase0CardID(targetCardID)) " +
+                    "frame=\(newFrame.map { NSStringFromRect($0) } ?? "nil") phase=frameChange"
+                )
+            }
+            .onChange(of: targetCardID) { _, newTargetID in
+                mainWorkspacePhase0Log(
+                    "main-editor-host-scaffold",
+                    "viewportKey=\(viewportKey) target=\(mainWorkspacePhase0CardID(newTargetID)) " +
+                    "frame=\(hostFrame.map { NSStringFromRect($0) } ?? "nil") phase=targetChange"
+                )
+            }
+        }
+    }
+
     // MARK: - Canvas Position Restore
 
     private var mainCanvasRestoreRetryDelays: [TimeInterval] {
@@ -436,6 +479,154 @@ extension ScenarioWriterView {
         "main-column-viewport:\(viewportKey)"
     }
 
+    func resolvedMainColumnEditorHostTargetID(cards: [SceneCard]) -> UUID? {
+        if let editingCardID, cards.contains(where: { $0.id == editingCardID }) {
+            return editingCardID
+        }
+        if let activeCardID, cards.contains(where: { $0.id == activeCardID }) {
+            return activeCardID
+        }
+        return nil
+    }
+
+    func resolvedMainColumnEditorHostFrame(
+        viewportKey: String,
+        cards: [SceneCard]
+    ) -> CGRect? {
+        guard let targetCardID = resolvedMainColumnEditorHostTargetID(cards: cards) else { return nil }
+        guard let frame = mainColumnObservedEditorSlotFramesByKey[viewportKey]?[targetCardID] else { return nil }
+        guard frame.width > 1, frame.height > 1 else { return nil }
+        return frame
+    }
+
+    func resolvedMainColumnEditingHostCard(cards: [SceneCard]) -> SceneCard? {
+        guard let editingCardID else { return nil }
+        return cards.first(where: { $0.id == editingCardID })
+    }
+
+    private func resolvedMainWorkspaceHostBodyHeight(for card: SceneCard) -> CGFloat {
+        if (mainEditorSession.requestedCardID == card.id || mainEditorSession.mountedCardID == card.id),
+           let liveBodyHeight = mainEditorSession.liveBodyHeight,
+           liveBodyHeight > 1 {
+            return liveBodyHeight
+        }
+        return sharedMeasuredTextBodyHeight(
+            text: card.content,
+            fontSize: CGFloat(fontSize),
+            lineSpacing: CGFloat(mainCardLineSpacingValue),
+            width: MainCanvasLayoutMetrics.textWidth,
+            lineFragmentPadding: MainEditorLayoutMetrics.mainEditorLineFragmentPadding,
+            safetyInset: 0
+        )
+    }
+
+    private func mainWorkspaceEditorTextBinding(for cardID: UUID) -> Binding<String> {
+        Binding(
+            get: { findCard(by: cardID)?.content ?? "" },
+            set: { newValue in
+                guard let card = findCard(by: cardID) else { return }
+                let oldValue = card.content
+                guard oldValue != newValue else { return }
+                card.content = newValue
+                handleMainEditorContentChange(cardID: cardID, oldValue: oldValue, newValue: newValue)
+            }
+        )
+    }
+
+    func updateMainEditorMeasuredBodyHeight(cardID: UUID, measured: CGFloat?) {
+        guard mainEditorSession.requestedCardID == cardID || mainEditorSession.mountedCardID == cardID else { return }
+        let resolvedHeight = (measured ?? 0) > 1 ? measured : nil
+        guard mainEditorSession.liveBodyHeight != resolvedHeight else { return }
+        mainEditorSession.liveBodyHeight = resolvedHeight
+        mainWorkspacePhase0Log(
+            "main-editor-session",
+            "phase=measure card=\(mainWorkspacePhase0CardID(cardID)) body=\(resolvedHeight.map { String(format: "%.1f", $0) } ?? "nil")"
+        )
+    }
+
+    @ViewBuilder
+    private func mainWorkspaceStableHostEditor(card: SceneCard, hostFrame: CGRect) -> some View {
+        let bodyHeight = resolvedMainWorkspaceHostBodyHeight(for: card)
+        ZStack(alignment: .topLeading) {
+            Color.clear
+                .frame(width: max(1, hostFrame.width), height: max(1, hostFrame.height), alignment: .topLeading)
+
+            MainWorkspaceEditableTextRenderer(
+                text: mainWorkspaceEditorTextBinding(for: card.id),
+                cardID: card.id,
+                textWidth: MainCanvasLayoutMetrics.textWidth,
+                bodyHeight: bodyHeight,
+                fontSize: CGFloat(fontSize),
+                lineSpacing: CGFloat(mainCardLineSpacingValue),
+                appearance: appearance,
+                isFocused: editingCardID == card.id,
+                onFocusStateChange: { isFocused in
+                    updateMainEditorResponderState(cardID: card.id, isFocused: isFocused)
+                },
+                onMeasuredBodyHeightChange: { measured in
+                    updateMainEditorMeasuredBodyHeight(cardID: card.id, measured: measured)
+                },
+                onCommandBy: { selector in
+                    handleMainEditorBoundaryCommand(selector)
+                }
+            )
+            .frame(width: MainCanvasLayoutMetrics.textWidth, height: bodyHeight, alignment: .topLeading)
+            .padding(.horizontal, MainEditorLayoutMetrics.mainEditorHorizontalPadding)
+            .padding(.vertical, 24)
+        }
+        .offset(x: hostFrame.minX, y: hostFrame.minY)
+        .onAppear {
+            markMainEditorMounted(cardID: card.id)
+            mainWorkspacePhase0Log(
+                "main-editor-host-appear",
+                "card=\(mainWorkspacePhase0CardID(card.id)) frame=\(NSStringFromRect(hostFrame))"
+            )
+        }
+        .onDisappear {
+            markMainEditorUnmounted(cardID: card.id)
+            mainWorkspacePhase0Log(
+                "main-editor-host-disappear",
+                "card=\(mainWorkspacePhase0CardID(card.id)) frame=\(NSStringFromRect(hostFrame))"
+            )
+        }
+    }
+
+    @ViewBuilder
+    func mainColumnEditorHostScaffold(
+        viewportKey: String,
+        cards: [SceneCard]
+    ) -> some View {
+        MainWorkspaceEditorHostScaffold(
+            viewportKey: viewportKey,
+            targetCardID: resolvedMainColumnEditorHostTargetID(cards: cards),
+            hostFrame: resolvedMainColumnEditorHostFrame(
+                viewportKey: viewportKey,
+                cards: cards
+            )
+        )
+        .id("main-editor-host-scaffold-\(viewportKey)")
+    }
+
+    @ViewBuilder
+    func mainColumnEditorHostOverlay(
+        viewportKey: String,
+        cards: [SceneCard]
+    ) -> some View {
+        let hostFrame = resolvedMainColumnEditorHostFrame(viewportKey: viewportKey, cards: cards)
+
+        ZStack(alignment: .topLeading) {
+            mainColumnEditorHostScaffold(
+                viewportKey: viewportKey,
+                cards: cards
+            )
+
+            if let targetCard = resolvedMainColumnEditingHostCard(cards: cards),
+               let hostFrame {
+                mainWorkspaceStableHostEditor(card: targetCard, hostFrame: hostFrame)
+            }
+        }
+    }
+
     func debugMainColumnEstimatedTargetSummary(_ layout: (targetMinY: CGFloat, targetMaxY: CGFloat)?) -> String {
         guard let layout else { return "est=unresolved" }
         return "est[\(debugCGFloat(layout.targetMinY)),\(debugCGFloat(layout.targetMaxY))]"
@@ -635,6 +826,81 @@ extension ScenarioWriterView {
 
     // MARK: - Timeline & Column View Builders
 
+    func resolveMainEditorSessionTextViewIdentity(for cardID: UUID) -> Int? {
+        guard let card = findCard(by: cardID) else { return nil }
+        guard let textView = NSApp.keyWindow?.firstResponder as? NSTextView else { return nil }
+        guard textView.string == card.content else { return nil }
+        return ObjectIdentifier(textView).hashValue
+    }
+
+    func prepareMainEditorSessionRequest(
+        for card: SceneCard,
+        explicitCaretLocation: Int? = nil
+    ) {
+        let textLength = (card.content as NSString).length
+        let resolvedSeed: Int?
+        if let explicitCaretLocation {
+            resolvedSeed = min(max(0, explicitCaretLocation), textLength)
+        } else if let saved = mainCaretLocationByCardID[card.id] {
+            resolvedSeed = min(max(0, saved), textLength)
+        } else {
+            resolvedSeed = nil
+        }
+        mainEditorSession = MainEditorSessionState(
+            requestedCardID: card.id,
+            mountedCardID: nil,
+            textViewIdentity: nil,
+            caretSeedLocation: resolvedSeed,
+            isFirstResponderReady: false,
+            liveBodyHeight: nil
+        )
+        mainWorkspacePhase0Log(
+            "main-editor-session",
+            "phase=request card=\(mainWorkspacePhase0CardID(card.id)) seed=\(resolvedSeed.map(String.init) ?? "nil")"
+        )
+    }
+
+    func markMainEditorMounted(cardID: UUID) {
+        mainEditorSession.mountedCardID = cardID
+        mainEditorSession.textViewIdentity = resolveMainEditorSessionTextViewIdentity(for: cardID)
+        mainEditorSession.isFirstResponderReady =
+            mainEditorSession.textViewIdentity != nil && mainEditorSession.requestedCardID == cardID
+        mainWorkspacePhase0Log(
+            "main-editor-session",
+            "phase=mounted requested=\(mainWorkspacePhase0CardID(mainEditorSession.requestedCardID)) " +
+            "mounted=\(mainWorkspacePhase0CardID(mainEditorSession.mountedCardID)) textView=\(mainEditorSession.textViewIdentity.map(String.init) ?? "nil") " +
+            "ready=\(mainEditorSession.isFirstResponderReady)"
+        )
+    }
+
+    func markMainEditorUnmounted(cardID: UUID) {
+        guard mainEditorSession.mountedCardID == cardID else { return }
+        mainEditorSession.mountedCardID = nil
+        mainEditorSession.textViewIdentity = nil
+        mainEditorSession.isFirstResponderReady = false
+        mainEditorSession.liveBodyHeight = nil
+        mainWorkspacePhase0Log(
+            "main-editor-session",
+            "phase=unmounted requested=\(mainWorkspacePhase0CardID(mainEditorSession.requestedCardID)) " +
+            "card=\(mainWorkspacePhase0CardID(cardID))"
+        )
+    }
+
+    func updateMainEditorResponderState(cardID: UUID, isFocused: Bool) {
+        guard mainEditorSession.requestedCardID == cardID || mainEditorSession.mountedCardID == cardID else { return }
+        let resolvedTextViewIdentity = isFocused ? resolveMainEditorSessionTextViewIdentity(for: cardID) : nil
+        mainEditorSession.mountedCardID = cardID
+        mainEditorSession.textViewIdentity = resolvedTextViewIdentity
+        mainEditorSession.isFirstResponderReady = resolvedTextViewIdentity != nil
+        mainWorkspacePhase0Log(
+            "main-editor-session",
+            "phase=focus requested=\(mainWorkspacePhase0CardID(mainEditorSession.requestedCardID)) " +
+            "mounted=\(mainWorkspacePhase0CardID(mainEditorSession.mountedCardID)) " +
+            "card=\(mainWorkspacePhase0CardID(cardID)) focused=\(isFocused) " +
+            "textView=\(resolvedTextViewIdentity.map(String.init) ?? "nil") ready=\(mainEditorSession.isFirstResponderReady)"
+        )
+    }
+
     func beginCardEditing(_ card: SceneCard, explicitCaretLocation: Int? = nil) {
         mainWorkspacePhase0Log(
             "begin-card-edit-request",
@@ -642,6 +908,7 @@ extension ScenarioWriterView {
             "editingBefore=\(mainWorkspacePhase0CardID(editingCardID)) explicitCaret=\(explicitCaretLocation.map(String.init) ?? "nil")"
         )
         finishEditing()
+        prepareMainEditorSessionRequest(for: card, explicitCaretLocation: explicitCaretLocation)
         pendingMainEditingSiblingNavigationTargetID = nil
         if let explicitCaretLocation {
             pendingMainEditingViewportKeepVisibleCardID = nil
@@ -757,7 +1024,10 @@ extension ScenarioWriterView {
             } : nil,
             onCloneCard: { copyCardsAsCloneFromContext(card) },
             clonePeerDestinations: clonePeerDestinations,
-            onNavigateToClonePeer: { targetID in navigateToCloneCard(targetID) }
+            onNavigateToClonePeer: { targetID in navigateToCloneCard(targetID) },
+            handleEditorCommandBySelector: { selector in
+                handleMainEditorBoundaryCommand(selector)
+            }
         )
         .background(
             RoundedRectangle(cornerRadius: 6)
@@ -864,9 +1134,18 @@ extension ScenarioWriterView {
                         }
                     }
                     .coordinateSpace(name: mainColumnViewportCoordinateSpaceName(viewportKey))
+                    .overlay(alignment: .topLeading) {
+                        mainColumnEditorHostOverlay(
+                            viewportKey: viewportKey,
+                            cards: cards
+                        )
+                    }
                     .onPreferenceChange(MainColumnCardFramePreferenceKey.self) { frames in
                         mainColumnObservedCardFramesByKey[viewportKey] = frames
                         mainCanvasScrollCoordinator.updateObservedFrames(frames, for: viewportKey)
+                    }
+                    .onPreferenceChange(MainColumnEditorSlotPreferenceKey.self) { frames in
+                        mainColumnObservedEditorSlotFramesByKey[viewportKey] = frames
                     }
                     .padding(.horizontal, MainCanvasLayoutMetrics.columnHorizontalPadding)
                     .frame(width: columnWidth)
@@ -2722,7 +3001,26 @@ extension ScenarioWriterView {
             isLinkedCard: isLinkedCard,
             onCloneCard: { copyCardsAsCloneFromContext(card) },
             clonePeerDestinations: clonePeerDestinations,
-            onNavigateToClonePeer: { targetID in navigateToCloneCard(targetID) }
+            onNavigateToClonePeer: { targetID in navigateToCloneCard(targetID) },
+            mainEditorSlotCoordinateSpaceName: mainColumnViewportCoordinateSpaceName(mainColumnViewportStorageKey(level: level)),
+            usesExternalMainEditor: editingCardID == card.id,
+            externalEditorLiveBodyHeight:
+                editingCardID == card.id &&
+                (mainEditorSession.requestedCardID == card.id || mainEditorSession.mountedCardID == card.id)
+                ? mainEditorSession.liveBodyHeight
+                : nil,
+            onMainEditorMount: { cardID in
+                markMainEditorMounted(cardID: cardID)
+            },
+            onMainEditorUnmount: { cardID in
+                markMainEditorUnmounted(cardID: cardID)
+            },
+            onMainEditorFocusStateChange: { cardID, isFocused in
+                updateMainEditorResponderState(cardID: cardID, isFocused: isFocused)
+            },
+            handleEditorCommandBySelector: { selector in
+                handleMainEditorBoundaryCommand(selector)
+            }
         )
         .id(card.id)
         .onDrag {

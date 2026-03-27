@@ -5,6 +5,15 @@ final class WeakTextViewBox {
     weak var textView: NSTextView?
 }
 
+struct MainEditorSessionState: Equatable {
+    var requestedCardID: UUID? = nil
+    var mountedCardID: UUID? = nil
+    var textViewIdentity: Int? = nil
+    var caretSeedLocation: Int? = nil
+    var isFirstResponderReady: Bool = false
+    var liveBodyHeight: CGFloat? = nil
+}
+
 // MARK: - ScenarioWriterView (메인 struct + 프로퍼티 + body + 레이아웃)
 
 struct ScenarioWriterView: View {
@@ -103,6 +112,7 @@ struct ScenarioWriterView: View {
     @State var activeCardID: UUID? = nil
     @State var selectedCardIDs: Set<UUID> = []
     @State var editingCardID: UUID? = nil
+    @State var mainEditorSession = MainEditorSessionState()
     @State var pendingMainPreemptiveFocusNavigationTargetID: UUID? = nil
     @State var indexBoardEditorDraft: IndexBoardEditorDraft? = nil
     @State var isIndexBoardInlineEditing: Bool = false
@@ -543,6 +553,11 @@ struct ScenarioWriterView: View {
     var mainColumnObservedCardFramesByKey: [String: [UUID: CGRect]] {
         get { interactionRuntime.mainColumnObservedCardFramesByKey }
         nonmutating set { interactionRuntime.mainColumnObservedCardFramesByKey = newValue }
+    }
+
+    var mainColumnObservedEditorSlotFramesByKey: [String: [UUID: CGRect]] {
+        get { interactionRuntime.mainColumnObservedEditorSlotFramesByKey }
+        nonmutating set { interactionRuntime.mainColumnObservedEditorSlotFramesByKey = newValue }
     }
 
     var mainColumnLayoutSnapshotByKey: [MainColumnLayoutCacheKey: MainColumnLayoutSnapshot] {
@@ -1692,6 +1707,30 @@ struct ScenarioWriterView: View {
             editingSessionHadTextMutation = false
         }
         syncScenarioTimestampSuppressionIfNeeded()
+        if let newID {
+            if mainEditorSession.requestedCardID != newID {
+                let length = (findCard(by: newID)?.content as NSString?)?.length ?? 0
+                let resolvedSeed = mainCaretLocationByCardID[newID].map { min(max(0, $0), length) }
+                mainEditorSession = MainEditorSessionState(
+                    requestedCardID: newID,
+                    mountedCardID: nil,
+                    textViewIdentity: nil,
+                    caretSeedLocation: resolvedSeed,
+                    isFirstResponderReady: false,
+                    liveBodyHeight: nil
+                )
+                mainWorkspacePhase0Log(
+                    "main-editor-session",
+                    "phase=sync-request card=\(mainWorkspacePhase0CardID(newID)) seed=\(resolvedSeed.map(String.init) ?? "nil")"
+                )
+            }
+        } else {
+            mainEditorSession = MainEditorSessionState()
+            mainWorkspacePhase0Log(
+                "main-editor-session",
+                "phase=clear"
+            )
+        }
         guard acceptsKeyboardInput else { return }
         guard !showFocusMode else { return }
         guard focusModeEditorCardID == nil else { return }

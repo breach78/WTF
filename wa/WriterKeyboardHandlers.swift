@@ -620,6 +620,41 @@ extension ScenarioWriterView {
     }
 
     func handleMainEditorBoundaryNavigation(_ press: KeyPress) -> Bool {
+        handleMainEditorBoundaryNavigation(
+            key: press.key,
+            isShiftSelection: press.modifiers.contains(.shift),
+            isRepeat: press.phase == .repeat
+        )
+    }
+
+    func handleMainEditorBoundaryCommand(_ commandSelector: Selector) -> Bool {
+        switch NSStringFromSelector(commandSelector) {
+        case "moveUp:":
+            return handleMainEditorBoundaryNavigation(key: .upArrow, isShiftSelection: false, isRepeat: false)
+        case "moveDown:":
+            return handleMainEditorBoundaryNavigation(key: .downArrow, isShiftSelection: false, isRepeat: false)
+        case "moveLeft:":
+            return handleMainEditorBoundaryNavigation(key: .leftArrow, isShiftSelection: false, isRepeat: false)
+        case "moveRight:":
+            return handleMainEditorBoundaryNavigation(key: .rightArrow, isShiftSelection: false, isRepeat: false)
+        case "moveUpAndModifySelection:":
+            return handleMainEditorBoundaryNavigation(key: .upArrow, isShiftSelection: true, isRepeat: false)
+        case "moveDownAndModifySelection:":
+            return handleMainEditorBoundaryNavigation(key: .downArrow, isShiftSelection: true, isRepeat: false)
+        case "moveLeftAndModifySelection:":
+            return handleMainEditorBoundaryNavigation(key: .leftArrow, isShiftSelection: true, isRepeat: false)
+        case "moveRightAndModifySelection:":
+            return handleMainEditorBoundaryNavigation(key: .rightArrow, isShiftSelection: true, isRepeat: false)
+        default:
+            return false
+        }
+    }
+
+    private func handleMainEditorBoundaryNavigation(
+        key: KeyEquivalent,
+        isShiftSelection: Bool,
+        isRepeat: Bool
+    ) -> Bool {
         guard let editingID = editingCardID,
               let editingCard = findCard(by: editingID) else { return false }
         guard let textView = NSApp.keyWindow?.firstResponder as? NSTextView else { return false }
@@ -639,16 +674,13 @@ extension ScenarioWriterView {
         let visualBoundary = focusCaretVisualBoundaryState(textView: textView, cursor: cursor)
         let atTopBoundary = (cursor == 0) && (visualBoundary?.isTop ?? true)
         let atBottomBoundary = (cursor == content.length) && (visualBoundary?.isBottom ?? true)
-        let isRepeat = (press.phase == .repeat)
         let shouldDiscardEmptyNewCardOnBoundaryMove =
             editingIsNewCard &&
             editingCard.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        let isShiftSelection = press.modifiers.contains(.shift)
 
-        switch press.key {
+        switch key {
         case .upArrow:
             return handleMainBoundaryUpArrow(
-                press: press,
                 editingCard: editingCard,
                 currentLevel: currentLevel,
                 levelIndex: levelIndex,
@@ -661,7 +693,6 @@ extension ScenarioWriterView {
 
         case .downArrow:
             return handleMainBoundaryDownArrow(
-                press: press,
                 editingCard: editingCard,
                 currentLevel: currentLevel,
                 levelIndex: levelIndex,
@@ -674,7 +705,6 @@ extension ScenarioWriterView {
 
         case .leftArrow:
             return handleMainBoundaryLeftArrow(
-                press: press,
                 editingCard: editingCard,
                 currentLevel: currentLevel,
                 atTopBoundary: atTopBoundary,
@@ -685,7 +715,6 @@ extension ScenarioWriterView {
 
         case .rightArrow:
             return handleMainBoundaryRightArrow(
-                press: press,
                 editingCard: editingCard,
                 currentLevel: currentLevel,
                 levels: levels,
@@ -707,7 +736,6 @@ extension ScenarioWriterView {
     }
 
     func handleMainBoundaryUpArrow(
-        press: KeyPress,
         editingCard: SceneCard,
         currentLevel: [SceneCard],
         levelIndex: Int,
@@ -747,7 +775,7 @@ extension ScenarioWriterView {
         clearMainBoundaryParentLeftArm()
         clearMainBoundaryChildRightArm()
         clearMainNoChildRightArm()
-        if isShiftSelection && press.phase == .down {
+        if isShiftSelection {
             applyMainBoundaryShiftSelection(
                 from: editingCard,
                 to: target,
@@ -771,7 +799,6 @@ extension ScenarioWriterView {
     }
 
     func handleMainBoundaryDownArrow(
-        press: KeyPress,
         editingCard: SceneCard,
         currentLevel: [SceneCard],
         levelIndex: Int,
@@ -811,7 +838,7 @@ extension ScenarioWriterView {
         clearMainBoundaryParentLeftArm()
         clearMainBoundaryChildRightArm()
         clearMainNoChildRightArm()
-        if isShiftSelection && press.phase == .down {
+        if isShiftSelection {
             applyMainBoundaryShiftSelection(
                 from: editingCard,
                 to: target,
@@ -834,7 +861,6 @@ extension ScenarioWriterView {
     }
 
     func handleMainBoundaryLeftArrow(
-        press: KeyPress,
         editingCard: SceneCard,
         currentLevel: [SceneCard],
         atTopBoundary: Bool,
@@ -849,9 +875,6 @@ extension ScenarioWriterView {
         guard let parentCard = editingCard.parent else {
             clearMainBoundaryParentLeftArm()
             return false
-        }
-        guard press.phase == .down else {
-            return true
         }
 
         clearMainEditTabArm()
@@ -877,7 +900,6 @@ extension ScenarioWriterView {
     }
 
     func handleMainBoundaryRightArrow(
-        press: KeyPress,
         editingCard: SceneCard,
         currentLevel: [SceneCard],
         levels: [[SceneCard]],
@@ -893,9 +915,6 @@ extension ScenarioWriterView {
             clearMainBoundaryChildRightArm()
             clearMainNoChildRightArm()
             return false
-        }
-        guard press.phase == .down else {
-            return true
         }
 
         clearMainEditTabArm()
@@ -1064,7 +1083,38 @@ extension ScenarioWriterView {
             if showAIChat && isAIChatInputFocused {
                 return event
             }
-            if editingCardID != nil || isSearchFocused { return event }
+            if editingCardID != nil {
+                let isPlainEditingArrow =
+                    !flags.contains(.command) &&
+                    !flags.contains(.option) &&
+                    !flags.contains(.control) &&
+                    [123, 124, 125, 126].contains(event.keyCode)
+                if isPlainEditingArrow {
+                    let key: KeyEquivalent? = switch event.keyCode {
+                    case 123: .leftArrow
+                    case 124: .rightArrow
+                    case 125: .downArrow
+                    case 126: .upArrow
+                    default: nil
+                    }
+                    if let key,
+                       handleMainEditorBoundaryNavigation(
+                        key: key,
+                        isShiftSelection: flags.contains(.shift),
+                        isRepeat: event.isARepeat
+                       ) {
+                        mainWorkspacePhase0Log(
+                            "main-nav-monitor-editing-arrow-handled",
+                            "keyCode=\(event.keyCode) repeat=\(event.isARepeat) " +
+                            "editing=\(mainWorkspacePhase0CardID(editingCardID)) " +
+                            "responder=\(mainWorkspacePhase0ResponderSummary(expectedText: editingCardID.flatMap { findCard(by: $0)?.content }))"
+                        )
+                        return nil
+                    }
+                }
+                return event
+            }
+            if isSearchFocused { return event }
             if event.modifierFlags.contains(.command) || event.modifierFlags.contains(.option) || event.modifierFlags.contains(.control) {
                 return event
             }

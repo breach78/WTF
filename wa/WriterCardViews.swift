@@ -344,21 +344,47 @@ private struct FocusModeEditableTextRenderer: NSViewRepresentable {
     }
 }
 
-private struct MainWorkspaceEditableTextRenderer: NSViewRepresentable {
+struct MainWorkspaceEditableTextRenderer: NSViewRepresentable {
     struct Signature: Equatable {
         let textWidthBucket: Int
         let bodyHeightBucket: Int
         let fontSizeBucket: Int
         let lineSpacingBucket: Int
         let isLightAppearance: Bool
-        let wantsFocus: Bool
     }
 
     final class TextView: NSTextView {
+        var debugCardID: UUID?
+        var onLayoutPass: ((NSTextView) -> Void)?
         var focusStateHandler: ((Bool) -> Void)?
+
+        override func layout() {
+            super.layout()
+            onLayoutPass?(self)
+        }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            mainWorkspacePhase0Log(
+                "appkit-inline-window",
+                "card=\(mainWorkspacePhase0CardID(self.debugCardID)) \(mainWorkspacePhase0TextViewSummary(self))"
+            )
+        }
+
+        override func viewDidMoveToSuperview() {
+            super.viewDidMoveToSuperview()
+            mainWorkspacePhase0Log(
+                "appkit-inline-superview",
+                "card=\(mainWorkspacePhase0CardID(self.debugCardID)) \(mainWorkspacePhase0TextViewSummary(self))"
+            )
+        }
 
         override func becomeFirstResponder() -> Bool {
             let accepted = super.becomeFirstResponder()
+            mainWorkspacePhase0Log(
+                "appkit-inline-become-first-responder",
+                "card=\(mainWorkspacePhase0CardID(self.debugCardID)) accepted=\(accepted) \(mainWorkspacePhase0TextViewSummary(self))"
+            )
             if accepted {
                 focusStateHandler?(true)
             }
@@ -367,6 +393,10 @@ private struct MainWorkspaceEditableTextRenderer: NSViewRepresentable {
 
         override func resignFirstResponder() -> Bool {
             let accepted = super.resignFirstResponder()
+            mainWorkspacePhase0Log(
+                "appkit-inline-resign-first-responder",
+                "card=\(mainWorkspacePhase0CardID(self.debugCardID)) accepted=\(accepted) \(mainWorkspacePhase0TextViewSummary(self))"
+            )
             if accepted {
                 focusStateHandler?(false)
             }
@@ -379,6 +409,10 @@ private struct MainWorkspaceEditableTextRenderer: NSViewRepresentable {
         var suppressBindingPropagation = false
         var lastSignature: Signature?
         var pendingFocusRetry: DispatchWorkItem?
+        var sessionEnded = false
+        var focusSettled = false
+        private var lastLoggedLayoutBodyBucket: Int?
+        private var lastLoggedLayoutFrameBucket: String?
 
         init(_ parent: MainWorkspaceEditableTextRenderer) {
             self.parent = parent
@@ -388,40 +422,125 @@ private struct MainWorkspaceEditableTextRenderer: NSViewRepresentable {
             pendingFocusRetry?.cancel()
         }
 
+        func log(_ event: String, _ textView: NSTextView? = nil, _ details: String = "") {
+            let summary: String
+            if let textView {
+                summary = mainWorkspacePhase0TextViewSummary(textView, expectedText: parent.text)
+            } else {
+                summary = "textView=nil"
+            }
+            let detailSuffix = details.isEmpty ? "" : " \(details)"
+            mainWorkspacePhase0Log(
+                event,
+                "card=\(mainWorkspacePhase0CardID(self.parent.cardID))\(detailSuffix) \(summary)"
+            )
+        }
+
+        func textView(
+            _ textView: NSTextView,
+            shouldChangeTextIn affectedCharRange: NSRange,
+            replacementString: String?
+        ) -> Bool {
+            let replacementLength = (replacementString ?? "") .count
+            log(
+                "appkit-inline-should-change",
+                textView,
+                "range=\(affectedCharRange.location):\(affectedCharRange.length) replacementLen=\(replacementLength)"
+            )
+            return true
+        }
+
+        func textDidBeginEditing(_ notification: Notification) {
+            guard let textView = notification.object as? NSTextView else { return }
+            sessionEnded = false
+            focusSettled = false
+            log("appkit-inline-begin-edit", textView)
+        }
+
+        func textDidEndEditing(_ notification: Notification) {
+            guard let textView = notification.object as? NSTextView else { return }
+            sessionEnded = true
+            focusSettled = false
+            pendingFocusRetry?.cancel()
+            pendingFocusRetry = nil
+            log("appkit-inline-end-edit", textView)
+        }
+
         func textDidChange(_ notification: Notification) {
             guard let textView = notification.object as? NSTextView else { return }
-            reportLayout(from: textView)
-            guard !suppressBindingPropagation else { return }
+            reportLayout(from: textView, reason: "textDidChange")
+            guard !suppressBindingPropagation else {
+                log("appkit-inline-text-change-suppressed", textView)
+                return
+            }
             let updated = textView.string
             if parent.text != updated {
+                log("appkit-inline-text-change", textView, "bindingUpdate=true")
                 parent.text = updated
+            } else {
+                log("appkit-inline-text-change", textView, "bindingUpdate=false")
             }
         }
 
         func textViewDidChangeSelection(_ notification: Notification) {
             guard let textView = notification.object as? NSTextView else { return }
-            reportLayout(from: textView)
+            reportLayout(from: textView, reason: "selection")
+            log("appkit-inline-selection-change", textView)
         }
 
-        func reportLayout(from textView: NSTextView) {
-            parent.onMeasuredBodyHeightChange(sharedLiveTextViewBodyHeight(textView))
+        func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+            log("appkit-inline-command", textView, "selector=\(NSStringFromSelector(commandSelector))")
+            return parent.onCommandBy(commandSelector)
+        }
+
+        func reportLayout(from textView: NSTextView, reason: String) {
+            let measured = sharedLiveTextViewBodyHeight(textView)
+            parent.onMeasuredBodyHeightChange(measured)
+
+            let bodyBucket = measured.map { Int(($0 * 10).rounded()) } ?? -1
+            let frameBucket = "\(Int((textView.frame.width * 10).rounded()))x\(Int((textView.frame.height * 10).rounded()))"
+            let shouldLog =
+                reason != "layout" ||
+                lastLoggedLayoutBodyBucket != bodyBucket ||
+                lastLoggedLayoutFrameBucket != frameBucket
+            if shouldLog {
+                lastLoggedLayoutBodyBucket = bodyBucket
+                lastLoggedLayoutFrameBucket = frameBucket
+                let measuredSummary = measured.map { String(format: "%.1f", $0) } ?? "nil"
+                log(
+                    "appkit-inline-layout",
+                    textView,
+                    "reason=\(reason) measured=\(measuredSummary)"
+                )
+            }
         }
 
         func requestFocus(for textView: NSTextView, remainingRetries: Int = 4) {
             pendingFocusRetry?.cancel()
             let work = DispatchWorkItem { [weak textView, weak self] in
                 guard let self, let textView else { return }
-                guard self.parent.isFocused else { return }
+                guard self.parent.isFocused else {
+                    self.log("appkit-inline-focus-skip", textView, "reason=notFocused")
+                    return
+                }
                 guard let window = textView.window else {
+                    self.log("appkit-inline-focus-wait", textView, "reason=noWindow retries=\(remainingRetries)")
                     if remainingRetries > 0 {
                         self.requestFocus(for: textView, remainingRetries: remainingRetries - 1)
                     }
                     return
                 }
-                if window.firstResponder !== textView {
+                let before = window.firstResponder === textView
+                self.log("appkit-inline-focus-attempt", textView, "before=\(before) retries=\(remainingRetries)")
+                if !before {
                     window.makeFirstResponder(textView)
                 }
-                if window.firstResponder !== textView, remainingRetries > 0 {
+                let after = window.firstResponder === textView
+                if after {
+                    self.focusSettled = true
+                }
+                self.log("appkit-inline-focus-result", textView, "after=\(after) retries=\(remainingRetries)")
+                if !after, remainingRetries > 0 {
                     self.requestFocus(for: textView, remainingRetries: remainingRetries - 1)
                 }
             }
@@ -431,6 +550,7 @@ private struct MainWorkspaceEditableTextRenderer: NSViewRepresentable {
     }
 
     @Binding var text: String
+    let cardID: UUID
     let textWidth: CGFloat
     let bodyHeight: CGFloat
     let fontSize: CGFloat
@@ -439,6 +559,7 @@ private struct MainWorkspaceEditableTextRenderer: NSViewRepresentable {
     let isFocused: Bool
     let onFocusStateChange: (Bool) -> Void
     let onMeasuredBodyHeightChange: (CGFloat?) -> Void
+    let onCommandBy: (Selector) -> Bool
 
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
@@ -446,8 +567,12 @@ private struct MainWorkspaceEditableTextRenderer: NSViewRepresentable {
 
     func makeNSView(context: Context) -> NSTextView {
         let textView = TextView(frame: NSRect(x: 0, y: 0, width: textWidth, height: bodyHeight))
-        textView.delegate = context.coordinator
+        textView.debugCardID = cardID
+        textView.onLayoutPass = { liveTextView in
+            context.coordinator.reportLayout(from: liveTextView, reason: "layout")
+        }
         textView.focusStateHandler = onFocusStateChange
+        textView.delegate = context.coordinator
         textView.isEditable = true
         textView.isSelectable = true
         textView.isRichText = false
@@ -472,6 +597,7 @@ private struct MainWorkspaceEditableTextRenderer: NSViewRepresentable {
             textContainer.containerSize = CGSize(width: textWidth, height: .greatestFiniteMagnitude)
         }
 
+        context.coordinator.log("appkit-inline-make", textView)
         updateTextView(textView, coordinator: context.coordinator)
         return textView
     }
@@ -482,9 +608,31 @@ private struct MainWorkspaceEditableTextRenderer: NSViewRepresentable {
             textView.delegate = context.coordinator
         }
         if let textView = textView as? TextView {
+            textView.debugCardID = cardID
+            textView.onLayoutPass = { liveTextView in
+                context.coordinator.reportLayout(from: liveTextView, reason: "layout")
+            }
             textView.focusStateHandler = onFocusStateChange
         }
+        context.coordinator.log("appkit-inline-update", textView, "focused=\(isFocused)")
+        if context.coordinator.sessionEnded && !isFocused {
+            context.coordinator.log("appkit-inline-update-suppressed", textView)
+            return
+        }
         updateTextView(textView, coordinator: context.coordinator)
+    }
+
+    static func dismantleNSView(_ textView: NSTextView, coordinator: Coordinator) {
+        coordinator.log("appkit-inline-dismantle", textView)
+        coordinator.sessionEnded = true
+        coordinator.focusSettled = false
+        coordinator.pendingFocusRetry?.cancel()
+        coordinator.pendingFocusRetry = nil
+        textView.delegate = nil
+        if let textView = textView as? TextView {
+            textView.onLayoutPass = nil
+            textView.focusStateHandler = nil
+        }
     }
 
     private func updateTextView(_ textView: NSTextView, coordinator: Coordinator) {
@@ -493,8 +641,7 @@ private struct MainWorkspaceEditableTextRenderer: NSViewRepresentable {
             bodyHeightBucket: Int((bodyHeight * 10).rounded()),
             fontSizeBucket: Int((fontSize * 10).rounded()),
             lineSpacingBucket: Int((lineSpacing * 10).rounded()),
-            isLightAppearance: appearance == "light",
-            wantsFocus: isFocused
+            isLightAppearance: appearance == "light"
         )
 
         let resolvedWidth = max(1, textWidth)
@@ -539,6 +686,11 @@ private struct MainWorkspaceEditableTextRenderer: NSViewRepresentable {
             let clampedLength = min(selected.length, max(0, length - clampedLocation))
             textView.setSelectedRange(NSRange(location: clampedLocation, length: clampedLength))
             coordinator.suppressBindingPropagation = false
+            coordinator.log(
+                "appkit-inline-sync-text",
+                textView,
+                "newLen=\(length) preservedSel=\(clampedLocation):\(clampedLength)"
+            )
         }
 
         if coordinator.lastSignature != signature {
@@ -564,13 +716,14 @@ private struct MainWorkspaceEditableTextRenderer: NSViewRepresentable {
             typing[.foregroundColor] = color
             typing[.paragraphStyle] = paragraph
             textView.typingAttributes = typing
+            coordinator.log("appkit-inline-signature", textView, "focused=\(isFocused)")
         }
 
-        if isFocused {
+        if isFocused && !coordinator.focusSettled {
             coordinator.requestFocus(for: textView)
         }
 
-        coordinator.reportLayout(from: textView)
+        coordinator.reportLayout(from: textView, reason: "updateNSView")
     }
 }
 
@@ -861,6 +1014,13 @@ struct CardItem: View {
     var onCloneCard: (() -> Void)? = nil
     var clonePeerDestinations: [ClonePeerMenuDestination] = []
     var onNavigateToClonePeer: ((UUID) -> Void)? = nil
+    var mainEditorSlotCoordinateSpaceName: String? = nil
+    var usesExternalMainEditor: Bool = false
+    var externalEditorLiveBodyHeight: CGFloat? = nil
+    var onMainEditorMount: ((UUID) -> Void)? = nil
+    var onMainEditorUnmount: ((UUID) -> Void)? = nil
+    var onMainEditorFocusStateChange: ((UUID, Bool) -> Void)? = nil
+    var handleEditorCommandBySelector: ((Selector) -> Bool)? = nil
     @State private var mainEditingMeasuredBodyHeight: CGFloat = 0
     @State private var mainEditingMeasureWorkItem: DispatchWorkItem? = nil
     @State private var mainEditingMeasureLastAt: Date = .distantPast
@@ -1057,6 +1217,9 @@ struct CardItem: View {
     }
 
     private var resolvedMainEditingBodyHeight: CGFloat {
+        if usesExternalMainEditor, let externalEditorLiveBodyHeight, externalEditorLiveBodyHeight > 1 {
+            return externalEditorLiveBodyHeight
+        }
         if mainEditingMeasuredBodyHeight > 1 {
             return mainEditingMeasuredBodyHeight
         }
@@ -1078,7 +1241,6 @@ struct CardItem: View {
 
     private func liveMainResponderBodyHeight() -> CGFloat? {
         guard isEditing else { return nil }
-        guard editorFocus else { return nil }
         guard let textView = NSApp.keyWindow?.firstResponder as? NSTextView else { return nil }
         guard textView.string == card.content else { return nil }
         return sharedLiveTextViewBodyHeight(textView)
@@ -1107,7 +1269,22 @@ struct CardItem: View {
                 "inline-editor-row-height",
                 "card=\(mainWorkspacePhase0CardID(card.id)) source=\(liveBodyHeight != nil ? "liveResponder" : "fallbackMeasure") " +
                 "body=\(measured) row=\(measured + (mainEditorVerticalPadding * 2)) previous=\(previous) " +
-                "editorFocus=\(editorFocus) responder=\(mainWorkspacePhase0ResponderSummary(expectedText: card.content))"
+                "isEditing=\(isEditing) responder=\(mainWorkspacePhase0ResponderSummary(expectedText: card.content))"
+            )
+        }
+    }
+
+    private func updateMainEditingMeasuredBodyHeight(_ measured: CGFloat?, source: String) {
+        guard let measured, measured > 0 else { return }
+        mainEditingMeasureLastAt = Date()
+        let previous = mainEditingMeasuredBodyHeight
+        if abs(previous - measured) > mainEditingMeasureUpdateThreshold {
+            mainEditingMeasuredBodyHeight = measured
+            mainWorkspacePhase0Log(
+                "inline-editor-row-height",
+                "card=\(mainWorkspacePhase0CardID(card.id)) source=\(source) " +
+                "body=\(measured) row=\(measured + (mainEditorVerticalPadding * 2)) previous=\(previous) " +
+                "isEditing=\(isEditing) responder=\(mainWorkspacePhase0ResponderSummary(expectedText: card.content))"
             )
         }
     }
@@ -1150,6 +1327,131 @@ struct CardItem: View {
         }
         mainEditingMeasureWorkItem = work
         DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    private var shouldReportMainEditorSlotFrame: Bool {
+        mainEditorSlotCoordinateSpaceName != nil && (isActive || isEditing)
+    }
+
+    @ViewBuilder
+    private var cardEditorSlotFrameReporter: some View {
+        if shouldReportMainEditorSlotFrame,
+           let coordinateSpaceName = mainEditorSlotCoordinateSpaceName {
+            GeometryReader { geometry in
+                Color.clear.preference(
+                    key: MainColumnEditorSlotPreferenceKey.self,
+                    value: [
+                        card.id: geometry.frame(in: .named(coordinateSpaceName))
+                    ]
+                )
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var cardEditorSlotContent: some View {
+        ZStack(alignment: .topLeading) {
+            if !isEditing {
+                Text(card.content.isEmpty ? "내용 없음" : card.content)
+                    .font(.custom("SansMonoCJKFinalDraft", size: fontSize))
+                    .lineSpacing(mainCardLineSpacing)
+                    .foregroundStyle(card.content.isEmpty ? (appearance == "light" ? .black.opacity(0.4) : .white.opacity(0.4)) : (appearance == "light" ? .black : .white))
+                    .padding(mainCardContentPadding)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if isEditing {
+                if usesExternalMainEditor {
+                    Color.clear
+                        .frame(
+                            width: MainCanvasLayoutMetrics.textWidth,
+                            height: resolvedMainEditingBodyHeight,
+                            alignment: .topLeading
+                        )
+                        .padding(.horizontal, mainEditorHorizontalPadding)
+                        .padding(.vertical, mainEditorVerticalPadding)
+                        .onAppear {
+                            mainWorkspacePhase0Log(
+                                "inline-editor-placeholder-appear",
+                                "card=\(mainWorkspacePhase0CardID(card.id)) active=\(isActive) selected=\(isSelected) " +
+                                "body=\(resolvedMainEditingBodyHeight)"
+                            )
+                        }
+                        .onDisappear {
+                            mainWorkspacePhase0Log(
+                                "inline-editor-placeholder-disappear",
+                                "card=\(mainWorkspacePhase0CardID(card.id)) body=\(resolvedMainEditingBodyHeight)"
+                            )
+                        }
+                } else {
+                    TextEditor(text: mainEditorTextBinding)
+                        .font(.custom("SansMonoCJKFinalDraft", size: fontSize))
+                        .lineSpacing(mainCardLineSpacing)
+                        .scrollContentBackground(.hidden)
+                        .scrollDisabled(true)
+                        .scrollIndicators(.never)
+                        .frame(
+                            width: MainCanvasLayoutMetrics.textWidth,
+                            height: resolvedMainEditingBodyHeight,
+                            alignment: .topLeading
+                        )
+                        .padding(.horizontal, mainEditorHorizontalPadding)
+                        .padding(.vertical, mainEditorVerticalPadding)
+                        .foregroundStyle(appearance == "light" ? .black : .white)
+                        .focused($editorFocus)
+                        .onAppear {
+                            onMainEditorMount?(card.id)
+                            mainWorkspacePhase0Log(
+                                "inline-editor-appear",
+                                "card=\(mainWorkspacePhase0CardID(card.id)) active=\(isActive) selected=\(isSelected) " +
+                                "measuredBody=\(mainEditingMeasuredBodyHeight) responder=\(mainWorkspacePhase0ResponderSummary(expectedText: card.content))"
+                            )
+                            scheduleMainEditingMeasuredBodyHeightRefresh(immediate: true)
+                            DispatchQueue.main.async {
+                                let alreadyFocusedHere: Bool = {
+                                    guard let textView = NSApp.keyWindow?.firstResponder as? NSTextView else { return false }
+                                    return textView.string == card.content
+                                }()
+                                if !alreadyFocusedHere {
+                                    editorFocus = true
+                                }
+                                mainWorkspacePhase0Log(
+                                    "inline-editor-focus-request",
+                                    "card=\(mainWorkspacePhase0CardID(card.id)) alreadyFocused=\(alreadyFocusedHere) " +
+                                    "editorFocus=\(editorFocus) responder=\(mainWorkspacePhase0ResponderSummary(expectedText: card.content))"
+                                )
+                                scheduleMainEditingMeasuredBodyHeightRefresh(immediate: true)
+                            }
+                        }
+                        .onDisappear {
+                            onMainEditorUnmount?(card.id)
+                            mainWorkspacePhase0Log(
+                                "inline-editor-disappear",
+                                "card=\(mainWorkspacePhase0CardID(card.id)) measuredBody=\(mainEditingMeasuredBodyHeight) " +
+                                "responder=\(mainWorkspacePhase0ResponderSummary(expectedText: card.content))"
+                            )
+                            mainEditingMeasureWorkItem?.cancel()
+                            mainEditingMeasureWorkItem = nil
+                        }
+                        .onChange(of: editorFocus) { _, newValue in
+                            onMainEditorFocusStateChange?(card.id, newValue)
+                            mainWorkspacePhase0Log(
+                                "inline-editor-focus-state",
+                                "card=\(mainWorkspacePhase0CardID(card.id)) focused=\(newValue) " +
+                                "responder=\(mainWorkspacePhase0ResponderSummary(expectedText: card.content))"
+                            )
+                        }
+                        .onChange(of: fontSize) { _, _ in
+                            scheduleMainEditingMeasuredBodyHeightRefresh(immediate: true)
+                        }
+                        .onChange(of: mainCardLineSpacing) { _, _ in
+                            scheduleMainEditingMeasuredBodyHeightRefresh(immediate: true)
+                        }
+                }
+            }
+        }
+        .background(cardEditorSlotFrameReporter)
     }
 
     @ViewBuilder
@@ -1277,88 +1579,7 @@ struct CardItem: View {
                     .opacity(activeTintOpacity)
             }
 
-            ZStack(alignment: .topLeading) {
-                if !isEditing {
-                    Text(card.content.isEmpty ? "내용 없음" : card.content)
-                        .font(.custom("SansMonoCJKFinalDraft", size: fontSize))
-                        .lineSpacing(mainCardLineSpacing)
-                        .foregroundStyle(card.content.isEmpty ? (appearance == "light" ? .black.opacity(0.4) : .white.opacity(0.4)) : (appearance == "light" ? .black : .white))
-                        .padding(mainCardContentPadding)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                if isEditing {
-                    MainWorkspaceEditableTextRenderer(
-                        text: mainEditorTextBinding,
-                        textWidth: mainEditingTextMeasureWidth,
-                        bodyHeight: resolvedMainEditingBodyHeight,
-                        fontSize: fontSize,
-                        lineSpacing: mainCardLineSpacing,
-                        appearance: appearance,
-                        isFocused: editorFocus,
-                        onFocusStateChange: { isFocused in
-                            if editorFocus != isFocused {
-                                editorFocus = isFocused
-                            }
-                            mainWorkspacePhase0Log(
-                                "inline-editor-focus-state",
-                                "card=\(mainWorkspacePhase0CardID(card.id)) focused=\(isFocused) " +
-                                "responder=\(mainWorkspacePhase0ResponderSummary(expectedText: card.content))"
-                            )
-                            if isFocused {
-                                scheduleMainEditingMeasuredBodyHeightRefresh(immediate: true)
-                            }
-                        },
-                        onMeasuredBodyHeightChange: { measured in
-                            updateMainEditingMeasuredBodyHeight(measured, source: "appkitRenderer")
-                        }
-                    )
-                        .frame(height: resolvedMainEditingBodyHeight, alignment: .topLeading)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, mainEditorHorizontalPadding)
-                        .padding(.vertical, mainEditorVerticalPadding)
-                        .onAppear {
-                            mainWorkspacePhase0Log(
-                                "inline-editor-appear",
-                                "card=\(mainWorkspacePhase0CardID(card.id)) active=\(isActive) selected=\(isSelected) " +
-                                "measuredBody=\(mainEditingMeasuredBodyHeight) responder=\(mainWorkspacePhase0ResponderSummary(expectedText: card.content))"
-                            )
-                            scheduleMainEditingMeasuredBodyHeightRefresh(immediate: true)
-                            DispatchQueue.main.async {
-                                let alreadyFocusedHere: Bool = {
-                                    guard let textView = NSApp.keyWindow?.firstResponder as? NSTextView else { return false }
-                                    return textView.string == card.content
-                                }()
-                                if !alreadyFocusedHere {
-                                    editorFocus = true
-                                }
-                                mainWorkspacePhase0Log(
-                                    "inline-editor-focus-request",
-                                    "card=\(mainWorkspacePhase0CardID(card.id)) alreadyFocused=\(alreadyFocusedHere) " +
-                                    "editorFocus=\(editorFocus) responder=\(mainWorkspacePhase0ResponderSummary(expectedText: card.content))"
-                                )
-                                scheduleMainEditingMeasuredBodyHeightRefresh(immediate: true)
-                            }
-                        }
-                        .onDisappear {
-                            editorFocus = false
-                            mainWorkspacePhase0Log(
-                                "inline-editor-disappear",
-                                "card=\(mainWorkspacePhase0CardID(card.id)) measuredBody=\(mainEditingMeasuredBodyHeight) " +
-                                "responder=\(mainWorkspacePhase0ResponderSummary(expectedText: card.content))"
-                            )
-                            mainEditingMeasureWorkItem?.cancel()
-                            mainEditingMeasureWorkItem = nil
-                        }
-                        .onChange(of: fontSize) { _, _ in
-                            scheduleMainEditingMeasuredBodyHeightRefresh(immediate: true)
-                        }
-                        .onChange(of: mainCardLineSpacing) { _, _ in
-                            scheduleMainEditingMeasuredBodyHeightRefresh(immediate: true)
-                        }
-                }
-            }
+            cardEditorSlotContent
         }
     }
 

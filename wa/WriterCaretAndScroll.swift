@@ -301,12 +301,20 @@ extension ScenarioWriterView {
         }
         textView.minSize = NSSize(width: 0, height: 0)
         textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
-        if normalizeInnerScrollView, let innerScrollView = textView.enclosingScrollView {
+        if normalizeInnerScrollView, let innerScrollView = resolvedMainEditorInnerScrollView(for: textView) {
             normalizeMainEditorInnerScrollView(innerScrollView)
         }
         if textView.textContainerInset != .zero {
             textView.textContainerInset = .zero
         }
+    }
+
+    private func resolvedMainEditorInnerScrollView(for textView: NSTextView) -> NSScrollView? {
+        guard let enclosingScrollView = textView.enclosingScrollView else { return nil }
+        if let outerScrollView = outerScrollView(containing: textView), outerScrollView === enclosingScrollView {
+            return nil
+        }
+        return enclosingScrollView
     }
 
     private func normalizeMainEditorInnerScrollView(_ scrollView: NSScrollView) {
@@ -343,7 +351,7 @@ extension ScenarioWriterView {
     private func configureMainEditorTextContainerWidth(_ textView: NSTextView) {
         guard let textContainer = textView.textContainer else { return }
 
-        let viewportWidth = textView.enclosingScrollView?.contentView.bounds.width ?? textView.bounds.width
+        let targetWidth = MainCanvasLayoutMetrics.textWidth
         textContainer.lineBreakMode = .byWordWrapping
         textContainer.maximumNumberOfLines = 0
         if abs(textContainer.lineFragmentPadding - mainEditorLineFragmentPadding) > 0.01 {
@@ -354,13 +362,14 @@ extension ScenarioWriterView {
         }
         textContainer.heightTracksTextView = false
 
-        let preferredWidth = MainCanvasLayoutMetrics.textWidth
-        let targetWidth = max(1, min(viewportWidth, preferredWidth))
-        if viewportWidth > 1 {
-            assert(targetWidth <= viewportWidth + 0.5, "Main editor container width exceeded viewport")
-        }
         if abs(textContainer.containerSize.width - targetWidth) > 0.5 {
             textContainer.containerSize = CGSize(width: targetWidth, height: .greatestFiniteMagnitude)
+        }
+        if abs(textView.frame.width - targetWidth) > 0.5 || abs(textView.frame.origin.x) > 0.5 {
+            textView.setFrameSize(NSSize(width: targetWidth, height: textView.frame.height))
+            if abs(textView.frame.origin.x) > 0.5 {
+                textView.setFrameOrigin(NSPoint(x: 0, y: textView.frame.origin.y))
+            }
         }
     }
 
@@ -670,7 +679,7 @@ extension ScenarioWriterView {
     }
 
     func normalizeMainEditorTextViewOffsetIfNeeded(_ textView: NSTextView, reason: String) {
-        guard let scrollView = textView.enclosingScrollView else { return }
+        guard let scrollView = resolvedMainEditorInnerScrollView(for: textView) else { return }
         let origin = scrollView.contentView.bounds.origin
         let shouldResetX = abs(origin.x) > 0.5
         let shouldResetY = abs(origin.y) > 0.5
