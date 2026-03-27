@@ -101,8 +101,11 @@ extension ScenarioWriterView {
         if mainEditorSession.requestedCardID == editingID && !mainEditorSession.isFirstResponderReady {
             return nil
         }
-        guard let textView = resolveMainSelectionTextView(from: notification) else { return nil }
-        guard textView.string == editingCard.content else { return nil }
+        let authorityTextView = resolvedActiveMainEditorTextView(for: editingID)
+        guard let textView = authorityTextView ?? resolveMainSelectionTextView(from: notification) else { return nil }
+        if authorityTextView == nil {
+            guard textView.string == editingCard.content else { return nil }
+        }
         if mainEditorSession.mountedCardID == editingID,
            let expectedIdentity = mainEditorSession.textViewIdentity,
            ObjectIdentifier(textView).hashValue != expectedIdentity {
@@ -243,6 +246,10 @@ extension ScenarioWriterView {
     }
 
     func resolveMainEditorTextView(for card: SceneCard) -> NSTextView? {
+        if let textView = resolvedActiveMainEditorTextView(for: card.id) {
+            return textView
+        }
+
         if let firstResponder = NSApp.keyWindow?.firstResponder as? NSTextView,
            firstResponder.isEditable,
            !firstResponder.isHidden,
@@ -274,7 +281,9 @@ extension ScenarioWriterView {
         guard !showFocusMode else { return }
         guard let editingID = editingCardID, let card = findCard(by: editingID) else { return }
         guard let textView = resolveMainEditorTextView(for: card) else { return }
-        guard textView.string == card.content else { return }
+        if resolvedActiveMainEditorTextView(for: card.id) == nil {
+            guard textView.string == card.content else { return }
+        }
 
         prepareMainEditorTextViewForLineSpacing(
             textView,
@@ -494,7 +503,8 @@ extension ScenarioWriterView {
 
     func ensureMainCaretVisible() {
         guard let editingID = editingCardID else { return }
-        guard let context = resolveMainCaretEnsureContext() else { return }
+        guard !isMainEditingTransitionPending(targetCardID: editingID) else { return }
+        guard let context = resolveMainCaretEnsureContext(for: editingID) else { return }
         if let viewportKey = resolvedMainColumnViewportKey(forCardID: editingID) {
             _ = beginMainVerticalScrollAuthority(
                 viewportKey: viewportKey,
@@ -532,11 +542,14 @@ extension ScenarioWriterView {
         let textContainer: NSTextContainer
     }
 
-    private func resolveMainCaretEnsureContext() -> MainCaretEnsureContext? {
+    private func resolveMainCaretEnsureContext(for editingID: UUID) -> MainCaretEnsureContext? {
         guard !showFocusMode else { return nil }
-        guard let editingID = editingCardID, let card = findCard(by: editingID) else { return nil }
-        guard let textView = NSApp.keyWindow?.firstResponder as? NSTextView else { return nil }
-        guard textView.string == card.content else { return nil }
+        guard let card = findCard(by: editingID) else { return nil }
+        let authorityTextView = resolvedActiveMainEditorTextView(for: editingID)
+        guard let textView = authorityTextView ?? (NSApp.keyWindow?.firstResponder as? NSTextView) else { return nil }
+        if authorityTextView == nil {
+            guard textView.string == card.content else { return nil }
+        }
         guard let layoutManager = textView.layoutManager, let textContainer = textView.textContainer else { return nil }
         guard let outerScrollView = outerScrollView(containing: textView),
               let outerDocumentView = outerScrollView.documentView else {

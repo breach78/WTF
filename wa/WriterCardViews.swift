@@ -123,8 +123,16 @@ private struct FocusModeReadOnlyTextRenderer: NSViewRepresentable {
 
         let resolvedWidth = max(1, textWidth)
         let resolvedHeight = max(1, bodyHeight)
-        textView.frame = NSRect(x: 0, y: 0, width: resolvedWidth, height: resolvedHeight)
-        textView.textContainerInset = .zero
+        let targetFrame = NSRect(x: 0, y: 0, width: resolvedWidth, height: resolvedHeight)
+        if abs(textView.frame.origin.x - targetFrame.origin.x) > 0.01 ||
+            abs(textView.frame.origin.y - targetFrame.origin.y) > 0.01 ||
+            abs(textView.frame.width - targetFrame.width) > 0.5 ||
+            abs(textView.frame.height - targetFrame.height) > 0.5 {
+            textView.frame = targetFrame
+        }
+        if textView.textContainerInset != .zero {
+            textView.textContainerInset = .zero
+        }
 
         if let textContainer = textView.textContainer,
            abs(textContainer.containerSize.width - resolvedWidth) > 0.5 {
@@ -264,8 +272,16 @@ private struct FocusModeEditableTextRenderer: NSViewRepresentable {
 
         let resolvedWidth = max(1, textWidth)
         let resolvedHeight = max(1, bodyHeight)
-        textView.frame = NSRect(x: 0, y: 0, width: resolvedWidth, height: resolvedHeight)
-        textView.textContainerInset = .zero
+        let targetFrame = NSRect(x: 0, y: 0, width: resolvedWidth, height: resolvedHeight)
+        if abs(textView.frame.origin.x - targetFrame.origin.x) > 0.01 ||
+            abs(textView.frame.origin.y - targetFrame.origin.y) > 0.01 ||
+            abs(textView.frame.width - targetFrame.width) > 0.5 ||
+            abs(textView.frame.height - targetFrame.height) > 0.5 {
+            textView.frame = targetFrame
+        }
+        if textView.textContainerInset != .zero {
+            textView.textContainerInset = .zero
+        }
 
         if let textContainer = textView.textContainer {
             if abs(textContainer.containerSize.width - resolvedWidth) > 0.5 {
@@ -436,6 +452,8 @@ struct MainWorkspaceEditableTextRenderer: NSViewRepresentable {
         var focusSettled = false
         private var lastLoggedLayoutBodyBucket: Int?
         private var lastLoggedLayoutFrameBucket: String?
+        private var lastReportedMeasuredBodyHeight: CGFloat?
+        private var lastReportedMeasuredBodyCardID: UUID?
 
         init(_ parent: MainWorkspaceEditableTextRenderer) {
             self.parent = parent
@@ -507,7 +525,6 @@ struct MainWorkspaceEditableTextRenderer: NSViewRepresentable {
 
         func textViewDidChangeSelection(_ notification: Notification) {
             guard let textView = notification.object as? NSTextView else { return }
-            reportLayout(from: textView, reason: "selection")
             log("appkit-inline-selection-change", textView)
         }
 
@@ -518,7 +535,26 @@ struct MainWorkspaceEditableTextRenderer: NSViewRepresentable {
 
         func reportLayout(from textView: NSTextView, reason: String) {
             let measured = sharedLiveTextViewBodyHeight(textView)
-            parent.onMeasuredBodyHeightChange(measured)
+            let previousReportedHeight = lastReportedMeasuredBodyHeight
+            let shouldReportMeasuredHeight: Bool
+            if lastReportedMeasuredBodyCardID != parent.cardID {
+                shouldReportMeasuredHeight = true
+            } else {
+                let threshold = MainEditorLayoutMetrics.mainEditorHeightUpdateThreshold
+                switch (previousReportedHeight, measured) {
+                case let (previous?, current?):
+                    shouldReportMeasuredHeight = abs(previous - current) > threshold
+                case (nil, nil):
+                    shouldReportMeasuredHeight = false
+                default:
+                    shouldReportMeasuredHeight = true
+                }
+            }
+            if shouldReportMeasuredHeight {
+                lastReportedMeasuredBodyCardID = parent.cardID
+                lastReportedMeasuredBodyHeight = measured
+                parent.onMeasuredBodyHeightChange(measured)
+            }
 
             let bodyBucket = measured.map { Int(($0 * 10).rounded()) } ?? -1
             let frameBucket = "\(Int((textView.frame.width * 10).rounded()))x\(Int((textView.frame.height * 10).rounded()))"
@@ -536,6 +572,14 @@ struct MainWorkspaceEditableTextRenderer: NSViewRepresentable {
                     "reason=\(reason) measured=\(measuredSummary)"
                 )
             }
+        }
+
+        func handleLayoutPass(_ textView: NSTextView) {
+            reportLayout(from: textView, reason: "layout")
+        }
+
+        func handleFocusStateChange(_ isFocused: Bool) {
+            parent.onFocusStateChange(isFocused)
         }
 
         func requestFocus(for textView: NSTextView, remainingRetries: Int = 4) {
@@ -597,10 +641,12 @@ struct MainWorkspaceEditableTextRenderer: NSViewRepresentable {
         let textView = TextView(frame: NSRect(x: 0, y: 0, width: textWidth, height: bodyHeight))
         textView.debugCardID = cardID
         textView.fixedTextWidth = round(textWidth)
-        textView.onLayoutPass = { liveTextView in
-            context.coordinator.reportLayout(from: liveTextView, reason: "layout")
+        textView.onLayoutPass = { [weak coordinator = context.coordinator] liveTextView in
+            coordinator?.handleLayoutPass(liveTextView)
         }
-        textView.focusStateHandler = onFocusStateChange
+        textView.focusStateHandler = { [weak coordinator = context.coordinator] isFocused in
+            coordinator?.handleFocusStateChange(isFocused)
+        }
         textView.delegate = context.coordinator
         textView.isEditable = true
         textView.isSelectable = true
@@ -637,12 +683,13 @@ struct MainWorkspaceEditableTextRenderer: NSViewRepresentable {
             textView.delegate = context.coordinator
         }
         if let textView = textView as? TextView {
-            textView.debugCardID = cardID
-            textView.fixedTextWidth = round(textWidth)
-            textView.onLayoutPass = { liveTextView in
-                context.coordinator.reportLayout(from: liveTextView, reason: "layout")
+            if textView.debugCardID != cardID {
+                textView.debugCardID = cardID
             }
-            textView.focusStateHandler = onFocusStateChange
+            let resolvedTextWidth = round(textWidth)
+            if abs(textView.fixedTextWidth - resolvedTextWidth) > 0.5 {
+                textView.fixedTextWidth = resolvedTextWidth
+            }
         }
         context.coordinator.log("appkit-inline-update", textView, "focused=\(isFocused)")
         if context.coordinator.sessionEnded && !isFocused {
@@ -676,8 +723,16 @@ struct MainWorkspaceEditableTextRenderer: NSViewRepresentable {
 
         let resolvedWidth = max(1, textWidth)
         let resolvedHeight = max(1, bodyHeight)
-        textView.frame = NSRect(x: 0, y: 0, width: resolvedWidth, height: resolvedHeight)
-        textView.textContainerInset = .zero
+        let targetFrame = NSRect(x: 0, y: 0, width: resolvedWidth, height: resolvedHeight)
+        if abs(textView.frame.origin.x - targetFrame.origin.x) > 0.01 ||
+            abs(textView.frame.origin.y - targetFrame.origin.y) > 0.01 ||
+            abs(textView.frame.width - targetFrame.width) > 0.5 ||
+            abs(textView.frame.height - targetFrame.height) > 0.5 {
+            textView.frame = targetFrame
+        }
+        if textView.textContainerInset != .zero {
+            textView.textContainerInset = .zero
+        }
 
         if let textContainer = textView.textContainer {
             if abs(textContainer.containerSize.width - resolvedWidth) > 0.5 {
@@ -686,10 +741,18 @@ struct MainWorkspaceEditableTextRenderer: NSViewRepresentable {
             if abs(textContainer.lineFragmentPadding - MainEditorLayoutMetrics.mainEditorLineFragmentPadding) > 0.01 {
                 textContainer.lineFragmentPadding = MainEditorLayoutMetrics.mainEditorLineFragmentPadding
             }
-            textContainer.lineBreakMode = .byWordWrapping
-            textContainer.maximumNumberOfLines = 0
-            textContainer.widthTracksTextView = false
-            textContainer.heightTracksTextView = false
+            if textContainer.lineBreakMode != .byWordWrapping {
+                textContainer.lineBreakMode = .byWordWrapping
+            }
+            if textContainer.maximumNumberOfLines != 0 {
+                textContainer.maximumNumberOfLines = 0
+            }
+            if textContainer.widthTracksTextView {
+                textContainer.widthTracksTextView = false
+            }
+            if textContainer.heightTracksTextView {
+                textContainer.heightTracksTextView = false
+            }
         }
 
         let font = resolveFocusModeTextFont(fontSize)
@@ -752,8 +815,6 @@ struct MainWorkspaceEditableTextRenderer: NSViewRepresentable {
         if isFocused && !coordinator.focusSettled {
             coordinator.requestFocus(for: textView)
         }
-
-        coordinator.reportLayout(from: textView, reason: "updateNSView")
     }
 }
 
@@ -1047,6 +1108,7 @@ struct CardItem: View {
     var mainEditorSlotCoordinateSpaceName: String? = nil
     var mainEditorManagedExternally: Bool = false
     var usesExternalMainEditor: Bool = false
+    var disablesInlineMainEditorFallback: Bool = false
     var externalEditorLiveBodyHeight: CGFloat? = nil
     var onMainEditorMount: ((UUID) -> Void)? = nil
     var onMainEditorUnmount: ((UUID) -> Void)? = nil
@@ -1076,7 +1138,7 @@ struct CardItem: View {
     private let mainEditorVerticalPadding: CGFloat = 24
     private let mainEditorLineFragmentPadding: CGFloat = MainEditorLayoutMetrics.mainEditorLineFragmentPadding
     private let mainEditingMeasureMinInterval: TimeInterval = 0.033
-    private let mainEditingMeasureUpdateThreshold: CGFloat = 0.5
+    private let mainEditingMeasureUpdateThreshold: CGFloat = MainEditorLayoutMetrics.mainEditorHeightUpdateThreshold
     private var mainEditorHorizontalPadding: CGFloat {
         MainEditorLayoutMetrics.mainEditorHorizontalPadding
     }
@@ -1247,6 +1309,11 @@ struct CardItem: View {
         max(1, preferredTextMeasureWidth)
     }
 
+    private var alignedMainCardDisplayTextWidth: CGFloat? {
+        guard mainEditorSlotCoordinateSpaceName != nil else { return nil }
+        return max(1, preferredTextMeasureWidth - (mainEditorLineFragmentPadding * 2))
+    }
+
     private var mainEditorBodyRenderedExternally: Bool {
         mainEditorManagedExternally || usesExternalMainEditor
     }
@@ -1261,6 +1328,7 @@ struct CardItem: View {
                     ? (appearance == "light" ? .black.opacity(0.4) : .white.opacity(0.4))
                     : (appearance == "light" ? .black : .white)
             )
+            .frame(width: alignedMainCardDisplayTextWidth, alignment: .leading)
             .padding(mainCardContentPadding)
             .frame(maxWidth: .infinity, alignment: .leading)
             .fixedSize(horizontal: false, vertical: true)
@@ -1311,6 +1379,7 @@ struct CardItem: View {
     }
 
     private func refreshMainEditingMeasuredBodyHeight() {
+        guard !mainEditorBodyRenderedExternally else { return }
         let liveBodyHeight = liveMainResponderBodyHeight()
         let measured = liveBodyHeight
             ?? measureMainEditorBodyHeight(text: card.content, width: mainEditingTextMeasureWidth)
@@ -1327,22 +1396,13 @@ struct CardItem: View {
         }
     }
 
-    private func updateMainEditingMeasuredBodyHeight(_ measured: CGFloat?, source: String) {
-        guard let measured, measured > 0 else { return }
-        mainEditingMeasureLastAt = Date()
-        let previous = mainEditingMeasuredBodyHeight
-        if abs(previous - measured) > mainEditingMeasureUpdateThreshold {
-            mainEditingMeasuredBodyHeight = measured
-            mainWorkspacePhase0Log(
-                "inline-editor-row-height",
-                "card=\(mainWorkspacePhase0CardID(card.id)) source=\(source) " +
-                "body=\(measured) row=\(measured + (mainEditorVerticalPadding * 2)) previous=\(previous) " +
-                "isEditing=\(isEditing) responder=\(mainWorkspacePhase0ResponderSummary(expectedText: card.content))"
-            )
-        }
-    }
-
     private func scheduleMainEditingMeasuredBodyHeightRefresh(immediate: Bool = false) {
+        guard !mainEditorBodyRenderedExternally else {
+            mainEditingMeasureWorkItem?.cancel()
+            mainEditingMeasureWorkItem = nil
+            return
+        }
+
         if immediate {
             mainEditingMeasureWorkItem?.cancel()
             mainEditingMeasureWorkItem = nil
@@ -1404,13 +1464,14 @@ struct CardItem: View {
                 mainCardDisplayText
             }
 
-            if mainEditorBodyRenderedExternally {
+            if mainEditorBodyRenderedExternally || (isEditing && disablesInlineMainEditorFallback) {
                 externalMainEditorPlaceholder
                     .onAppear {
                         mainWorkspacePhase0Log(
                             "inline-editor-placeholder-appear",
                             "card=\(mainWorkspacePhase0CardID(card.id)) active=\(isActive) selected=\(isSelected) " +
                             "managedExternally=\(mainEditorManagedExternally) usesExternal=\(usesExternalMainEditor) " +
+                            "fallbackDisabled=\(disablesInlineMainEditorFallback) " +
                             "body=\(resolvedMainEditingBodyHeight)"
                         )
                     }
@@ -1418,7 +1479,8 @@ struct CardItem: View {
                         mainWorkspacePhase0Log(
                             "inline-editor-placeholder-disappear",
                             "card=\(mainWorkspacePhase0CardID(card.id)) managedExternally=\(mainEditorManagedExternally) " +
-                            "usesExternal=\(usesExternalMainEditor) body=\(resolvedMainEditingBodyHeight)"
+                            "usesExternal=\(usesExternalMainEditor) fallbackDisabled=\(disablesInlineMainEditorFallback) " +
+                            "body=\(resolvedMainEditingBodyHeight)"
                         )
                     }
             } else if isEditing {
@@ -1750,7 +1812,7 @@ struct CardItem: View {
                 "card=\(mainWorkspacePhase0CardID(card.id)) isEditing=\(newValue) active=\(isActive) " +
                 "measuredBody=\(mainEditingMeasuredBodyHeight) responder=\(mainWorkspacePhase0ResponderSummary(expectedText: card.content))"
             )
-            if newValue {
+            if newValue && !mainEditorBodyRenderedExternally {
                 scheduleMainEditingMeasuredBodyHeightRefresh(immediate: true)
             } else {
                 mainEditingMeasureWorkItem?.cancel()

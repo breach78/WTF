@@ -489,10 +489,15 @@ extension ScenarioWriterView {
         "main-column-viewport:\(viewportKey)"
     }
 
+    private var isMainWorkspaceEditorSurfaceActive: Bool {
+        !showFocusMode && !isIndexBoardActive
+    }
+
     func resolvedVisibleMainEditorHostTargetID(
         viewportKey: String,
         cards: [SceneCard]? = nil
     ) -> UUID? {
+        guard isMainWorkspaceEditorSurfaceActive else { return nil }
         guard let mountedCardID = mainEditorSession.mountedCardID else { return nil }
         if let cards, !cards.contains(where: { $0.id == mountedCardID }) {
             return nil
@@ -507,6 +512,7 @@ extension ScenarioWriterView {
         viewportKey: String,
         cards: [SceneCard]
     ) -> UUID? {
+        guard isMainWorkspaceEditorSurfaceActive else { return nil }
         let candidateIDs = [mainEditorSession.requestedCardID, mainEditorSession.mountedCardID].compactMap { $0 }
 
         for candidateID in candidateIDs {
@@ -552,7 +558,8 @@ extension ScenarioWriterView {
         viewportKey: String,
         cards: [SceneCard]
     ) -> Bool {
-        resolvedMainColumnEditorHostTargetID(viewportKey: viewportKey, cards: cards) == cardID
+        guard isMainWorkspaceEditorSurfaceActive else { return false }
+        return resolvedMainColumnEditorHostTargetID(viewportKey: viewportKey, cards: cards) == cardID
     }
 
     func resolvedMainColumnEditingHostCard(
@@ -597,11 +604,20 @@ extension ScenarioWriterView {
     func updateMainEditorMeasuredBodyHeight(cardID: UUID, measured: CGFloat?) {
         guard mainEditorSession.requestedCardID == cardID || mainEditorSession.mountedCardID == cardID else { return }
         let resolvedHeight = (measured ?? 0) > 1 ? measured : nil
-        guard mainEditorSession.liveBodyHeight != resolvedHeight else { return }
+        let previous = mainEditorSession.liveBodyHeight
+        let threshold = MainEditorLayoutMetrics.mainEditorHeightUpdateThreshold
+        if let previous, let resolvedHeight,
+           abs(previous - resolvedHeight) <= threshold {
+            return
+        }
+        if previous == nil && resolvedHeight == nil {
+            return
+        }
         mainEditorSession.liveBodyHeight = resolvedHeight
         mainWorkspacePhase0Log(
             "main-editor-session",
-            "phase=measure card=\(mainWorkspacePhase0CardID(cardID)) body=\(resolvedHeight.map { String(format: "%.1f", $0) } ?? "nil")"
+            "phase=measure card=\(mainWorkspacePhase0CardID(cardID)) body=\(resolvedHeight.map { String(format: "%.1f", $0) } ?? "nil") " +
+            "previous=\(previous.map { String(format: "%.1f", $0) } ?? "nil")"
         )
     }
 
@@ -1026,6 +1042,16 @@ extension ScenarioWriterView {
             return true
         }
         return isMainEditingTransitionPending(targetCardID: targetCardID)
+    }
+
+    private func shouldSuppressMainColumnFocusVerificationDuringEditing(
+        authority: MainVerticalScrollAuthority?,
+        targetCardID: UUID
+    ) -> Bool {
+        if authority?.kind == .editingTransition {
+            return false
+        }
+        return shouldSuppressGeneralMainCanvasScrollDuringEditing(targetCardID: targetCardID)
     }
 
     func beginMainEditingScrollIsolation(
@@ -2855,6 +2881,12 @@ extension ScenarioWriterView {
         authority: MainVerticalScrollAuthority? = nil
     ) {
         cancelPendingMainColumnFocusVerificationWorkItem(for: viewportKey)
+        if shouldSuppressMainColumnFocusVerificationDuringEditing(
+            authority: authority,
+            targetCardID: targetID
+        ) {
+            return
+        }
         let delay: TimeInterval
         if animated {
             delay = attempt == 0 ? 0.18 : 0.10
@@ -2873,6 +2905,10 @@ extension ScenarioWriterView {
 
             guard !showFocusMode else { return }
             guard acceptsKeyboardInput else { return }
+            guard !shouldSuppressMainColumnFocusVerificationDuringEditing(
+                authority: authority,
+                targetCardID: targetID
+            ) else { return }
             guard isMainVerticalScrollAuthorityCurrent(authority, viewportKey: viewportKey) else { return }
             guard resolvedMainColumnFocusTargetID(in: cards) == targetID else { return }
             let hasObservedTargetFrame = observedMainColumnTargetFrame(
@@ -3252,7 +3288,8 @@ extension ScenarioWriterView {
             cards: columnCards
         )
         let mainEditorManagedExternally =
-            mainEditorSession.requestedCardID == card.id || mainEditorSession.mountedCardID == card.id
+            isMainWorkspaceEditorSurfaceActive &&
+            (mainEditorSession.requestedCardID == card.id || mainEditorSession.mountedCardID == card.id)
         CardItem(
             card: card,
             renderSettings: mainCardRenderSettings,
@@ -3342,6 +3379,7 @@ extension ScenarioWriterView {
             mainEditorSlotCoordinateSpaceName: editorCoordinateSpaceName,
             mainEditorManagedExternally: mainEditorManagedExternally,
             usesExternalMainEditor: usesExternalMainEditor,
+            disablesInlineMainEditorFallback: true,
             externalEditorLiveBodyHeight:
                 usesExternalMainEditor &&
                 mainEditorSession.mountedCardID == card.id
@@ -4266,6 +4304,8 @@ extension ScenarioWriterView {
         clearMainEditingScrollIsolation(reason: "resetEditingTransientState")
         editingCardID = nil
         pendingMainEditingBoundaryNavigationTargetID = nil
+        pendingMainEditingViewportKeepVisibleCardID = nil
+        pendingMainEditingViewportRevealEdge = nil
         editingStartContent = ""
         editingIsNewCard = false
         editingStartState = nil

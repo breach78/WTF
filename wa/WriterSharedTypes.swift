@@ -160,6 +160,7 @@ enum FocusModeLayoutMetrics {
 enum MainEditorLayoutMetrics {
     static let mainCardContentPadding: CGFloat = 24
     static let mainEditorLineFragmentPadding: CGFloat = 5
+    static let mainEditorHeightUpdateThreshold: CGFloat = 0.5
     static var mainEditorHorizontalPadding: CGFloat {
         max(0, mainCardContentPadding - mainEditorLineFragmentPadding)
     }
