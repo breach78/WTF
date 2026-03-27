@@ -102,7 +102,7 @@ extension ScenarioWriterView {
 
     func prepareCardForContextMenuAIAction(_ card: SceneCard) {
         suppressMainFocusRestoreAfterFinishEditing = true
-        finishEditing()
+        finishEditing(reason: .transition)
         selectedCardIDs = [card.id]
         changeActiveCard(to: card, shouldFocusMain: false)
     }
@@ -119,7 +119,7 @@ extension ScenarioWriterView {
     func prepareCardForContextMenuAISummaryAction(_ card: SceneCard) -> [UUID] {
         let sourceCards = summarySourceCards(contextCard: card)
         suppressMainFocusRestoreAfterFinishEditing = true
-        finishEditing()
+        finishEditing(reason: .transition)
         if sourceCards.count == 1 {
             selectedCardIDs = [card.id]
         }
@@ -201,7 +201,7 @@ extension ScenarioWriterView {
     }
 
     func requestAICandidates(action: AICardAction, selectedOptions: Set<AIGenerationOption>) {
-        finishEditing()
+        finishEditing(reason: .transition)
         pruneAICandidateTracking()
 
         guard let parentID = activeCardID,
@@ -331,7 +331,7 @@ extension ScenarioWriterView {
         }
 
         suppressMainFocusRestoreAfterFinishEditing = true
-        finishEditing()
+        finishEditing(reason: .transition)
         selectedCardIDs = Set(request.sourceCardIDs)
         changeActiveCard(to: contextCard, shouldFocusMain: false)
 
@@ -444,7 +444,7 @@ extension ScenarioWriterView {
     }
 
     func applySelectedAICandidateToParent(candidateID: UUID? = nil) {
-        finishEditing()
+        finishEditing(reason: .transition)
         pruneAICandidateTracking()
 
         guard let parentID = aiCandidateState.parentID,

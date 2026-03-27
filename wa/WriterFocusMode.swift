@@ -808,7 +808,7 @@ extension ScenarioWriterView {
             guard hadEditingState else { return }
             focusModeEditorCardID = nil
             if editingCardID != nil {
-                finishEditing()
+                finishEditing(reason: .explicitExit)
             }
         }
         return true
@@ -2820,7 +2820,7 @@ extension ScenarioWriterView {
         if showFocusMode, editingCardID != nil, editingCardID != targetCardID {
             commitFocusModeCardEditIfNeeded()
         } else if editingCardID != nil, editingCardID != targetCardID {
-            finishEditing()
+            finishEditing(reason: .transition)
         }
     }
 
@@ -3470,7 +3470,7 @@ extension ScenarioWriterView {
         beginFocusModeExitTeardownWindow()
         pendingFocusModeEntryCaretHint = nil
         focusPendingProgrammaticBeginEditCardID = nil
-        finishEditing()
+        finishEditing(reason: .transition)
         focusModeEditorCardID = nil
         clearFocusBoundaryArm()
     }

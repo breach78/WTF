@@ -51,7 +51,7 @@ extension ScenarioWriterView {
     func openIndexBoardTimelineResultInMainWorkspace(_ card: SceneCard, beginEditing: Bool) {
         guard findCard(by: card.id) != nil else { return }
         teardownIndexBoardIfNeeded(restoreEntryState: false)
-        finishEditing()
+        finishEditing(reason: .transition)
         selectedCardIDs = [card.id]
         keyboardRangeSelectionAnchorCardID = card.id
         changeActiveCard(

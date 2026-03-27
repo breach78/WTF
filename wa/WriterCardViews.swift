@@ -542,6 +542,7 @@ struct MainWorkspaceEditableTextRenderer: NSViewRepresentable {
             pendingFocusRetry?.cancel()
             let work = DispatchWorkItem { [weak textView, weak self] in
                 guard let self, let textView else { return }
+                self.pendingFocusRetry = nil
                 guard self.parent.isFocused else {
                     self.log("appkit-inline-focus-skip", textView, "reason=notFocused")
                     return
@@ -568,7 +569,11 @@ struct MainWorkspaceEditableTextRenderer: NSViewRepresentable {
                 }
             }
             pendingFocusRetry = work
-            DispatchQueue.main.async(execute: work)
+            if Thread.isMainThread, textView.window != nil {
+                work.perform()
+            } else {
+                DispatchQueue.main.async(execute: work)
+            }
         }
     }
 
@@ -1139,7 +1144,7 @@ struct CardItem: View {
     }
 
     private var shouldShowInlineInsertControls: Bool {
-        !isArchived && !isEditing
+        !isArchived && !isEditing && !mainEditorBodyRenderedExternally
     }
 
     private var bodyDropTrailingInset: CGFloat {
@@ -1242,8 +1247,27 @@ struct CardItem: View {
         max(1, preferredTextMeasureWidth)
     }
 
+    private var mainEditorBodyRenderedExternally: Bool {
+        mainEditorManagedExternally || usesExternalMainEditor
+    }
+
+    @ViewBuilder
+    private var mainCardDisplayText: some View {
+        Text(card.content.isEmpty ? "내용 없음" : card.content)
+            .font(.custom("SansMonoCJKFinalDraft", size: fontSize))
+            .lineSpacing(mainCardLineSpacing)
+            .foregroundStyle(
+                card.content.isEmpty
+                    ? (appearance == "light" ? .black.opacity(0.4) : .white.opacity(0.4))
+                    : (appearance == "light" ? .black : .white)
+            )
+            .padding(mainCardContentPadding)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
     private var resolvedMainEditingBodyHeight: CGFloat {
-        if usesExternalMainEditor {
+        if mainEditorBodyRenderedExternally {
             if let externalEditorLiveBodyHeight, externalEditorLiveBodyHeight > 1 {
                 return externalEditorLiveBodyHeight
             }
@@ -1344,7 +1368,18 @@ struct CardItem: View {
     }
 
     private var shouldReportMainEditorSlotFrame: Bool {
-        mainEditorSlotCoordinateSpaceName != nil && (isActive || isEditing || usesExternalMainEditor)
+        mainEditorSlotCoordinateSpaceName != nil && (isActive || isEditing || mainEditorBodyRenderedExternally)
+    }
+
+    private var externalMainEditorPlaceholder: some View {
+        Color.clear
+            .frame(
+                width: MainCanvasLayoutMetrics.textWidth,
+                height: resolvedMainEditingBodyHeight,
+                alignment: .topLeading
+            )
+            .padding(.horizontal, mainEditorHorizontalPadding)
+            .padding(.vertical, mainEditorVerticalPadding)
     }
 
     @ViewBuilder
@@ -1365,18 +1400,34 @@ struct CardItem: View {
     @ViewBuilder
     private var cardEditorSlotContent: some View {
         ZStack(alignment: .topLeading) {
-            if !isEditing && !usesExternalMainEditor {
-                Text(card.content.isEmpty ? "내용 없음" : card.content)
-                    .font(.custom("SansMonoCJKFinalDraft", size: fontSize))
-                    .lineSpacing(mainCardLineSpacing)
-                    .foregroundStyle(card.content.isEmpty ? (appearance == "light" ? .black.opacity(0.4) : .white.opacity(0.4)) : (appearance == "light" ? .black : .white))
-                    .padding(mainCardContentPadding)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .fixedSize(horizontal: false, vertical: true)
+            if !isEditing && !mainEditorBodyRenderedExternally {
+                mainCardDisplayText
             }
 
-            if !isEditing && usesExternalMainEditor {
-                Color.clear
+            if mainEditorBodyRenderedExternally {
+                externalMainEditorPlaceholder
+                    .onAppear {
+                        mainWorkspacePhase0Log(
+                            "inline-editor-placeholder-appear",
+                            "card=\(mainWorkspacePhase0CardID(card.id)) active=\(isActive) selected=\(isSelected) " +
+                            "managedExternally=\(mainEditorManagedExternally) usesExternal=\(usesExternalMainEditor) " +
+                            "body=\(resolvedMainEditingBodyHeight)"
+                        )
+                    }
+                    .onDisappear {
+                        mainWorkspacePhase0Log(
+                            "inline-editor-placeholder-disappear",
+                            "card=\(mainWorkspacePhase0CardID(card.id)) managedExternally=\(mainEditorManagedExternally) " +
+                            "usesExternal=\(usesExternalMainEditor) body=\(resolvedMainEditingBodyHeight)"
+                        )
+                    }
+            } else if isEditing {
+                TextEditor(text: mainEditorTextBinding)
+                    .font(.custom("SansMonoCJKFinalDraft", size: fontSize))
+                    .lineSpacing(mainCardLineSpacing)
+                    .scrollContentBackground(.hidden)
+                    .scrollDisabled(true)
+                    .scrollIndicators(.never)
                     .frame(
                         width: MainCanvasLayoutMetrics.textWidth,
                         height: resolvedMainEditingBodyHeight,
@@ -1384,96 +1435,56 @@ struct CardItem: View {
                     )
                     .padding(.horizontal, mainEditorHorizontalPadding)
                     .padding(.vertical, mainEditorVerticalPadding)
-            }
-
-            if isEditing {
-                if usesExternalMainEditor {
-                    Color.clear
-                        .frame(
-                            width: MainCanvasLayoutMetrics.textWidth,
-                            height: resolvedMainEditingBodyHeight,
-                            alignment: .topLeading
+                    .foregroundStyle(appearance == "light" ? .black : .white)
+                    .focused($editorFocus)
+                    .onAppear {
+                        onMainEditorMount?(card.id)
+                        mainWorkspacePhase0Log(
+                            "inline-editor-appear",
+                            "card=\(mainWorkspacePhase0CardID(card.id)) active=\(isActive) selected=\(isSelected) " +
+                            "measuredBody=\(mainEditingMeasuredBodyHeight) responder=\(mainWorkspacePhase0ResponderSummary(expectedText: card.content))"
                         )
-                        .padding(.horizontal, mainEditorHorizontalPadding)
-                        .padding(.vertical, mainEditorVerticalPadding)
-                        .onAppear {
-                            mainWorkspacePhase0Log(
-                                "inline-editor-placeholder-appear",
-                                "card=\(mainWorkspacePhase0CardID(card.id)) active=\(isActive) selected=\(isSelected) " +
-                                "body=\(resolvedMainEditingBodyHeight)"
-                            )
-                        }
-                        .onDisappear {
-                            mainWorkspacePhase0Log(
-                                "inline-editor-placeholder-disappear",
-                                "card=\(mainWorkspacePhase0CardID(card.id)) body=\(resolvedMainEditingBodyHeight)"
-                            )
-                        }
-                } else {
-                    TextEditor(text: mainEditorTextBinding)
-                        .font(.custom("SansMonoCJKFinalDraft", size: fontSize))
-                        .lineSpacing(mainCardLineSpacing)
-                        .scrollContentBackground(.hidden)
-                        .scrollDisabled(true)
-                        .scrollIndicators(.never)
-                        .frame(
-                            width: MainCanvasLayoutMetrics.textWidth,
-                            height: resolvedMainEditingBodyHeight,
-                            alignment: .topLeading
-                        )
-                        .padding(.horizontal, mainEditorHorizontalPadding)
-                        .padding(.vertical, mainEditorVerticalPadding)
-                        .foregroundStyle(appearance == "light" ? .black : .white)
-                        .focused($editorFocus)
-                        .onAppear {
-                            onMainEditorMount?(card.id)
-                            mainWorkspacePhase0Log(
-                                "inline-editor-appear",
-                                "card=\(mainWorkspacePhase0CardID(card.id)) active=\(isActive) selected=\(isSelected) " +
-                                "measuredBody=\(mainEditingMeasuredBodyHeight) responder=\(mainWorkspacePhase0ResponderSummary(expectedText: card.content))"
-                            )
-                            scheduleMainEditingMeasuredBodyHeightRefresh(immediate: true)
-                            DispatchQueue.main.async {
-                                let alreadyFocusedHere: Bool = {
-                                    guard let textView = NSApp.keyWindow?.firstResponder as? NSTextView else { return false }
-                                    return textView.string == card.content
-                                }()
-                                if !alreadyFocusedHere {
-                                    editorFocus = true
-                                }
-                                mainWorkspacePhase0Log(
-                                    "inline-editor-focus-request",
-                                    "card=\(mainWorkspacePhase0CardID(card.id)) alreadyFocused=\(alreadyFocusedHere) " +
-                                    "editorFocus=\(editorFocus) responder=\(mainWorkspacePhase0ResponderSummary(expectedText: card.content))"
-                                )
-                                scheduleMainEditingMeasuredBodyHeightRefresh(immediate: true)
+                        scheduleMainEditingMeasuredBodyHeightRefresh(immediate: true)
+                        DispatchQueue.main.async {
+                            let alreadyFocusedHere: Bool = {
+                                guard let textView = NSApp.keyWindow?.firstResponder as? NSTextView else { return false }
+                                return textView.string == card.content
+                            }()
+                            if !alreadyFocusedHere {
+                                editorFocus = true
                             }
-                        }
-                        .onDisappear {
-                            onMainEditorUnmount?(card.id)
                             mainWorkspacePhase0Log(
-                                "inline-editor-disappear",
-                                "card=\(mainWorkspacePhase0CardID(card.id)) measuredBody=\(mainEditingMeasuredBodyHeight) " +
-                                "responder=\(mainWorkspacePhase0ResponderSummary(expectedText: card.content))"
+                                "inline-editor-focus-request",
+                                "card=\(mainWorkspacePhase0CardID(card.id)) alreadyFocused=\(alreadyFocusedHere) " +
+                                "editorFocus=\(editorFocus) responder=\(mainWorkspacePhase0ResponderSummary(expectedText: card.content))"
                             )
-                            mainEditingMeasureWorkItem?.cancel()
-                            mainEditingMeasureWorkItem = nil
-                        }
-                        .onChange(of: editorFocus) { _, newValue in
-                            onMainEditorFocusStateChange?(card.id, newValue)
-                            mainWorkspacePhase0Log(
-                                "inline-editor-focus-state",
-                                "card=\(mainWorkspacePhase0CardID(card.id)) focused=\(newValue) " +
-                                "responder=\(mainWorkspacePhase0ResponderSummary(expectedText: card.content))"
-                            )
-                        }
-                        .onChange(of: fontSize) { _, _ in
                             scheduleMainEditingMeasuredBodyHeightRefresh(immediate: true)
                         }
-                        .onChange(of: mainCardLineSpacing) { _, _ in
-                            scheduleMainEditingMeasuredBodyHeightRefresh(immediate: true)
-                        }
-                }
+                    }
+                    .onDisappear {
+                        onMainEditorUnmount?(card.id)
+                        mainWorkspacePhase0Log(
+                            "inline-editor-disappear",
+                            "card=\(mainWorkspacePhase0CardID(card.id)) measuredBody=\(mainEditingMeasuredBodyHeight) " +
+                            "responder=\(mainWorkspacePhase0ResponderSummary(expectedText: card.content))"
+                        )
+                        mainEditingMeasureWorkItem?.cancel()
+                        mainEditingMeasureWorkItem = nil
+                    }
+                    .onChange(of: editorFocus) { _, newValue in
+                        onMainEditorFocusStateChange?(card.id, newValue)
+                        mainWorkspacePhase0Log(
+                            "inline-editor-focus-state",
+                            "card=\(mainWorkspacePhase0CardID(card.id)) focused=\(newValue) " +
+                            "responder=\(mainWorkspacePhase0ResponderSummary(expectedText: card.content))"
+                        )
+                    }
+                    .onChange(of: fontSize) { _, _ in
+                        scheduleMainEditingMeasuredBodyHeightRefresh(immediate: true)
+                    }
+                    .onChange(of: mainCardLineSpacing) { _, _ in
+                        scheduleMainEditingMeasuredBodyHeightRefresh(immediate: true)
+                    }
             }
         }
         .background(cardEditorSlotFrameReporter)

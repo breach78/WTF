@@ -529,7 +529,7 @@ extension ScenarioWriterView {
 
     func presentIndexBoardEditor(for card: SceneCard) {
         guard isIndexBoardActive else { return }
-        finishEditing()
+        finishEditing(reason: .transition)
         let showsBack = activeIndexBoardSession?.showsBackByCardID[card.id] ?? false
         indexBoardEditorDraft = IndexBoardEditorDraft(
             cardID: card.id,

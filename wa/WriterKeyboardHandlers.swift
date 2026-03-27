@@ -4,6 +4,47 @@ import AppKit
 extension ScenarioWriterView {
 
     // --- Key Handling Logic ---
+    private func monitoredMainKeyboardKeyName(for press: KeyPress) -> String? {
+        switch press.key {
+        case .return: "return"
+        case .escape: "escape"
+        case .leftArrow: "left"
+        case .rightArrow: "right"
+        case .upArrow: "up"
+        case .downArrow: "down"
+        default: nil
+        }
+    }
+
+    private func monitoredMainKeyboardKeyName(for event: NSEvent) -> String? {
+        switch event.keyCode {
+        case 36, 76: "return"
+        case 53: "escape"
+        case 123: "left"
+        case 124: "right"
+        case 125: "down"
+        case 126: "up"
+        default: nil
+        }
+    }
+
+    private func logMonitoredMainKeyboardEvent(
+        source: String,
+        key: String,
+        phase: String,
+        details: String = ""
+    ) {
+        let expectedText = (editingCardID ?? activeCardID).flatMap { findCard(by: $0)?.content }
+        let suffix = details.isEmpty ? "" : " \(details)"
+        mainWorkspacePhase0Log(
+            "main-key-flow",
+            "source=\(source) key=\(key) phase=\(phase) " +
+            "active=\(mainWorkspacePhase0CardID(activeCardID)) editing=\(mainWorkspacePhase0CardID(editingCardID)) " +
+            "mainFocused=\(isMainViewFocused) acceptsKeyboard=\(acceptsKeyboardInput) " +
+            "responder=\(mainWorkspacePhase0ResponderSummary(expectedText: expectedText))\(suffix)"
+        )
+    }
+
     func handleGlobalKeyPress(_ press: KeyPress) -> KeyPress.Result {
         if isIndexBoardInlineEditing {
             return .ignored
@@ -11,7 +52,18 @@ extension ScenarioWriterView {
         if let handled = handleSplitPaneCycleShortcut(press) { return handled }
         if let handled = handleIndexBoardToggleShortcut(press) { return handled }
         if let handled = handleIndexBoardKeyPress(press) { return handled }
-        if !acceptsKeyboardInput { return .ignored }
+        let monitoredKey = monitoredMainKeyboardKeyName(for: press)
+        if !acceptsKeyboardInput {
+            if let monitoredKey, press.phase != .repeat {
+                logMonitoredMainKeyboardEvent(
+                    source: "swiftui",
+                    key: monitoredKey,
+                    phase: String(describing: press.phase),
+                    details: "result=ignored reason=acceptsKeyboardInput=false"
+                )
+            }
+            return .ignored
+        }
 
         let isNoModifier =
             !press.modifiers.contains(.command) &&
@@ -21,12 +73,20 @@ extension ScenarioWriterView {
 
         if let handled = handleDeleteAlertShortcut(press) { return handled }
 
-        let isMainEditorTyping = !showHistoryBar && editingCardID != nil
+        let isMainEditorTyping = !showHistoryBar && isMainEditorActivelyTyping()
         let isTimelineSearchTyping = !showHistoryBar && isSearchFocused
         let isHistorySearchTyping = showHistoryBar && isNamedSnapshotSearchFocused
         let isHistoryNoteTyping = showHistoryBar && isNamedSnapshotNoteEditing && isNamedSnapshotNoteEditorFocused
         let isAIChatTyping = !showHistoryBar && showAIChat && isAIChatInputFocused
         let isTyping = isMainEditorTyping || isTimelineSearchTyping || isHistorySearchTyping || isHistoryNoteTyping || isAIChatTyping
+        if let monitoredKey, press.phase != .repeat {
+            logMonitoredMainKeyboardEvent(
+                source: "swiftui",
+                key: monitoredKey,
+                phase: String(describing: press.phase),
+                details: "typing=\(isTyping) mainEditorTyping=\(isMainEditorTyping)"
+            )
+        }
         if let handled = handleDownPhaseShortcuts(
             press,
             isMainEditorTyping: isMainEditorTyping,
@@ -307,16 +367,16 @@ extension ScenarioWriterView {
             let isArmed =
                 mainEditTabArmCardID == editingID &&
                 now.timeIntervalSince(mainEditTabArmAt) <= mainEditDoubleTabInterval
-            if isArmed {
-                clearMainEditTabArm()
-                if editingID != nil {
-                    suppressMainFocusRestoreAfterFinishEditing = true
-                    DispatchQueue.main.async {
-                        finishEditing()
-                        addChildCard()
+                if isArmed {
+                    clearMainEditTabArm()
+                    if editingID != nil {
+                        suppressMainFocusRestoreAfterFinishEditing = true
+                        DispatchQueue.main.async {
+                            finishEditing(reason: .transition)
+                            addChildCard()
+                        }
                     }
-                }
-                return .handled
+                    return .handled
             }
             mainEditTabArmCardID = editingID
             mainEditTabArmAt = now
@@ -346,7 +406,7 @@ extension ScenarioWriterView {
                 clearMainEditTabArm()
                 suppressMainFocusRestoreAfterFinishEditing = true
                 DispatchQueue.main.async {
-                    finishEditing()
+                    finishEditing(reason: .transition)
                     insertSibling(above: false)
                 }
                 return .handled
@@ -364,7 +424,7 @@ extension ScenarioWriterView {
             if isTyping {
                 if editingCardID != nil {
                     clearMainEditTabArm()
-                    DispatchQueue.main.async { finishEditing() }
+                    DispatchQueue.main.async { finishEditing(reason: .explicitExit) }
                 }
                 else if isSearchFocused { DispatchQueue.main.async { closeSearch() } }
                 return .handled
@@ -432,7 +492,7 @@ extension ScenarioWriterView {
             !press.modifiers.contains(.control) &&
             !press.modifiers.contains(.shift) &&
             isPlainPasteShortcut(press) {
-            guard let textView = NSApp.keyWindow?.firstResponder as? NSTextView else {
+            guard let textView = resolvedActiveMainEditorTextView() else {
                 return .ignored
             }
             if handleFountainClipboardPasteShortcutIfPossible(from: textView) {
@@ -501,6 +561,9 @@ extension ScenarioWriterView {
         guard !press.modifiers.contains(.command),
               !press.modifiers.contains(.option),
               !press.modifiers.contains(.control) else { return nil }
+        if editingCardID != nil {
+            return .handled
+        }
         switch press.key {
         case .upArrow, .downArrow, .leftArrow, .rightArrow:
             return handleNavigation(press: press)
@@ -565,15 +628,23 @@ extension ScenarioWriterView {
             DispatchQueue.main.async { addChildCard() }
             return .handled
         case .return:
-            if let activeID = activeCardID {
+            if let card = resolvedMainEditingTargetCard() {
+                logMonitoredMainKeyboardEvent(
+                    source: "swiftui",
+                    key: "return",
+                    phase: "dispatch",
+                    details: "dispatch=beginCardEditing active=\(mainWorkspacePhase0CardID(card.id))"
+                )
                 DispatchQueue.main.async {
-                    if let card = findCard(by: activeID) {
-                        editingStartContent = card.content
-                    }
-                    editingStartState = captureScenarioState()
-                    editingIsNewCard = false
-                    editingCardID = activeID
+                    beginCardEditing(card)
                 }
+            } else {
+                logMonitoredMainKeyboardEvent(
+                    source: "swiftui",
+                    key: "return",
+                    phase: "dispatch",
+                    details: "dispatch=none reason=noActiveCard"
+                )
             }
             return .handled
         default:
@@ -629,6 +700,12 @@ extension ScenarioWriterView {
 
     func handleMainEditorBoundaryCommand(_ commandSelector: Selector) -> Bool {
         switch NSStringFromSelector(commandSelector) {
+        case "cancelOperation:":
+            clearMainEditTabArm()
+            DispatchQueue.main.async {
+                finishEditing(reason: .explicitExit)
+            }
+            return true
         case "moveUp:":
             return handleMainEditorBoundaryNavigation(key: .upArrow, isShiftSelection: false, isRepeat: false)
         case "moveDown:":
@@ -656,18 +733,13 @@ extension ScenarioWriterView {
         isRepeat: Bool
     ) -> Bool {
         if let pendingTarget = pendingMainEditingBoundaryNavigationTargetID {
-            let transitionReady =
-                editingCardID == pendingTarget &&
-                mainEditorSession.requestedCardID == pendingTarget &&
-                mainEditorSession.isFirstResponderReady
-            if !transitionReady {
+            if !isMainEditingBoundaryTransitionReady(for: pendingTarget) {
                 return true
             }
         }
         guard let editingID = editingCardID,
               let editingCard = findCard(by: editingID) else { return false }
-        guard let textView = NSApp.keyWindow?.firstResponder as? NSTextView else { return false }
-        guard textView.string == editingCard.content else { return false }
+        guard let textView = resolvedActiveMainEditorTextView(for: editingID) else { return false }
         guard !textView.hasMarkedText() else { return false }
 
         let levels = resolvedLevelsWithParents().map(\.cards)
@@ -978,7 +1050,7 @@ extension ScenarioWriterView {
     }
 
     func applyMainBoundaryShiftSelection(from editingCard: SceneCard, to target: SceneCard, in level: [SceneCard]) {
-        finishEditing()
+        finishEditing(reason: .transition)
         changeActiveCard(to: target, shouldFocusMain: false, deferToMainAsync: false)
         updateKeyboardRangeSelection(from: editingCard, to: target, in: level)
     }
@@ -992,11 +1064,15 @@ extension ScenarioWriterView {
         let textLength = (target.content as NSString).length
         let safeCaretLocation = min(max(0, caretLocation), textLength)
         if shouldDiscardEmptyNewCardOnBoundaryMove {
-            finishEditing()
+            finishEditing(reason: .transition)
         }
         cancelMainArrowNavigationSettle()
         cancelAllPendingMainColumnFocusWork()
         prepareMainEditorSessionRequest(for: target, explicitCaretLocation: safeCaretLocation)
+        beginMainEditingScrollIsolation(
+            for: target.id,
+            reason: suppressSiblingNavigationScrolls ? "boundary.vertical" : "boundary.horizontal"
+        )
         pendingMainEditingSiblingNavigationTargetID = suppressSiblingNavigationScrolls ? target.id : nil
         pendingMainEditingBoundaryNavigationTargetID = target.id
         if suppressSiblingNavigationScrolls {
@@ -1065,7 +1141,7 @@ extension ScenarioWriterView {
                 if editingCardID != nil {
                     clearMainEditTabArm()
                     DispatchQueue.main.async {
-                        finishEditing()
+                        finishEditing(reason: .explicitExit)
                     }
                     return nil
                 }
@@ -1080,6 +1156,21 @@ extension ScenarioWriterView {
                 }
             }
             let isCmdOnly = flags.contains(.command) && !flags.contains(.option) && !flags.contains(.control) && !flags.contains(.shift)
+            if let monitoredKey = monitoredMainKeyboardKeyName(for: event), !event.isARepeat {
+                logMonitoredMainKeyboardEvent(
+                    source: "local-monitor",
+                    key: monitoredKey,
+                    phase: "down",
+                    details: "keyCode=\(event.keyCode)"
+                )
+            }
+            let isMainEditorTyping = isMainEditorActivelyTyping()
+            let isPlainReturn =
+                (event.keyCode == 36 || event.keyCode == 76) &&
+                !flags.contains(.command) &&
+                !flags.contains(.option) &&
+                !flags.contains(.control) &&
+                !flags.contains(.shift)
             let normalized = (event.charactersIgnoringModifiers ?? "").lowercased()
             let isFindShortcut = normalized == "f" || normalized == "ㄹ" || event.keyCode == 3
             let isCtrlTab = flags.contains(.control) && !flags.contains(.command) && !flags.contains(.option) && !flags.contains(.shift) && event.keyCode == 48
@@ -1094,8 +1185,8 @@ extension ScenarioWriterView {
                 return nil
             }
             let isPasteShortcut = normalized == "v" || normalized == "ㅍ" || event.keyCode == 9
-            if isCmdOnly && editingCardID != nil && isPasteShortcut {
-                if let textView = NSApp.keyWindow?.firstResponder as? NSTextView,
+            if isCmdOnly && isMainEditorTyping && isPasteShortcut {
+                if let textView = resolvedActiveMainEditorTextView(),
                    handleFountainClipboardPasteShortcutIfPossible(from: textView) {
                     return nil
                 }
@@ -1103,73 +1194,53 @@ extension ScenarioWriterView {
             if showAIChat && isAIChatInputFocused {
                 return event
             }
-            if editingCardID != nil {
-                let isPlainEditingArrow =
-                    !flags.contains(.command) &&
-                    !flags.contains(.option) &&
-                    !flags.contains(.control) &&
-                    [123, 124, 125, 126].contains(event.keyCode)
-                if isPlainEditingArrow {
-                    if let pendingTarget = pendingMainEditingBoundaryNavigationTargetID {
-                        let transitionReady =
-                            editingCardID == pendingTarget &&
-                            mainEditorSession.requestedCardID == pendingTarget &&
-                            mainEditorSession.isFirstResponderReady
-                        if !transitionReady {
-                            mainWorkspacePhase0Log(
-                                "main-nav-monitor-editing-arrow-suppressed",
-                                "keyCode=\(event.keyCode) repeat=\(event.isARepeat) reason=boundaryTransitionPending " +
-                                "editing=\(mainWorkspacePhase0CardID(editingCardID)) pending=\(mainWorkspacePhase0CardID(pendingTarget)) " +
-                                "requested=\(mainWorkspacePhase0CardID(mainEditorSession.requestedCardID)) ready=\(mainEditorSession.isFirstResponderReady) " +
-                                "responder=\(mainWorkspacePhase0ResponderSummary(expectedText: editingCardID.flatMap { findCard(by: $0)?.content }))"
-                            )
-                            return nil
-                        }
-                    }
-                    if let editingID = editingCardID,
-                       let editingCard = findCard(by: editingID) {
-                        if let textView = NSApp.keyWindow?.firstResponder as? NSTextView,
-                           !textView.hasMarkedText(),
-                           textView.string != editingCard.content {
-                            mainWorkspacePhase0Log(
-                                "main-nav-monitor-editing-arrow-suppressed",
-                                "keyCode=\(event.keyCode) repeat=\(event.isARepeat) reason=contentMismatch " +
-                                "editing=\(mainWorkspacePhase0CardID(editingCardID)) " +
-                                "responder=\(mainWorkspacePhase0ResponderSummary(expectedText: editingCard.content))"
-                            )
-                            return nil
-                        }
-                        if !(NSApp.keyWindow?.firstResponder is NSTextView) {
-                            mainWorkspacePhase0Log(
-                                "main-nav-monitor-editing-arrow-suppressed",
-                                "keyCode=\(event.keyCode) repeat=\(event.isARepeat) reason=noTextView " +
-                                "editing=\(mainWorkspacePhase0CardID(editingCardID)) " +
-                                "responder=\(mainWorkspacePhase0ResponderSummary(expectedText: editingCard.content))"
-                            )
-                            return nil
-                        }
-                    }
-                    let key: KeyEquivalent? = switch event.keyCode {
-                    case 123: .leftArrow
-                    case 124: .rightArrow
-                    case 125: .downArrow
-                    case 126: .upArrow
-                    default: nil
-                    }
-                    if let key,
-                       handleMainEditorBoundaryNavigation(
-                        key: key,
-                        isShiftSelection: flags.contains(.shift),
-                        isRepeat: event.isARepeat
-                       ) {
-                        mainWorkspacePhase0Log(
-                            "main-nav-monitor-editing-arrow-handled",
-                            "keyCode=\(event.keyCode) repeat=\(event.isARepeat) " +
-                            "editing=\(mainWorkspacePhase0CardID(editingCardID)) " +
-                            "responder=\(mainWorkspacePhase0ResponderSummary(expectedText: editingCardID.flatMap { findCard(by: $0)?.content }))"
-                        )
-                        return nil
-                    }
+            if isPlainReturn && !isMainEditorTyping && !isSearchFocused {
+                guard let card = resolvedMainEditingTargetCard() else {
+                    logMonitoredMainKeyboardEvent(
+                        source: "local-monitor",
+                        key: "return",
+                        phase: "dispatch",
+                        details: "dispatch=none reason=noActiveCard"
+                    )
+                    return event
+                }
+                logMonitoredMainKeyboardEvent(
+                    source: "local-monitor",
+                    key: "return",
+                    phase: "dispatch",
+                    details: "dispatch=beginCardEditing active=\(mainWorkspacePhase0CardID(card.id))"
+                )
+                DispatchQueue.main.async {
+                    beginCardEditing(card)
+                }
+                return nil
+            }
+            let isMainEditingArrow =
+                !flags.contains(.command) &&
+                !flags.contains(.option) &&
+                !flags.contains(.control) &&
+                [123, 124, 125, 126].contains(event.keyCode)
+            if isMainEditingArrow &&
+                editingCardID != nil &&
+                !isMainEditorTyping {
+                mainWorkspacePhase0Log(
+                    "main-nav-monitor-editing-arrow-suppressed",
+                    "keyCode=\(event.keyCode) repeat=\(event.isARepeat) reason=noAuthoritativeTextView " +
+                    "editing=\(mainWorkspacePhase0CardID(editingCardID)) " +
+                    "requested=\(mainWorkspacePhase0CardID(mainEditorSession.requestedCardID)) " +
+                    "pending=\(mainWorkspacePhase0CardID(pendingMainEditingBoundaryNavigationTargetID)) " +
+                    "responder=\(mainWorkspacePhase0ResponderSummary(expectedText: editingCardID.flatMap { findCard(by: $0)?.content }))"
+                )
+                return nil
+            }
+            if isMainEditorTyping {
+                if isMainEditingArrow {
+                    mainWorkspacePhase0Log(
+                        "main-nav-monitor-editing-arrow-pass-through",
+                        "keyCode=\(event.keyCode) repeat=\(event.isARepeat) " +
+                        "editing=\(mainWorkspacePhase0CardID(editingCardID)) " +
+                        "responder=\(mainWorkspacePhase0ResponderSummary(expectedText: editingCardID.flatMap { findCard(by: $0)?.content }))"
+                    )
                 }
                 return event
             }

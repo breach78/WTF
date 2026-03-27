@@ -36,7 +36,7 @@ extension ScenarioWriterView {
             return
         }
 
-        finishEditing()
+        finishEditing(reason: .transition)
         let prevState = captureScenarioState()
         if activeCard.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             activeCard.content = reply
@@ -69,7 +69,7 @@ extension ScenarioWriterView {
             return
         }
 
-        finishEditing()
+        finishEditing(reason: .transition)
         let prevState = captureScenarioState()
         let child = SceneCard(
             content: reply,

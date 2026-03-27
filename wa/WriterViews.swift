@@ -14,6 +14,12 @@ struct MainEditorSessionState: Equatable {
     var liveBodyHeight: CGFloat? = nil
 }
 
+enum FinishEditingReason: String {
+    case generic
+    case explicitExit
+    case transition
+}
+
 // MARK: - ScenarioWriterView (메인 struct + 프로퍼티 + body + 레이아웃)
 
 struct ScenarioWriterView: View {
@@ -113,6 +119,10 @@ struct ScenarioWriterView: View {
     @State var selectedCardIDs: Set<UUID> = []
     @State var editingCardID: UUID? = nil
     @State var mainEditorSession = MainEditorSessionState()
+    @State var mainEditorEntryFinishGuardCardID: UUID? = nil
+    @State var mainEditorEntryFinishGuardUntil: Date = .distantPast
+    @State var mainEditingScrollIsolationUntil: Date = .distantPast
+    @State var mainEditingScrollIsolationTargetCardID: UUID? = nil
     @State var pendingMainPreemptiveFocusNavigationTargetID: UUID? = nil
     @State var indexBoardEditorDraft: IndexBoardEditorDraft? = nil
     @State var isIndexBoardInlineEditing: Bool = false
@@ -1956,7 +1966,7 @@ struct ScenarioWriterView: View {
             if beginEditing {
                 beginCardEditing(requestedCard)
             } else {
-                finishEditing()
+                finishEditing(reason: .transition)
                 selectedCardIDs = [requestedCard.id]
                 keyboardRangeSelectionAnchorCardID = requestedCard.id
                 changeActiveCard(
@@ -2883,7 +2893,7 @@ struct ScenarioWriterView: View {
         if isPreviewingHistory {
             historyPreviewSelectedCardIDs = []
         } else {
-            finishEditing()
+            finishEditing(reason: .transition)
             selectedCardIDs = []
             isMainViewFocused = true
         }
@@ -2908,6 +2918,17 @@ struct ScenarioWriterView: View {
         }
         if pendingMainEditingSiblingNavigationTargetID == id {
             indexBoardRestoreTrace("main_canvas_auto_scroll_skip", "reason=pendingSibling target=\(debugRestoreUUID(id))")
+            return
+        }
+        let suppressEditingAutoScroll =
+            shouldSuppressGeneralMainCanvasScrollDuringEditing(targetCardID: id) &&
+            pendingMainEditingBoundaryNavigationTargetID != id
+        if suppressEditingAutoScroll {
+            indexBoardRestoreTrace(
+                "main_canvas_auto_scroll_skip",
+                "reason=editingIsolation target=\(debugRestoreUUID(id)) isolationTarget=\(debugRestoreUUID(mainEditingScrollIsolationTargetCardID)) " +
+                "until=\(String(format: "%.3f", mainEditingScrollIsolationUntil.timeIntervalSince1970))"
+            )
             return
         }
         let clickFocusedTarget = pendingMainClickHorizontalFocusTargetID == id
@@ -3067,6 +3088,14 @@ struct ScenarioWriterView: View {
         guard acceptsKeyboardInput else { return }
         guard !isPreviewingHistory else { return }
         guard let targetID = activeCardID, findCard(by: targetID) != nil else { return }
+        if shouldSuppressGeneralMainCanvasScrollDuringEditing(targetCardID: targetID) {
+            indexBoardRestoreTrace(
+                "main_canvas_navigation_settle_skip",
+                "reason=editingIsolation target=\(debugRestoreUUID(targetID)) isolationTarget=\(debugRestoreUUID(mainEditingScrollIsolationTargetCardID)) " +
+                "until=\(String(format: "%.3f", mainEditingScrollIsolationUntil.timeIntervalSince1970))"
+            )
+            return
+        }
         scrollToColumnIfNeeded(
             targetCardID: targetID,
             proxy: hProxy,
@@ -3257,7 +3286,20 @@ struct ScenarioWriterView: View {
                 return
             }
             guard !showFocusMode else { return }
-            beginCardEditing(target)
+            finishEditing(reason: .transition)
+            selectedCardIDs = [target.id]
+            keyboardRangeSelectionAnchorCardID = target.id
+            changeActiveCard(
+                to: target,
+                shouldFocusMain: false,
+                deferToMainAsync: false,
+                force: true
+            )
+            scheduleMainCanvasRestoreRequest(
+                targetCardID: target.id,
+                forceSemantic: true
+            )
+            isMainViewFocused = true
         }
     }
 

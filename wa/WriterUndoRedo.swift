@@ -360,7 +360,7 @@ extension ScenarioWriterView {
     }
 
     func performUndo() {
-        finishEditing()
+        finishEditing(reason: .transition)
         guard let previous = undoStack.popLast() else {
             return
         }
@@ -370,7 +370,7 @@ extension ScenarioWriterView {
     }
 
     func performRedo() {
-        finishEditing()
+        finishEditing(reason: .transition)
         guard let next = redoStack.popLast() else {
             return
         }

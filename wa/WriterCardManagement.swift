@@ -89,6 +89,16 @@ extension ScenarioWriterView {
         guard !showFocusMode else { return }
         guard !isPreviewingHistory else { return }
         guard let request = pendingMainCanvasRestoreRequest else { return }
+        if shouldSuppressGeneralMainCanvasScrollDuringEditing(targetCardID: request.targetCardID) {
+            indexBoardRestoreTrace(
+                "main_canvas_restore_skip",
+                "reason=editingIsolation target=\(debugRestoreUUID(request.targetCardID)) request=\(request.reason.rawValue) " +
+                "isolationTarget=\(debugRestoreUUID(mainEditingScrollIsolationTargetCardID)) " +
+                "until=\(String(format: "%.3f", mainEditingScrollIsolationUntil.timeIntervalSince1970))"
+            )
+            pendingMainCanvasRestoreRequest = nil
+            return
+        }
 
         if let visibleLevel = request.visibleLevel {
             lastScrolledLevel = max(0, visibleLevel)
@@ -483,13 +493,11 @@ extension ScenarioWriterView {
         viewportKey: String,
         cards: [SceneCard]? = nil
     ) -> UUID? {
-        let observedFrames = mainColumnObservedEditorSlotFramesByKey[viewportKey] ?? [:]
         guard let mountedCardID = mainEditorSession.mountedCardID else { return nil }
         if let cards, !cards.contains(where: { $0.id == mountedCardID }) {
             return nil
         }
-        guard mainEditorSession.isFirstResponderReady else { return nil }
-        guard let frame = observedFrames[mountedCardID], frame.width > 1, frame.height > 1 else {
+        guard resolvedMainColumnEditorHostFrame(viewportKey: viewportKey, cardID: mountedCardID) != nil else {
             return nil
         }
         return mountedCardID
@@ -499,12 +507,11 @@ extension ScenarioWriterView {
         viewportKey: String,
         cards: [SceneCard]
     ) -> UUID? {
-        let observedFrames = mainColumnObservedEditorSlotFramesByKey[viewportKey] ?? [:]
         let candidateIDs = [mainEditorSession.requestedCardID, mainEditorSession.mountedCardID].compactMap { $0 }
 
         for candidateID in candidateIDs {
             guard cards.contains(where: { $0.id == candidateID }) else { continue }
-            guard let frame = observedFrames[candidateID], frame.width > 1, frame.height > 1 else {
+            guard resolvedMainColumnEditorHostFrame(viewportKey: viewportKey, cardID: candidateID) != nil else {
                 continue
             }
             return candidateID
@@ -532,7 +539,9 @@ extension ScenarioWriterView {
         viewportKey: String,
         cardID: UUID
     ) -> CGRect? {
-        let frame = mainColumnObservedEditorSlotFramesByKey[viewportKey]?[cardID]
+        let frame =
+            mainColumnObservedEditorSlotFramesByKey[viewportKey]?[cardID] ??
+            mainColumnCachedEditorSlotFramesByKey[viewportKey]?[cardID]
         guard let frame else { return nil }
         guard frame.width > 1, frame.height > 1 else { return nil }
         return frame
@@ -540,9 +549,10 @@ extension ScenarioWriterView {
 
     func canUseExternalMainEditor(
         cardID: UUID,
-        viewportKey: String
+        viewportKey: String,
+        cards: [SceneCard]
     ) -> Bool {
-        resolvedVisibleMainEditorHostTargetID(viewportKey: viewportKey) == cardID
+        resolvedMainColumnEditorHostTargetID(viewportKey: viewportKey, cards: cards) == cardID
     }
 
     func resolvedMainColumnEditingHostCard(
@@ -557,7 +567,6 @@ extension ScenarioWriterView {
 
     private func resolvedMainWorkspaceHostBodyHeight(for card: SceneCard) -> CGFloat {
         if mainEditorSession.mountedCardID == card.id,
-           mainEditorSession.isFirstResponderReady,
            let liveBodyHeight = mainEditorSession.liveBodyHeight,
            liveBodyHeight > 1 {
             return liveBodyHeight
@@ -626,7 +635,6 @@ extension ScenarioWriterView {
             .padding(.horizontal, MainEditorLayoutMetrics.mainEditorHorizontalPadding)
             .padding(.vertical, 24)
         }
-        .id("main-workspace-stable-host-\(card.id.uuidString)")
         .offset(x: hostFrame.minX, y: hostFrame.minY)
         .opacity(isVisible ? 1 : 0.001)
         .allowsHitTesting(isVisible)
@@ -642,6 +650,9 @@ extension ScenarioWriterView {
                 "main-editor-host-visibility",
                 "card=\(mainWorkspacePhase0CardID(card.id)) visible=\(newValue) frame=\(NSStringFromRect(hostFrame))"
             )
+        }
+        .onChange(of: card.id) { oldCardID, newCardID in
+            rebindMainEditorMountedCard(from: oldCardID, to: newCardID)
         }
         .onDisappear {
             markMainEditorUnmounted(cardID: card.id)
@@ -674,7 +685,6 @@ extension ScenarioWriterView {
         cards: [SceneCard]
     ) -> some View {
         let hostFrame = resolvedMainColumnEditorHostFrame(viewportKey: viewportKey, cards: cards)
-        let visibleTargetID = resolvedVisibleMainEditorHostTargetID(viewportKey: viewportKey, cards: cards)
 
         ZStack(alignment: .topLeading) {
             mainColumnEditorHostScaffold(
@@ -687,7 +697,7 @@ extension ScenarioWriterView {
                 mainWorkspaceStableHostEditor(
                     card: targetCard,
                     hostFrame: hostFrame,
-                    isVisible: visibleTargetID == targetCard.id
+                    isVisible: true
                 )
             }
         }
@@ -892,11 +902,181 @@ extension ScenarioWriterView {
 
     // MARK: - Timeline & Column View Builders
 
-    func resolveMainEditorSessionTextViewIdentity(for cardID: UUID) -> Int? {
-        guard let card = findCard(by: cardID) else { return nil }
+    private struct ResolvedMainEditorAuthority {
+        let cardID: UUID
+        let textView: NSTextView
+        let textViewIdentity: Int
+    }
+
+    private func resolvedMainEditorAuthority(for cardID: UUID? = nil) -> ResolvedMainEditorAuthority? {
         guard let textView = NSApp.keyWindow?.firstResponder as? NSTextView else { return nil }
-        guard textView.string == card.content else { return nil }
-        return ObjectIdentifier(textView).hashValue
+        guard textView.isEditable else { return nil }
+        let resolvedCardID =
+            cardID ??
+            mainEditorSession.requestedCardID ??
+            mainEditorSession.mountedCardID ??
+            editingCardID
+        guard let resolvedCardID else { return nil }
+        guard mainEditorSession.requestedCardID == resolvedCardID || mainEditorSession.mountedCardID == resolvedCardID else {
+            return nil
+        }
+
+        let identity = ObjectIdentifier(textView).hashValue
+        if let card = findCard(by: resolvedCardID), textView.string == card.content {
+            return ResolvedMainEditorAuthority(
+                cardID: resolvedCardID,
+                textView: textView,
+                textViewIdentity: identity
+            )
+        }
+        if mainEditorSession.textViewIdentity == identity {
+            return ResolvedMainEditorAuthority(
+                cardID: resolvedCardID,
+                textView: textView,
+                textViewIdentity: identity
+            )
+        }
+        return nil
+    }
+
+    func resolveMainEditorSessionTextViewIdentity(for cardID: UUID) -> Int? {
+        resolvedMainEditorAuthority(for: cardID)?.textViewIdentity
+    }
+
+    @discardableResult
+    private func refreshMainEditorSessionResponderState(
+        for cardID: UUID,
+        updateMountedCardID: Bool = true
+    ) -> Int? {
+        let resolvedTextViewIdentity = resolveMainEditorSessionTextViewIdentity(for: cardID)
+        if updateMountedCardID {
+            mainEditorSession.mountedCardID = cardID
+        }
+        mainEditorSession.textViewIdentity = resolvedTextViewIdentity
+        mainEditorSession.isFirstResponderReady = resolvedTextViewIdentity != nil
+        return resolvedTextViewIdentity
+    }
+
+    func resolvedActiveMainEditorTextView(for cardID: UUID? = nil) -> NSTextView? {
+        resolvedMainEditorAuthority(for: cardID)?.textView
+    }
+
+    func isMainEditorActivelyTyping(cardID: UUID? = nil) -> Bool {
+        resolvedActiveMainEditorTextView(for: cardID) != nil
+    }
+
+    func shouldTreatCardAsActivelyEditing(_ cardID: UUID) -> Bool {
+        guard editingCardID == cardID else { return false }
+        if isMainEditorActivelyTyping(cardID: cardID) {
+            return true
+        }
+        return mainEditorSession.requestedCardID == cardID && !mainEditorSession.isFirstResponderReady
+    }
+
+    func resolvedMainEditingTargetCard() -> SceneCard? {
+        if let activeID = activeCardID,
+           let activeCard = findCard(by: activeID) {
+            return activeCard
+        }
+        if let requestedID = mainEditorSession.requestedCardID,
+           let requestedCard = findCard(by: requestedID) {
+            return requestedCard
+        }
+        if let mountedID = mainEditorSession.mountedCardID,
+           let mountedCard = findCard(by: mountedID) {
+            return mountedCard
+        }
+        if let editingID = editingCardID,
+           let editingCard = findCard(by: editingID) {
+            return editingCard
+        }
+        return nil
+    }
+
+    func resolvedMainEditingTransitionTargetCardID() -> UUID? {
+        pendingMainEditingBoundaryNavigationTargetID ??
+        mainEditorSession.requestedCardID ??
+        editingCardID
+    }
+
+    func isMainEditingBoundaryTransitionReady(for targetCardID: UUID) -> Bool {
+        editingCardID == targetCardID &&
+        mainEditorSession.requestedCardID == targetCardID &&
+        mainEditorSession.isFirstResponderReady
+    }
+
+    func isMainEditingTransitionPending(targetCardID: UUID? = nil) -> Bool {
+        guard !showFocusMode else { return false }
+        let resolvedTargetID = targetCardID ?? resolvedMainEditingTransitionTargetCardID()
+        guard let resolvedTargetID else { return false }
+        if let pendingTarget = pendingMainEditingBoundaryNavigationTargetID,
+           pendingTarget == resolvedTargetID {
+            return !isMainEditingBoundaryTransitionReady(for: pendingTarget)
+        }
+        guard mainEditorSession.requestedCardID == resolvedTargetID else { return false }
+        return resolvedActiveMainEditorTextView(for: resolvedTargetID) == nil
+    }
+
+    func shouldSuppressGeneralMainCanvasScrollDuringEditing(targetCardID: UUID? = nil) -> Bool {
+        let targetMatchesTimedIsolation =
+            targetCardID == nil ||
+            mainEditingScrollIsolationTargetCardID == nil ||
+            targetCardID == mainEditingScrollIsolationTargetCardID
+        if targetMatchesTimedIsolation && Date() < mainEditingScrollIsolationUntil {
+            return true
+        }
+        return isMainEditingTransitionPending(targetCardID: targetCardID)
+    }
+
+    func beginMainEditingScrollIsolation(
+        for targetCardID: UUID,
+        duration: TimeInterval = 0.32,
+        reason: String
+    ) {
+        let previousTargetID = mainEditingScrollIsolationTargetCardID
+        let previousUntil = mainEditingScrollIsolationUntil
+        let nextUntil = Date().addingTimeInterval(duration)
+        mainEditingScrollIsolationTargetCardID = targetCardID
+        if nextUntil > mainEditingScrollIsolationUntil {
+            mainEditingScrollIsolationUntil = nextUntil
+        }
+        cancelMainArrowNavigationSettle()
+        cancelAllPendingMainColumnFocusWork()
+        pendingMainCanvasRestoreRequest = nil
+        suspendMainColumnViewportCapture(for: duration)
+        mainWorkspacePhase0Log(
+            "main-editing-scroll-isolation",
+            "phase=begin reason=\(reason) target=\(mainWorkspacePhase0CardID(targetCardID)) " +
+            "previousTarget=\(mainWorkspacePhase0CardID(previousTargetID)) " +
+            "previousUntil=\(previousUntil.timeIntervalSince1970) " +
+            "until=\(mainEditingScrollIsolationUntil.timeIntervalSince1970)"
+        )
+    }
+
+    func clearMainEditingScrollIsolation(reason: String) {
+        guard mainEditingScrollIsolationTargetCardID != nil || mainEditingScrollIsolationUntil > .distantPast else { return }
+        mainWorkspacePhase0Log(
+            "main-editing-scroll-isolation",
+            "phase=clear reason=\(reason) target=\(mainWorkspacePhase0CardID(mainEditingScrollIsolationTargetCardID)) " +
+            "until=\(mainEditingScrollIsolationUntil.timeIntervalSince1970)"
+        )
+        mainEditingScrollIsolationTargetCardID = nil
+        mainEditingScrollIsolationUntil = .distantPast
+    }
+
+    func shouldAllowActiveCardChangeDuringEditing(to targetCardID: UUID, force: Bool = false) -> Bool {
+        guard !force else { return true }
+        guard let editingID = editingCardID else { return true }
+        if targetCardID == editingID {
+            return true
+        }
+        if pendingMainEditingBoundaryNavigationTargetID == targetCardID {
+            return true
+        }
+        if pendingMainEditingSiblingNavigationTargetID == targetCardID {
+            return true
+        }
+        return false
     }
 
     func prepareMainEditorSessionRequest(
@@ -928,14 +1108,11 @@ extension ScenarioWriterView {
 
     func markMainEditorMounted(cardID: UUID) {
         guard mainEditorSession.requestedCardID == cardID else { return }
-        mainEditorSession.mountedCardID = cardID
-        mainEditorSession.textViewIdentity = resolveMainEditorSessionTextViewIdentity(for: cardID)
-        mainEditorSession.isFirstResponderReady =
-            mainEditorSession.textViewIdentity != nil && mainEditorSession.requestedCardID == cardID
+        let resolvedTextViewIdentity = refreshMainEditorSessionResponderState(for: cardID)
         mainWorkspacePhase0Log(
             "main-editor-session",
             "phase=mounted requested=\(mainWorkspacePhase0CardID(mainEditorSession.requestedCardID)) " +
-            "mounted=\(mainWorkspacePhase0CardID(mainEditorSession.mountedCardID)) textView=\(mainEditorSession.textViewIdentity.map(String.init) ?? "nil") " +
+            "mounted=\(mainWorkspacePhase0CardID(mainEditorSession.mountedCardID)) textView=\(resolvedTextViewIdentity.map(String.init) ?? "nil") " +
             "ready=\(mainEditorSession.isFirstResponderReady)"
         )
     }
@@ -955,12 +1132,8 @@ extension ScenarioWriterView {
 
     func updateMainEditorResponderState(cardID: UUID, isFocused: Bool) {
         guard mainEditorSession.requestedCardID == cardID || mainEditorSession.mountedCardID == cardID else { return }
-        let resolvedTextViewIdentity = isFocused ? resolveMainEditorSessionTextViewIdentity(for: cardID) : nil
-        mainEditorSession.mountedCardID = cardID
-        mainEditorSession.textViewIdentity = resolvedTextViewIdentity
-        mainEditorSession.isFirstResponderReady = resolvedTextViewIdentity != nil
-        if isFocused,
-           mainEditorSession.isFirstResponderReady,
+        let resolvedTextViewIdentity = refreshMainEditorSessionResponderState(for: cardID)
+        if mainEditorSession.isFirstResponderReady,
            pendingMainEditingBoundaryNavigationTargetID == cardID {
             pendingMainEditingBoundaryNavigationTargetID = nil
         }
@@ -968,9 +1141,69 @@ extension ScenarioWriterView {
             "main-editor-session",
             "phase=focus requested=\(mainWorkspacePhase0CardID(mainEditorSession.requestedCardID)) " +
             "mounted=\(mainWorkspacePhase0CardID(mainEditorSession.mountedCardID)) " +
-            "card=\(mainWorkspacePhase0CardID(cardID)) focused=\(isFocused) " +
+            "card=\(mainWorkspacePhase0CardID(cardID)) focusedHint=\(isFocused) " +
             "textView=\(resolvedTextViewIdentity.map(String.init) ?? "nil") ready=\(mainEditorSession.isFirstResponderReady)"
         )
+    }
+
+    func rebindMainEditorMountedCard(from previousCardID: UUID, to cardID: UUID) {
+        guard previousCardID != cardID else { return }
+        guard mainEditorSession.requestedCardID == cardID else { return }
+        let resolvedTextViewIdentity = refreshMainEditorSessionResponderState(for: cardID)
+        mainEditorSession.liveBodyHeight = nil
+        if mainEditorSession.isFirstResponderReady,
+           pendingMainEditingBoundaryNavigationTargetID == cardID {
+            pendingMainEditingBoundaryNavigationTargetID = nil
+        }
+        mainWorkspacePhase0Log(
+            "main-editor-session",
+            "phase=rebind previous=\(mainWorkspacePhase0CardID(previousCardID)) requested=\(mainWorkspacePhase0CardID(mainEditorSession.requestedCardID)) " +
+            "mounted=\(mainWorkspacePhase0CardID(mainEditorSession.mountedCardID)) card=\(mainWorkspacePhase0CardID(cardID)) " +
+            "textView=\(resolvedTextViewIdentity.map(String.init) ?? "nil") ready=\(mainEditorSession.isFirstResponderReady)"
+        )
+    }
+
+    private func relevantFinishEditingCallStackSummary() -> String {
+        Thread.callStackSymbols
+            .filter { $0.contains("/wa/") || $0.contains("WTF") }
+            .prefix(8)
+            .joined(separator: " | ")
+    }
+
+    private func armMainEditorEntryFinishGuard(for cardID: UUID) {
+        mainEditorEntryFinishGuardCardID = cardID
+        mainEditorEntryFinishGuardUntil = Date().addingTimeInterval(1.2)
+        mainWorkspacePhase0Log(
+            "main-editor-entry-guard",
+            "phase=arm card=\(mainWorkspacePhase0CardID(cardID)) until=\(String(format: "%.3f", mainEditorEntryFinishGuardUntil.timeIntervalSince1970))"
+        )
+    }
+
+    private func clearMainEditorEntryFinishGuard(ifMatching cardID: UUID? = nil) {
+        if let cardID, mainEditorEntryFinishGuardCardID != cardID {
+            return
+        }
+        if mainEditorEntryFinishGuardCardID != nil || mainEditorEntryFinishGuardUntil > .distantPast {
+            mainWorkspacePhase0Log(
+                "main-editor-entry-guard",
+                "phase=clear card=\(mainWorkspacePhase0CardID(mainEditorEntryFinishGuardCardID))"
+            )
+        }
+        mainEditorEntryFinishGuardCardID = nil
+        mainEditorEntryFinishGuardUntil = .distantPast
+    }
+
+    private func shouldSuppressFinishEditingDuringEntryGuard(cardID: UUID, reason: FinishEditingReason) -> Bool {
+        guard reason == .generic else { return false }
+        guard !showFocusMode else { return false }
+        guard mainEditorEntryFinishGuardCardID == cardID else { return false }
+        guard Date() < mainEditorEntryFinishGuardUntil else { return false }
+        return true
+    }
+
+    private func shouldAllowGenericFinishEditing(cardID: UUID) -> Bool {
+        guard !showFocusMode else { return true }
+        return resolvedActiveMainEditorTextView(for: cardID) == nil
     }
 
     func beginCardEditing(_ card: SceneCard, explicitCaretLocation: Int? = nil) {
@@ -979,8 +1212,15 @@ extension ScenarioWriterView {
             "card=\(mainWorkspacePhase0CardID(card.id)) activeBefore=\(mainWorkspacePhase0CardID(activeCardID)) " +
             "editingBefore=\(mainWorkspacePhase0CardID(editingCardID)) explicitCaret=\(explicitCaretLocation.map(String.init) ?? "nil")"
         )
-        finishEditing()
+        if editingCardID != nil {
+            suppressMainFocusRestoreAfterFinishEditing = true
+        }
+        finishEditing(reason: .transition)
         prepareMainEditorSessionRequest(for: card, explicitCaretLocation: explicitCaretLocation)
+        beginMainEditingScrollIsolation(
+            for: card.id,
+            reason: explicitCaretLocation == nil ? "beginCardEditing" : "beginCardEditing.explicitCaret"
+        )
         pendingMainEditingSiblingNavigationTargetID = nil
         if let explicitCaretLocation {
             pendingMainEditingViewportKeepVisibleCardID = nil
@@ -1006,6 +1246,7 @@ extension ScenarioWriterView {
         editingStartState = captureScenarioState()
         editingIsNewCard = false
         selectedCardIDs = [card.id]
+        armMainEditorEntryFinishGuard(for: card.id)
         mainWorkspacePhase0Log(
             "begin-card-edit-applied",
             "card=\(mainWorkspacePhase0CardID(card.id)) active=\(mainWorkspacePhase0CardID(activeCardID)) " +
@@ -1045,7 +1286,7 @@ extension ScenarioWriterView {
             isArchived: card.isArchived,
             isAncestor: false,
             isDescendant: false,
-            isEditing: acceptsKeyboardInput && editingCardID == card.id,
+            isEditing: acceptsKeyboardInput && shouldTreatCardAsActivelyEditing(card.id),
             preferredTextMeasureWidth: TimelinePanelLayoutMetrics.textWidth,
             forceNamedSnapshotNoteStyle: isNamedNote,
             forceCustomColorVisibility: isAICandidate,
@@ -1337,7 +1578,7 @@ extension ScenarioWriterView {
             .contextMenu {
                 indexBoardColumnContextMenu(level: level, parent: parent, cards: cards)
             }
-            .onTapGesture { finishEditing(); isMainViewFocused = true }
+            .onTapGesture { finishEditing(reason: .transition); isMainViewFocused = true }
         }
         .frame(width: columnWidth)
     }
@@ -2863,7 +3104,6 @@ extension ScenarioWriterView {
     func resolvedMainCardLiveEditingHeightOverride(for card: SceneCard) -> CGFloat? {
         guard editingCardID == card.id else { return nil }
         guard mainEditorSession.mountedCardID == card.id,
-              mainEditorSession.isFirstResponderReady,
               let liveBodyHeight = mainEditorSession.liveBodyHeight,
               liveBodyHeight > 1 else {
             return nil
@@ -3006,7 +3246,11 @@ extension ScenarioWriterView {
         let clonePeerDestinations = isCloneLinked ? clonePeerMenuDestinations(for: card) : []
         let viewportKey = mainColumnViewportStorageKey(level: level)
         let editorCoordinateSpaceName = mainColumnViewportCoordinateSpaceName(viewportKey)
-        let usesExternalMainEditor = canUseExternalMainEditor(cardID: card.id, viewportKey: viewportKey)
+        let usesExternalMainEditor = canUseExternalMainEditor(
+            cardID: card.id,
+            viewportKey: viewportKey,
+            cards: columnCards
+        )
         let mainEditorManagedExternally =
             mainEditorSession.requestedCardID == card.id || mainEditorSession.mountedCardID == card.id
         CardItem(
@@ -3018,7 +3262,7 @@ extension ScenarioWriterView {
             isArchived: card.isArchived,
             isAncestor: activeAncestorIDs.contains(card.id) || activeSiblingIDs.contains(card.id),
             isDescendant: activeDescendantIDs.contains(card.id),
-            isEditing: !showFocusMode && acceptsKeyboardInput && editingCardID == card.id,
+            isEditing: !showFocusMode && acceptsKeyboardInput && shouldTreatCardAsActivelyEditing(card.id),
             preferredTextMeasureWidth: MainCanvasLayoutMetrics.textWidth,
             forceNamedSnapshotNoteStyle: false,
             forceCustomColorVisibility: isAICandidate,
@@ -3100,8 +3344,7 @@ extension ScenarioWriterView {
             usesExternalMainEditor: usesExternalMainEditor,
             externalEditorLiveBodyHeight:
                 usesExternalMainEditor &&
-                mainEditorSession.mountedCardID == card.id &&
-                mainEditorSession.isFirstResponderReady
+                mainEditorSession.mountedCardID == card.id
                 ? mainEditorSession.liveBodyHeight
                 : nil,
             onMainEditorMount: { cardID in
@@ -3185,7 +3428,7 @@ extension ScenarioWriterView {
 
     @ViewBuilder
     func addFirstButton(level: Int) -> some View {
-        Button { suppressMainFocusRestoreAfterFinishEditing = true; finishEditing(); addCard(at: level, parent: nil) } label: { Image(systemName: "plus.circle.fill").font(.title2).foregroundStyle(.tertiary).frame(maxWidth: .infinity).padding(.vertical, 8) }.buttonStyle(.plain)
+        Button { suppressMainFocusRestoreAfterFinishEditing = true; finishEditing(reason: .transition); addCard(at: level, parent: nil) } label: { Image(systemName: "plus.circle.fill").font(.title2).foregroundStyle(.tertiary).frame(maxWidth: .infinity).padding(.vertical, 8) }.buttonStyle(.plain)
     }
 
     // MARK: - Drag & Drop
@@ -3886,6 +4129,16 @@ extension ScenarioWriterView {
             "pending=\(pendingActiveCardID?.uuidString ?? "nil") force=\(force) async=\(deferToMainAsync) " +
             "stack=\(debugStack)"
         )
+        if !shouldAllowActiveCardChangeDuringEditing(to: card.id, force: force) {
+            mainWorkspacePhase0Log(
+                "active-card-change-suppressed",
+                "target=\(mainWorkspacePhase0CardID(card.id)) active=\(mainWorkspacePhase0CardID(activeCardID)) " +
+                "editing=\(mainWorkspacePhase0CardID(editingCardID)) " +
+                "pendingBoundary=\(mainWorkspacePhase0CardID(pendingMainEditingBoundaryNavigationTargetID)) " +
+                "pendingSibling=\(mainWorkspacePhase0CardID(pendingMainEditingSiblingNavigationTargetID))"
+            )
+            return
+        }
         cleanupEmptyEditingCardIfNeeded(beforeSwitchingTo: card.id)
         if !force {
             if activeCardID == card.id, pendingActiveCardID == nil {
@@ -3943,7 +4196,7 @@ extension ScenarioWriterView {
               currentEditingID != targetCardID,
               let currentCard = findCard(by: currentEditingID) else { return }
         guard currentCard.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        finishEditing()
+        finishEditing(reason: .transition)
     }
 
     func descendantIDSet(of card: SceneCard) -> Set<UUID> {
@@ -3962,14 +4215,30 @@ extension ScenarioWriterView {
         let newCardPrevState: ScenarioState?
     }
 
-    func takeFinishEditingContext() -> FinishEditingContext? {
+    func takeFinishEditingContext(reason: FinishEditingReason) -> FinishEditingContext? {
+        guard let id = editingCardID else { return nil }
+        if shouldSuppressFinishEditingDuringEntryGuard(cardID: id, reason: reason) {
+            mainWorkspacePhase0Log(
+                "take-finish-editing-context-suppressed",
+                "card=\(mainWorkspacePhase0CardID(id)) reason=entryGuard responder=\(mainWorkspacePhase0ResponderSummary(expectedText: findCard(by: id)?.content)) " +
+                "stack=\(relevantFinishEditingCallStackSummary())"
+            )
+            return nil
+        }
+        if reason == .generic, !shouldAllowGenericFinishEditing(cardID: id) {
+            mainWorkspacePhase0Log(
+                "take-finish-editing-context-suppressed",
+                "card=\(mainWorkspacePhase0CardID(id)) reason=genericAuthority responder=\(mainWorkspacePhase0ResponderSummary(expectedText: findCard(by: id)?.content)) " +
+                "stack=\(relevantFinishEditingCallStackSummary())"
+            )
+            return nil
+        }
         let inFocusMode = showFocusMode
         let skipMainFocusRestore = suppressMainFocusRestoreAfterFinishEditing || inFocusMode
         suppressMainFocusRestoreAfterFinishEditing = false
         if inFocusMode {
             finalizeFocusTypingCoalescing(reason: "finish-editing")
         }
-        guard let id = editingCardID else { return nil }
         if !inFocusMode {
             rememberMainCaretLocation(for: id)
         }
@@ -3985,13 +4254,16 @@ extension ScenarioWriterView {
         mainWorkspacePhase0Log(
             "take-finish-editing-context",
             "card=\(mainWorkspacePhase0CardID(id)) active=\(mainWorkspacePhase0CardID(activeCardID)) " +
-            "skipMainFocusRestore=\(skipMainFocusRestore) responder=\(mainWorkspacePhase0ResponderSummary(expectedText: findCard(by: id)?.content))"
+            "reason=\(reason.rawValue) skipMainFocusRestore=\(skipMainFocusRestore) responder=\(mainWorkspacePhase0ResponderSummary(expectedText: findCard(by: id)?.content)) " +
+            "stack=\(relevantFinishEditingCallStackSummary())"
         )
         resetEditingTransientState()
         return context
     }
 
     func resetEditingTransientState() {
+        clearMainEditorEntryFinishGuard(ifMatching: editingCardID)
+        clearMainEditingScrollIsolation(reason: "resetEditingTransientState")
         editingCardID = nil
         pendingMainEditingBoundaryNavigationTargetID = nil
         editingStartContent = ""
@@ -4008,8 +4280,8 @@ extension ScenarioWriterView {
         }
     }
 
-    func finishEditing() {
-        guard let context = takeFinishEditingContext() else { return }
+    func finishEditing(reason: FinishEditingReason = .generic) {
+        guard let context = takeFinishEditingContext(reason: reason) else { return }
         // Re-entrant finish events can arrive from multiple view layers.
         // Clear edit state first so the same edit cannot be committed twice.
         let apply = {
@@ -4228,14 +4500,17 @@ extension ScenarioWriterView {
 
     func restoreMainFocusAfterFinishEditingIfNeeded(skipMainFocusRestore: Bool) {
         if !skipMainFocusRestore {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { isMainViewFocused = true }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                guard editingCardID == nil else { return }
+                isMainViewFocused = true
+            }
         }
     }
 
     // MARK: - Export & Deselect
 
     func deselectAll() {
-        finishEditing()
+        finishEditing(reason: .transition)
         activeCardID = nil
         resetActiveRelationStateCache()
         selectedCardIDs = []
@@ -4399,7 +4674,7 @@ extension ScenarioWriterView {
             }
             resetEditingTransientState()
         } else if editingCardID != nil {
-            finishEditing()
+            finishEditing(reason: .transition)
             if showFocusMode {
                 focusModeEditorCardID = nil
             }
@@ -5089,7 +5364,7 @@ extension ScenarioWriterView {
         let oldSiblings = liveOrderedSiblings(parent: parent)
         let prevState = captureScenarioState()
         suppressMainFocusRestoreAfterFinishEditing = true
-        finishEditing()
+        finishEditing(reason: .transition)
 
         let insertionIndex = firstSelected.orderIndex
         let newParent = SceneCard(
@@ -5195,7 +5470,7 @@ extension ScenarioWriterView {
         }
 
         suppressMainFocusRestoreAfterFinishEditing = true
-        finishEditing()
+        finishEditing(reason: .transition)
 
         let prompt = buildChildCardsSummaryPrompt(parentCard: parentCard, directChildren: directChildren)
         let resolvedModel = currentGeminiModel()
@@ -5428,7 +5703,7 @@ extension ScenarioWriterView {
     }
 
     func performHardDelete(_ card: SceneCard) {
-        finishEditing()
+        finishEditing(reason: .transition)
         let idsToRemove = resolvedHardDeleteIDs(targetCard: card)
         guard !idsToRemove.isEmpty else { return }
 
@@ -5459,7 +5734,7 @@ extension ScenarioWriterView {
     }
 
     func performHardDeleteAllTimelineEmptyLeafCards() {
-        finishEditing()
+        finishEditing(reason: .transition)
 
         let idsToRemove: Set<UUID> = Set(
             scenario.cards.compactMap { card in
@@ -5595,7 +5870,7 @@ extension ScenarioWriterView {
 
     func beginTimelineLinkedCardEditing(_ card: SceneCard) {
         let anchorCard = resolvedLinkedCardsAnchorID().flatMap { findCard(by: $0) }
-        finishEditing()
+        finishEditing(reason: .transition)
         keyboardRangeSelectionAnchorCardID = nil
 
         if let anchorCard, activeCardID != anchorCard.id {
@@ -5618,7 +5893,7 @@ extension ScenarioWriterView {
 
     func handleCardTap(_ card: SceneCard) {
         let isCommandPressed = NSEvent.modifierFlags.contains(.command)
-        finishEditing()
+        finishEditing(reason: .transition)
         keyboardRangeSelectionAnchorCardID = nil
         if isCommandPressed {
             if selectedCardIDs.contains(card.id) {
@@ -5688,7 +5963,7 @@ extension ScenarioWriterView {
         let isNewActiveTarget = activeCardID != card.id
         pendingMainClickFocusTargetID = isNewActiveTarget ? card.id : nil
         pendingMainClickHorizontalFocusTargetID = isNewActiveTarget ? card.id : nil
-        finishEditing()
+        finishEditing(reason: .transition)
     }
 
     private func finalizeMainWorkspaceClickTarget(_ card: SceneCard) {

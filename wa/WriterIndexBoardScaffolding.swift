@@ -395,7 +395,7 @@ extension ScenarioWriterView {
             )
         }
 
-        finishEditing()
+        finishEditing(reason: .transition)
         indexBoardRuntime.activate(session, scenarioID: scenario.id, paneID: paneContextID)
         indexBoardRestoreTrace(
             "board_open_activated",
@@ -1312,7 +1312,7 @@ extension ScenarioWriterView {
         let isCommandPressed = flags.contains(.command)
         let isShiftPressed = flags.contains(.shift)
 
-        finishEditing()
+        finishEditing(reason: .transition)
 
         if isCommandPressed && isShiftPressed {
             handleIndexBoardRangeClick(card, orderedCardIDs: orderedCardIDs, additive: true)
@@ -1332,7 +1332,7 @@ extension ScenarioWriterView {
     func handleIndexBoardCardDragStart(cardID: UUID, movingCardIDs: [UUID]) {
         guard let card = findCard(by: cardID) else { return }
 
-        finishEditing()
+        finishEditing(reason: .transition)
 
         let movingIDSet = Set(movingCardIDs)
         if !movingIDSet.isEmpty,
@@ -1419,7 +1419,7 @@ extension ScenarioWriterView {
     }
 
     func applyIndexBoardMarqueeSelection(_ cardIDs: Set<UUID>, orderedCardIDs: [UUID]) {
-        finishEditing()
+        finishEditing(reason: .transition)
 
         let orderedSelection = orderedCardIDs.filter { cardIDs.contains($0) }
         selectedCardIDs = Set(orderedSelection)
