@@ -355,11 +355,34 @@ struct MainWorkspaceEditableTextRenderer: NSViewRepresentable {
 
     final class TextView: NSTextView {
         var debugCardID: UUID?
+        var fixedTextWidth: CGFloat = 0
         var onLayoutPass: ((NSTextView) -> Void)?
         var focusStateHandler: ((Bool) -> Void)?
 
+        private var isApplyingFrameConstraint = false
+
+        private func clampFrameToFixedGeometryIfNeeded() {
+            guard !isApplyingFrameConstraint, fixedTextWidth > 1 else { return }
+            let resolvedWidth = round(fixedTextWidth)
+            guard abs(frame.origin.x) > 0.01 || abs(frame.origin.y) > 0.01 || abs(frame.width - resolvedWidth) > 0.01 else { return }
+            isApplyingFrameConstraint = true
+            super.setFrameOrigin(.zero)
+            super.setFrameSize(NSSize(width: resolvedWidth, height: frame.height))
+            isApplyingFrameConstraint = false
+        }
+
+        override func setFrameSize(_ newSize: NSSize) {
+            let resolvedWidth = fixedTextWidth > 1 ? round(fixedTextWidth) : newSize.width
+            super.setFrameSize(NSSize(width: resolvedWidth, height: newSize.height))
+        }
+
+        override func setFrameOrigin(_ newOrigin: NSPoint) {
+            super.setFrameOrigin(.zero)
+        }
+
         override func layout() {
             super.layout()
+            clampFrameToFixedGeometryIfNeeded()
             onLayoutPass?(self)
         }
 
@@ -568,6 +591,7 @@ struct MainWorkspaceEditableTextRenderer: NSViewRepresentable {
     func makeNSView(context: Context) -> NSTextView {
         let textView = TextView(frame: NSRect(x: 0, y: 0, width: textWidth, height: bodyHeight))
         textView.debugCardID = cardID
+        textView.fixedTextWidth = round(textWidth)
         textView.onLayoutPass = { liveTextView in
             context.coordinator.reportLayout(from: liveTextView, reason: "layout")
         }
@@ -609,6 +633,7 @@ struct MainWorkspaceEditableTextRenderer: NSViewRepresentable {
         }
         if let textView = textView as? TextView {
             textView.debugCardID = cardID
+            textView.fixedTextWidth = round(textWidth)
             textView.onLayoutPass = { liveTextView in
                 context.coordinator.reportLayout(from: liveTextView, reason: "layout")
             }
@@ -1015,6 +1040,7 @@ struct CardItem: View {
     var clonePeerDestinations: [ClonePeerMenuDestination] = []
     var onNavigateToClonePeer: ((UUID) -> Void)? = nil
     var mainEditorSlotCoordinateSpaceName: String? = nil
+    var mainEditorManagedExternally: Bool = false
     var usesExternalMainEditor: Bool = false
     var externalEditorLiveBodyHeight: CGFloat? = nil
     var onMainEditorMount: ((UUID) -> Void)? = nil
@@ -1031,7 +1057,7 @@ struct CardItem: View {
     @State private var isBottomInsertZoneDropTargeted: Bool = false
     @State private var isTrailingInsertZoneDropTargeted: Bool = false
     @State private var isBodyDropTargeted: Bool = false
-    @State private var editorFocus: Bool = false
+    @FocusState private var editorFocus: Bool
     private var fontSize: CGFloat { renderSettings.fontSize }
     private var appearance: String { renderSettings.appearance }
     private var cardBaseColorHex: String { renderSettings.cardBaseColorHex }
@@ -1217,8 +1243,11 @@ struct CardItem: View {
     }
 
     private var resolvedMainEditingBodyHeight: CGFloat {
-        if usesExternalMainEditor, let externalEditorLiveBodyHeight, externalEditorLiveBodyHeight > 1 {
-            return externalEditorLiveBodyHeight
+        if usesExternalMainEditor {
+            if let externalEditorLiveBodyHeight, externalEditorLiveBodyHeight > 1 {
+                return externalEditorLiveBodyHeight
+            }
+            return measureMainEditorBodyHeight(text: card.content, width: mainEditingTextMeasureWidth)
         }
         if mainEditingMeasuredBodyHeight > 1 {
             return mainEditingMeasuredBodyHeight
@@ -1289,21 +1318,6 @@ struct CardItem: View {
         }
     }
 
-    private func updateMainEditingMeasuredBodyHeight(_ measured: CGFloat?, source: String) {
-        guard let measured, measured > 0 else { return }
-        mainEditingMeasureLastAt = Date()
-        let previous = mainEditingMeasuredBodyHeight
-        if abs(previous - measured) > mainEditingMeasureUpdateThreshold {
-            mainEditingMeasuredBodyHeight = measured
-            mainWorkspacePhase0Log(
-                "inline-editor-row-height",
-                "card=\(mainWorkspacePhase0CardID(card.id)) source=\(source) " +
-                "body=\(measured) row=\(measured + (mainEditorVerticalPadding * 2)) previous=\(previous) " +
-                "editorFocus=\(editorFocus) responder=\(mainWorkspacePhase0ResponderSummary(expectedText: card.content))"
-            )
-        }
-    }
-
     private func scheduleMainEditingMeasuredBodyHeightRefresh(immediate: Bool = false) {
         if immediate {
             mainEditingMeasureWorkItem?.cancel()
@@ -1330,7 +1344,7 @@ struct CardItem: View {
     }
 
     private var shouldReportMainEditorSlotFrame: Bool {
-        mainEditorSlotCoordinateSpaceName != nil && (isActive || isEditing)
+        mainEditorSlotCoordinateSpaceName != nil && (isActive || isEditing || usesExternalMainEditor)
     }
 
     @ViewBuilder
@@ -1351,7 +1365,7 @@ struct CardItem: View {
     @ViewBuilder
     private var cardEditorSlotContent: some View {
         ZStack(alignment: .topLeading) {
-            if !isEditing {
+            if !isEditing && !usesExternalMainEditor {
                 Text(card.content.isEmpty ? "내용 없음" : card.content)
                     .font(.custom("SansMonoCJKFinalDraft", size: fontSize))
                     .lineSpacing(mainCardLineSpacing)
@@ -1359,6 +1373,17 @@ struct CardItem: View {
                     .padding(mainCardContentPadding)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if !isEditing && usesExternalMainEditor {
+                Color.clear
+                    .frame(
+                        width: MainCanvasLayoutMetrics.textWidth,
+                        height: resolvedMainEditingBodyHeight,
+                        alignment: .topLeading
+                    )
+                    .padding(.horizontal, mainEditorHorizontalPadding)
+                    .padding(.vertical, mainEditorVerticalPadding)
             }
 
             if isEditing {

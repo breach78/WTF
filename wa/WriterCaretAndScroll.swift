@@ -95,9 +95,19 @@ extension ScenarioWriterView {
     private func resolveMainSelectionChangeContext(from notification: Notification) -> MainSelectionChangeContext? {
         guard !showFocusMode else { return nil }
         guard let editingID = editingCardID else { return nil }
+        guard let editingCard = findCard(by: editingID) else { return nil }
         guard !isSearchFocused else { return nil }
         guard NSApp.keyWindow?.identifier?.rawValue != ReferenceWindowConstants.windowID else { return nil }
+        if mainEditorSession.requestedCardID == editingID && !mainEditorSession.isFirstResponderReady {
+            return nil
+        }
         guard let textView = resolveMainSelectionTextView(from: notification) else { return nil }
+        guard textView.string == editingCard.content else { return nil }
+        if mainEditorSession.mountedCardID == editingID,
+           let expectedIdentity = mainEditorSession.textViewIdentity,
+           ObjectIdentifier(textView).hashValue != expectedIdentity {
+            return nil
+        }
 
         let selected = textView.selectedRange()
         let textLength = (textView.string as NSString).length
@@ -296,13 +306,18 @@ extension ScenarioWriterView {
         if textView.isHorizontallyResizable {
             textView.isHorizontallyResizable = false
         }
-        if !textView.isVerticallyResizable {
-            textView.isVerticallyResizable = true
-        }
         textView.minSize = NSSize(width: 0, height: 0)
         textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
-        if normalizeInnerScrollView, let innerScrollView = resolvedMainEditorInnerScrollView(for: textView) {
+        let innerScrollView = resolvedMainEditorInnerScrollView(for: textView)
+        if normalizeInnerScrollView, let innerScrollView {
             normalizeMainEditorInnerScrollView(innerScrollView)
+        }
+        if innerScrollView != nil {
+            if !textView.isVerticallyResizable {
+                textView.isVerticallyResizable = true
+            }
+        } else if textView.isVerticallyResizable {
+            textView.isVerticallyResizable = false
         }
         if textView.textContainerInset != .zero {
             textView.textContainerInset = .zero

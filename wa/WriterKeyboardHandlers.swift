@@ -655,6 +655,15 @@ extension ScenarioWriterView {
         isShiftSelection: Bool,
         isRepeat: Bool
     ) -> Bool {
+        if let pendingTarget = pendingMainEditingBoundaryNavigationTargetID {
+            let transitionReady =
+                editingCardID == pendingTarget &&
+                mainEditorSession.requestedCardID == pendingTarget &&
+                mainEditorSession.isFirstResponderReady
+            if !transitionReady {
+                return true
+            }
+        }
         guard let editingID = editingCardID,
               let editingCard = findCard(by: editingID) else { return false }
         guard let textView = NSApp.keyWindow?.firstResponder as? NSTextView else { return false }
@@ -746,6 +755,9 @@ extension ScenarioWriterView {
         isRepeat: Bool
     ) -> Bool {
         guard atTopBoundary else { return false }
+        if isRepeat {
+            return true
+        }
         let isRapidBurst = registerMainVerticalArrowPress(for: 126)
 
         let target: SceneCard
@@ -809,6 +821,9 @@ extension ScenarioWriterView {
         isRepeat: Bool
     ) -> Bool {
         guard atBottomBoundary else { return false }
+        if isRepeat {
+            return true
+        }
         let isRapidBurst = registerMainVerticalArrowPress(for: 125)
 
         let target: SceneCard
@@ -974,11 +989,14 @@ extension ScenarioWriterView {
         shouldDiscardEmptyNewCardOnBoundaryMove: Bool,
         suppressSiblingNavigationScrolls: Bool = false
     ) {
+        let textLength = (target.content as NSString).length
+        let safeCaretLocation = min(max(0, caretLocation), textLength)
         if shouldDiscardEmptyNewCardOnBoundaryMove {
             finishEditing()
         }
         cancelMainArrowNavigationSettle()
         cancelAllPendingMainColumnFocusWork()
+        prepareMainEditorSessionRequest(for: target, explicitCaretLocation: safeCaretLocation)
         pendingMainEditingSiblingNavigationTargetID = suppressSiblingNavigationScrolls ? target.id : nil
         pendingMainEditingBoundaryNavigationTargetID = target.id
         if suppressSiblingNavigationScrolls {
@@ -988,15 +1006,17 @@ extension ScenarioWriterView {
             pendingMainEditingViewportKeepVisibleCardID = target.id
             pendingMainEditingViewportRevealEdge = caretLocation <= 0 ? .top : .bottom
         }
+        mainCaretLocationByCardID[target.id] = safeCaretLocation
+        mainProgrammaticCaretSuppressEnsureCardID = target.id
+        mainProgrammaticCaretExpectedCardID = target.id
+        mainProgrammaticCaretExpectedLocation = safeCaretLocation
+        mainProgrammaticCaretSelectionIgnoreUntil = Date().addingTimeInterval(0.28)
         changeActiveCard(to: target, shouldFocusMain: false, deferToMainAsync: false)
         selectedCardIDs = [target.id]
         editingCardID = target.id
         editingStartContent = target.content
         editingStartState = captureScenarioState()
         editingIsNewCard = false
-        let textLength = (target.content as NSString).length
-        let safeCaretLocation = min(max(0, caretLocation), textLength)
-        mainCaretLocationByCardID[target.id] = safeCaretLocation
     }
 
     // --- Main Nav Key Monitor ---
@@ -1090,6 +1110,45 @@ extension ScenarioWriterView {
                     !flags.contains(.control) &&
                     [123, 124, 125, 126].contains(event.keyCode)
                 if isPlainEditingArrow {
+                    if let pendingTarget = pendingMainEditingBoundaryNavigationTargetID {
+                        let transitionReady =
+                            editingCardID == pendingTarget &&
+                            mainEditorSession.requestedCardID == pendingTarget &&
+                            mainEditorSession.isFirstResponderReady
+                        if !transitionReady {
+                            mainWorkspacePhase0Log(
+                                "main-nav-monitor-editing-arrow-suppressed",
+                                "keyCode=\(event.keyCode) repeat=\(event.isARepeat) reason=boundaryTransitionPending " +
+                                "editing=\(mainWorkspacePhase0CardID(editingCardID)) pending=\(mainWorkspacePhase0CardID(pendingTarget)) " +
+                                "requested=\(mainWorkspacePhase0CardID(mainEditorSession.requestedCardID)) ready=\(mainEditorSession.isFirstResponderReady) " +
+                                "responder=\(mainWorkspacePhase0ResponderSummary(expectedText: editingCardID.flatMap { findCard(by: $0)?.content }))"
+                            )
+                            return nil
+                        }
+                    }
+                    if let editingID = editingCardID,
+                       let editingCard = findCard(by: editingID) {
+                        if let textView = NSApp.keyWindow?.firstResponder as? NSTextView,
+                           !textView.hasMarkedText(),
+                           textView.string != editingCard.content {
+                            mainWorkspacePhase0Log(
+                                "main-nav-monitor-editing-arrow-suppressed",
+                                "keyCode=\(event.keyCode) repeat=\(event.isARepeat) reason=contentMismatch " +
+                                "editing=\(mainWorkspacePhase0CardID(editingCardID)) " +
+                                "responder=\(mainWorkspacePhase0ResponderSummary(expectedText: editingCard.content))"
+                            )
+                            return nil
+                        }
+                        if !(NSApp.keyWindow?.firstResponder is NSTextView) {
+                            mainWorkspacePhase0Log(
+                                "main-nav-monitor-editing-arrow-suppressed",
+                                "keyCode=\(event.keyCode) repeat=\(event.isARepeat) reason=noTextView " +
+                                "editing=\(mainWorkspacePhase0CardID(editingCardID)) " +
+                                "responder=\(mainWorkspacePhase0ResponderSummary(expectedText: editingCard.content))"
+                            )
+                            return nil
+                        }
+                    }
                     let key: KeyEquivalent? = switch event.keyCode {
                     case 123: .leftArrow
                     case 124: .rightArrow

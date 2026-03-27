@@ -257,6 +257,7 @@ struct ScenarioWriterView: View {
     @State var historyRetentionLastAppliedCount: Int = 0
     @State var caretEnsureBurstWorkItems: [DispatchWorkItem] = []
     @State var mainColumnPendingFocusWorkItemByKey: [String: DispatchWorkItem] = [:]
+    @State var mainColumnCachedEditorSlotFramesByKey: [String: [UUID: CGRect]] = [:]
     @State var inactivePaneSnapshotState = InactivePaneSnapshotState()
     @State var scenarioTimestampSuppressionActive: Bool = false
     @State var editingSessionHadTextMutation: Bool = false
@@ -1707,6 +1708,7 @@ struct ScenarioWriterView: View {
             editingSessionHadTextMutation = false
         }
         syncScenarioTimestampSuppressionIfNeeded()
+        let seedLocation: Int?
         if let newID {
             if mainEditorSession.requestedCardID != newID {
                 let length = (findCard(by: newID)?.content as NSString?)?.length ?? 0
@@ -1723,6 +1725,9 @@ struct ScenarioWriterView: View {
                     "main-editor-session",
                     "phase=sync-request card=\(mainWorkspacePhase0CardID(newID)) seed=\(resolvedSeed.map(String.init) ?? "nil")"
                 )
+                seedLocation = resolvedSeed
+            } else {
+                seedLocation = mainEditorSession.caretSeedLocation
             }
         } else {
             mainEditorSession = MainEditorSessionState()
@@ -1730,6 +1735,7 @@ struct ScenarioWriterView: View {
                 "main-editor-session",
                 "phase=clear"
             )
+            seedLocation = nil
         }
         guard acceptsKeyboardInput else { return }
         guard !showFocusMode else { return }
@@ -1769,12 +1775,10 @@ struct ScenarioWriterView: View {
             mainLastCommittedContentByCard[newID] = card.content
         }
         let isBoundaryNavigation = pendingMainEditingBoundaryNavigationTargetID == newID
-        if isBoundaryNavigation {
-            pendingMainEditingBoundaryNavigationTargetID = nil
-        }
         let suppressInitialEnsure = isBoundaryNavigation || mainProgrammaticCaretSuppressEnsureCardID == newID
         restoreMainEditingCaret(
             for: newID,
+            location: seedLocation,
             suppressInitialEnsure: suppressInitialEnsure,
             ensureDelay: 0.03
         )
