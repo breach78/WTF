@@ -1318,6 +1318,10 @@ struct CardItem: View {
         mainEditorManagedExternally || usesExternalMainEditor
     }
 
+    private var shouldShowMainEditingTransitionShellText: Bool {
+        isEditing && mainEditorManagedExternally && !usesExternalMainEditor
+    }
+
     @ViewBuilder
     private var mainCardDisplayText: some View {
         Text(card.content.isEmpty ? "내용 없음" : card.content)
@@ -1460,7 +1464,7 @@ struct CardItem: View {
     @ViewBuilder
     private var cardEditorSlotContent: some View {
         ZStack(alignment: .topLeading) {
-            if !isEditing && !mainEditorBodyRenderedExternally {
+            if (!isEditing && !mainEditorBodyRenderedExternally) || shouldShowMainEditingTransitionShellText {
                 mainCardDisplayText
             }
 

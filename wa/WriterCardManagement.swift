@@ -8,18 +8,18 @@ extension ScenarioWriterView {
     private struct MainWorkspaceEditorHostScaffold: View {
         let viewportKey: String
         let targetCardID: UUID?
-        let hostFrame: CGRect?
+        let slotFrame: CGRect?
 
         var body: some View {
             ZStack(alignment: .topLeading) {
-                if let hostFrame {
+                if let slotFrame {
                     Color.clear
                         .frame(
-                            width: max(1, hostFrame.width),
-                            height: max(1, hostFrame.height),
+                            width: max(1, slotFrame.width),
+                            height: max(1, slotFrame.height),
                             alignment: .topLeading
                         )
-                        .offset(x: hostFrame.minX, y: hostFrame.minY)
+                        .offset(x: slotFrame.minX, y: slotFrame.minY)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -28,10 +28,10 @@ extension ScenarioWriterView {
                 mainWorkspacePhase0Log(
                     "main-editor-host-scaffold",
                     "viewportKey=\(viewportKey) target=\(mainWorkspacePhase0CardID(targetCardID)) " +
-                    "frame=\(hostFrame.map { NSStringFromRect($0) } ?? "nil") phase=appear"
+                    "frame=\(slotFrame.map { NSStringFromRect($0) } ?? "nil") phase=appear"
                 )
             }
-            .onChange(of: hostFrame) { _, newFrame in
+            .onChange(of: slotFrame) { _, newFrame in
                 mainWorkspacePhase0Log(
                     "main-editor-host-scaffold",
                     "viewportKey=\(viewportKey) target=\(mainWorkspacePhase0CardID(targetCardID)) " +
@@ -42,7 +42,7 @@ extension ScenarioWriterView {
                 mainWorkspacePhase0Log(
                     "main-editor-host-scaffold",
                     "viewportKey=\(viewportKey) target=\(mainWorkspacePhase0CardID(newTargetID)) " +
-                    "frame=\(hostFrame.map { NSStringFromRect($0) } ?? "nil") phase=targetChange"
+                    "frame=\(slotFrame.map { NSStringFromRect($0) } ?? "nil") phase=targetChange"
                 )
             }
         }
@@ -516,7 +516,9 @@ extension ScenarioWriterView {
         let candidateIDs = [mainEditorSession.requestedCardID, mainEditorSession.mountedCardID].compactMap { $0 }
 
         for candidateID in candidateIDs {
-            guard cards.contains(where: { $0.id == candidateID }) else { continue }
+            guard cards.contains(where: { $0.id == candidateID }) || findCard(by: candidateID) != nil else {
+                continue
+            }
             guard resolvedMainColumnEditorHostFrame(viewportKey: viewportKey, cardID: candidateID) != nil else {
                 continue
             }
@@ -569,7 +571,7 @@ extension ScenarioWriterView {
         guard let targetCardID = resolvedMountingMainEditorHostTargetID(viewportKey: viewportKey, cards: cards) else {
             return nil
         }
-        return cards.first(where: { $0.id == targetCardID })
+        return cards.first(where: { $0.id == targetCardID }) ?? findCard(by: targetCardID)
     }
 
     private func resolvedMainWorkspaceHostBodyHeight(for card: SceneCard) -> CGFloat {
@@ -687,7 +689,7 @@ extension ScenarioWriterView {
         MainWorkspaceEditorHostScaffold(
             viewportKey: viewportKey,
             targetCardID: resolvedMainColumnEditorHostTargetID(viewportKey: viewportKey, cards: cards),
-            hostFrame: resolvedMainColumnEditorHostFrame(
+            slotFrame: resolvedMainColumnEditorHostFrame(
                 viewportKey: viewportKey,
                 cards: cards
             )
@@ -1486,8 +1488,13 @@ extension ScenarioWriterView {
                     .onPreferenceChange(MainColumnEditorSlotPreferenceKey.self) { frames in
                         mainColumnObservedEditorSlotFramesByKey[viewportKey] = frames
                         let validCardIDs = Set(cards.map(\.id))
+                        let editingSessionCardIDs = Set(
+                            [mainEditorSession.requestedCardID, mainEditorSession.mountedCardID].compactMap { $0 }
+                        )
                         var cachedFrames = mainColumnCachedEditorSlotFramesByKey[viewportKey] ?? [:]
-                        cachedFrames = cachedFrames.filter { validCardIDs.contains($0.key) }
+                        cachedFrames = cachedFrames.filter {
+                            validCardIDs.contains($0.key) || editingSessionCardIDs.contains($0.key)
+                        }
                         for (cardID, frame) in frames where frame.width > 1 && frame.height > 1 {
                             cachedFrames[cardID] = frame
                         }
