@@ -70,7 +70,7 @@ final class MainCanvasNavigationDiagnostics {
 
     func beginFocusIntent(
         ownerKey: String,
-        direction: ScenarioWriterView.MainArrowDirection?,
+        direction: MainArrowDirection?,
         isRepeat: Bool,
         sourceCardID: UUID?,
         intendedCardID: UUID?
@@ -339,7 +339,7 @@ final class MainCanvasNavigationDiagnostics {
         "\(ownerKey)|\(axis)|\(engine)"
     }
 
-    private func string(for direction: ScenarioWriterView.MainArrowDirection) -> String {
+    private func string(for direction: MainArrowDirection) -> String {
         switch direction {
         case .up: return "up"
         case .down: return "down"

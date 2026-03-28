@@ -1,0 +1,1862 @@
+# 대형 코드 파일 기능 인벤토리
+
+생성일: 2026-03-28
+
+## Phase 0 기준 인벤토리
+
+- 이 문서는 `plan_writer_surface_reduction_execution.md`의 Phase 0에서 고정하는 기준 인벤토리다.
+- 대상 giant file 집합은 아래 `13`개 섹션으로 고정하고, 대상 변경은 계획 문서와 함께 명시적으로 갱신할 때만 허용한다.
+- 줄 수 기준선의 source of truth는 계획 문서의 `현재 줄 수 기준선` 표이며, 각 phase는 이 문서를 기능/책임 인벤토리 기준으로 참조한다.
+
+## wa/WriterCardManagement.swift
+
+### 1) 선언·기능 스냅샷
+- [1] import SwiftUI
+- [2] import AppKit
+- [3] import QuartzCore
+- [4] import UniformTypeIdentifiers
+- [6] enum MainWorkspaceMotionEntryPoints {
+- [16]     static func beginEditingBoundaryMotionSession(
+- [33]     static func beginReorderMotionSession(
+- [62]     static func publishPreemptiveFocusNavigationIntent(
+- [85]     static func requestMainCanvasRestoreForFocusExit(
+- [97]     static func requestMainCanvasViewportRestoreForFocusExit(
+- [110] extension ScenarioWriterView {
+- [112]     private struct MainWorkspaceEditorHostScaffold: View {
+- [117]         var body: some View {
+- [155]     // MARK: - Canvas Position Restore
+- [161]     private func enqueueMainCanvasRestoreRequest(
+- [180]     func scheduleMainCanvasRestoreRetries(_ action: @escaping () -> Void) {
+- [188]     func scheduleMainColumnViewportRestore(_ offsets: [String: CGFloat]) {
+- [204]     func replayDeferredMainColumnViewportRestoreIfNeeded() {
+- [211]     func restoreMainCanvasPositionIfNeeded(proxy: ScrollViewProxy, availableWidth: CGFloat) {
+- [257]     func requestMainCanvasRestoreForHistoryToggle() {
+- [263]     func requestMainCanvasRestoreForFocusExit(using snapshot: FocusModeWorkspaceSnapshot?) {
+- [280]     func requestMainCanvasViewportRestoreForFocusExit(using snapshot: FocusModeWorkspaceSnapshot?) {
+- [290]     func captureFocusModeEntryWorkspaceSnapshot() {
+- [331]     func canReuseRetainedMainCanvasShellForFocusExit(using snapshot: FocusModeWorkspaceSnapshot?) -> Bool {
+- [344]     func finalizeRetainedMainCanvasShellForFocusExitReuse() {
+- [348]     func resolvedMainColumnViewportKey(forCardID cardID: UUID) -> String? {
+- [353]     func resolvedVisibleMainCanvasLevelFromCurrentScrollPosition() -> Int? {
+- [386]     func restoreMainCanvasHorizontalViewport(to storedOffsetX: CGFloat) {
+- [432]     func requestMainCanvasRestoreForZoomChange() {
+- [440]     func requestMainCanvasRestoreForHorizontalScrollModeChange() {
+- [448]     func cancelMainArrowNavigationSettle() {
+- [453]     func scheduleMainArrowNavigationSettle() {
+- [494]     func publishMainColumnNavigationIntent(
+- [512]     func beginMainEditingBoundaryMotionSession(
+- [532]     func beginMainReorderMotionSession(
+- [558]     func handleMainColumnLateJoinIfPossible(
+- [629]     func publishMainColumnFocusNavigationIntent(
+- [646]     func publishPreemptiveMainColumnFocusNavigationIntent(
+- [673]     func preemptivelyAlignMainCanvasHorizontally(
+- [698]     // MARK: - Debug Helpers
+- [700]     func debugCGFloat(_ value: CGFloat) -> String {
+- [704]     func debugCardIDString(_ id: UUID?) -> String {
+- [709]     func debugCardToken(_ card: SceneCard?) -> String {
+- [718]     func debugUUIDListSummary(_ ids: [UUID], limit: Int = 6) -> String {
+- [726]     func debugFocusStateSummary() -> String {
+- [734]     func mainColumnViewportCoordinateSpaceName(_ viewportKey: String) -> String {
+- [742]     func resolvedVisibleMainEditorHostTargetID(
+- [757]     func resolvedMountingMainEditorHostTargetID(
+- [777]     func resolvedMainColumnEditorHostTargetID(
+- [784]     func resolvedMainColumnEditorHostFrame(
+- [792]     func resolvedMainColumnEditorHostFrame(
+- [804]     func canUseExternalMainEditor(
+- [813]     func resolvedMainColumnEditingHostCard(
+- [823]     private func resolvedPreparedMainEditorHostTargetID(
+- [840]     private func resolvedPreparedMainColumnEditingHostCard(
+- [850]     private func resolvedMainWorkspaceHostBodyHeight(for card: SceneCard) -> CGFloat {
+- [866]     private func mainWorkspaceEditorTextBinding(for cardID: UUID) -> Binding<String> {
+- [879]     func updateMainEditorMeasuredBodyHeight(cardID: UUID, measured: CGFloat?) {
+- [900]     private func mainWorkspaceStableHostEditor(card: SceneCard, hostFrame: CGRect, isVisible: Bool) -> some View {
+- [958]     func mainColumnEditorHostScaffold(
+- [974]     func mainColumnEditorHostOverlay(
+- [1003]     func debugMainColumnEstimatedTargetSummary(_ layout: (targetMinY: CGFloat, targetMaxY: CGFloat)?) -> String {
+- [1008]     func debugMainColumnObservedTargetSummary(viewportKey: String, targetID: UUID, offsetY: CGFloat) -> String {
+- [1022]     func debugMainColumnVisibleCardSummary(
+- [1060]     func mainColumnGeometryObservationCardIDs(
+- [1111]     // MARK: - Resolved Colors & Search
+- [1113]     func resolvedBackgroundColor() -> Color {
+- [1122]     func resolvedTimelineBackgroundColor() -> Color {
+- [1129]     func matchesSearch(_ card: SceneCard) -> Bool {
+- [1139]     func searchTokens(from text: String) -> [String] {
+- [1146]     func normalizedSearchText(_ text: String) -> String {
+- [1152]     // MARK: - Color Utilities
+- [1154]     func rgbFromHex(_ hex: String) -> (Double, Double, Double)? {
+- [1158]     enum MutationUndoMode {
+- [1164]     func prepareWriterModelForPersistence() {
+- [1168]     func saveWriterChanges(immediate: Bool = false) {
+- [1173]     func persistCardMutation(forceSnapshot: Bool = false, immediateSave: Bool = false) {
+- [1178]     func commitCardMutation(
+- [1200]     // MARK: - Timeline & Column View Builders
+- [1202]     private struct ResolvedMainEditorAuthority {
+- [1208]     private func resolvedMainEditorAuthority(for cardID: UUID? = nil) -> ResolvedMainEditorAuthority? {
+- [1239]     func resolveMainEditorSessionTextViewIdentity(for cardID: UUID) -> Int? {
+- [1244]     private func refreshMainEditorSessionResponderState(
+- [1257]     func resolvedActiveMainEditorTextView(for cardID: UUID? = nil) -> NSTextView? {
+- [1261]     func isMainEditorActivelyTyping(cardID: UUID? = nil) -> Bool {
+- [1265]     func shouldTreatCardAsActivelyEditing(_ cardID: UUID) -> Bool {
+- [1273]     func resolvedMainEditingTargetCard() -> SceneCard? {
+- [1293]     func resolvedMainEditingTransitionTargetCardID() -> UUID? {
+- [1299]     func isMainEditingBoundaryTransitionReady(for targetCardID: UUID) -> Bool {
+- [1305]     func isMainEditingTransitionPending(targetCardID: UUID? = nil) -> Bool {
+- [1317]     func shouldSuppressGeneralMainCanvasScrollDuringEditing(targetCardID: UUID? = nil) -> Bool {
+- [1328]     private func shouldSuppressMainColumnFocusVerificationDuringEditing(
+- [1338]     func beginMainEditingScrollIsolation(
+- [1363]     func clearMainEditingScrollIsolation(reason: String) {
+- [1374]     func shouldAllowActiveCardChangeDuringEditing(to targetCardID: UUID, force: Bool = false) -> Bool {
+- [1389]     func prepareMainEditorSessionRequest(
+- [1416]     func markMainEditorMounted(cardID: UUID) {
+- [1427]     func markMainEditorUnmounted(cardID: UUID) {
+- [1440]     func updateMainEditorResponderState(cardID: UUID, isFocused: Bool) {
+- [1456]     func rebindMainEditorMountedCard(from previousCardID: UUID, to cardID: UUID) {
+- [1473]     private func relevantFinishEditingCallStackSummary() -> String {
+- [1480]     private func armMainEditorEntryFinishGuard(for cardID: UUID) {
+- [1489]     private func clearMainEditorEntryFinishGuard(ifMatching cardID: UUID? = nil) {
+- [1503]     private func shouldSuppressFinishEditingDuringEntryGuard(cardID: UUID, reason: FinishEditingReason) -> Bool {
+- [1511]     private func shouldAllowGenericFinishEditing(cardID: UUID) -> Bool {
+- [1516]     func beginCardEditing(_ card: SceneCard, explicitCaretLocation: Int? = nil) {
+- [1566]     func timelineRow(_ card: SceneCard) -> some View {
+- [1677]     func column(for cards: [SceneCard], level: Int, parent: SceneCard?, screenHeight: CGFloat) -> some View {
+- [1925]     func scrollToFocus(
+- [2116]     func handleMainColumnNavigationIntent(
+- [2178]     func handleMainColumnImmediateAlignmentIntent(
+- [2219]     func handleMainColumnBottomRevealIntent(
+- [2290]     func handleMainColumnReorderCommitMotion(
+- [2331]     func handleMainColumnActiveFocusChange(
+- [2424]     func resolvedMainColumnCurrentOffsetY(viewportKey: String) -> CGFloat {
+- [2436]     func resolvedMainColumnFocusTargetOffset(
+- [2462]     func resolvedMainColumnVisibleRect(
+- [2481]     func predictedMainColumnTargetFrame(
+- [2501]     func observedMainColumnTargetFrame(
+- [2508]     func resolvedMainColumnBlockFrame(
+- [2537]     func isMainColumnBlockWithinComfortBand(
+- [2560]     func resolvedMainColumnBlockVisibilityTargetOffset(
+- [2588]     func applyMainColumnBlockVisibility(
+- [2664]     func isObservedMainColumnFocusTargetVisible(
+- [2691]     func isObservedMainColumnFocusTargetAligned(
+- [2716]     func performMainColumnNativeFocusScroll(
+- [2836]     func shouldSkipMainColumnFocusScroll(
+- [2871]     func shouldAutoAlignMainColumn(cards: [SceneCard], activeID: UUID?) -> Bool {
+- [2882]     func resolvedMainColumnLayoutSnapshot(
+- [2961]     func resolvedMainColumnTargetLayout(
+- [2971]     func mainColumnScrollCacheKey(level: Int, parent: SceneCard?) -> String {
+- [2977]     func mainColumnScrollObserver(
+- [3018]     func suspendMainColumnViewportCapture(for duration: TimeInterval) {
+- [3031]     func mainColumnViewportStorageKey(level: Int) -> String {
+- [3039]     func shouldPreserveMainColumnViewportOnReveal(level: Int, storageKey: String, newActiveID: UUID?) -> Bool {
+- [3054]     func shouldSuppressMainArrowRepeatAnimation() -> Bool {
+- [3058]     func cancelPendingMainColumnFocusWorkItem(for viewportKey: String) {
+- [3067]     func cancelPendingMainColumnFocusVerificationWorkItem(for viewportKey: String) {
+- [3076]     func cancelAllPendingMainColumnFocusWork() {
+- [3081]     func resolvedMainColumnFocusTargetID(in cards: [SceneCard]) -> UUID? {
+- [3095]     private func resolvedMainColumnPreferredDescendantTargetID(
+- [3121]     func isMainColumnFocusTargetVisible(
+- [3137]     func isMainColumnFocusTargetAligned(
+- [3153]     func applyMainColumnFocusAlignment(
+- [3205]     func resolvedMainColumnVisibilityTargetOffset(
+- [3257]     func performMainColumnNativeVisibilityScroll(
+- [3342]     func applyMainColumnFocusVisibility(
+- [3401]     func scheduleMainColumnFocusVerification(
+- [3564]     func handleMainColumnNavigationSettle(
+- [3603]     func scheduleMainColumnActiveCardFocus(
+- [3680]     func requestMainBottomRevealIfNeeded(
+- [3693]     func resolvedMainCardLiveEditingHeightOverride(for card: SceneCard) -> CGFloat? {
+- [3703]     func resolvedMainCardHeightCacheKey(
+- [3733]     func storeMainCardHeightRecord(_ record: MainCardHeightRecord) {
+- [3740]     func resolvedMainCardHeightRecord(
+- [3807]     func resolvedMainCardHeight(
+- [3821]     func cardRow(
+- [3961]     func clonePeerMenuDestinations(for card: SceneCard) -> [ClonePeerMenuDestination] {
+- [3989]     func cloneParentTitle(for card: SceneCard) -> String {
+- [4000]     func firstMeaningfulLine(from text: String) -> String? {
+- [4013]     func navigateToCloneCard(_ cardID: UUID) {
+- [4021]     func addFirstButton(level: Int) -> some View {
+- [4025]     // MARK: - Drag & Drop
+- [4027]     func handleGeneralDrop(
+- [4055]     func executeMoveSelection(_ selectedCards: [SceneCard], draggedCard: SceneCard, target: DropTarget) {
+- [4112]     func movableRoots(from cards: [SceneCard]) -> [SceneCard] {
+- [4132]     func trailingSiblingBlock(from draggedCard: SceneCard) -> [SceneCard] {
+- [4140]     func buildCanvasRank() -> [UUID: (Int, Int)] {
+- [4151]     func resolveDestination(_ target: DropTarget) -> (parent: SceneCard?, index: Int) {
+- [4176]     func normalizeAffectedParents(oldParents: [SceneCard?], destinationParent: SceneCard?) {
+- [4196]     func executeMove(_ card: SceneCard, target: DropTarget) {
+- [4263]     func targetIDFrom(_ target: DropTarget) -> UUID? {
+- [4270]     func liveOrderedSiblings(parent: SceneCard?) -> [SceneCard] {
+- [4293]     func synchronizeMovedSubtreeCategoryIfNeeded(
+- [4304]     func isDescendant(_ card: SceneCard, of targetID: UUID) -> Bool {
+- [4315]     func resolvedLevelsWithParents() -> [LevelData] {
+- [4328]     func displayedMainLevelsData(from levelsData: [LevelData]) -> [LevelData] {
+- [4365]     func resolvedDisplayedMainLevelsWithParents() -> [LevelData] {
+- [4369]     func resolvedDisplayedMainLevels() -> [[SceneCard]] {
+- [4373]     func displayedMainCardLocationByID(
+- [4385]     func displayedMainCardLocationByID(_ id: UUID) -> (level: Int, index: Int)? {
+- [4390]     func resolvedAllLevels() -> [[SceneCard]] {
+- [4394]     func scrollToColumnIfNeeded(
+- [4474]     func resolvedMainCanvasHorizontalAnchor(availableWidth: CGFloat) -> UnitPoint {
+- [4485]     func resolvedMainCanvasHorizontalTargetX(
+- [4498]     func performMainCanvasHorizontalScroll(
+- [4611]     // MARK: - Card Lookup & Active State
+- [4613]     func findCard(by id: UUID) -> SceneCard? { scenario.cardByID(id) }
+- [4615]     func resolvedActiveRelationFingerprint(
+- [4640]     func resetActiveRelationStateCache() {
+- [4658]     func synchronizeActiveRelationState(for activeID: UUID?) {
+- [4716]     func changeActiveCard(
+- [4792]     func cleanupEmptyEditingCardIfNeeded(beforeSwitchingTo targetCardID: UUID) {
+- [4801]     func descendantIDSet(of card: SceneCard) -> Set<UUID> {
+- [4805]     // MARK: - Finish Editing
+- [4807]     struct FinishEditingContext {
+- [4817]     func takeFinishEditingContext(reason: FinishEditingReason) -> FinishEditingContext? {
+- [4863]     private func resignMainEditorFirstResponderIfNeeded(for cardID: UUID?) {
+- [4875]     func resetEditingTransientState() {
+- [4891]     func runFinishEditingCommit(_ apply: @escaping () -> Void) {
+- [4899]     func finishEditing(reason: FinishEditingReason = .generic) {
+- [4917]     func commitFinishedEditingIfNeeded(
+- [4947]     func normalizeEditingCardContent(_ card: SceneCard) {
+- [4953]     func commitEmptyEditingCard(
+- [5007]     func nextFocusAfterMainModeEmptyCardRemoval(removedCard: SceneCard) -> SceneCard? {
+- [5033]     func nextFocusAfterFocusModeEmptyCardRemoval(
+- [5061]     func pushCardDeleteUndoState(prevState: ScenarioState, inFocusMode: Bool) {
+- [5069]     func commitNonEmptyEditingCard(
+- [5095]     func recordLinkedCardEditIfNeeded(editedCardID: UUID, contentChanged: Bool) {
+- [5104]     func resolvedFocusCardIDForLinkedEditRecording() -> UUID? {
+- [5117]     func restoreMainFocusAfterFinishEditingIfNeeded(skipMainFocusRestore: Bool) {
+- [5126]     // MARK: - Export & Deselect
+- [5128]     func deselectAll() {
+- [5135]     func buildExportText() -> String {
+- [5149]     func exportToClipboard() {
+- [5161]     func copySelectedCardTreeToClipboard() {
+- [5169]     func cutSelectedCardTreeToClipboard() {
+- [5178]     func copyCardsAsCloneFromContext(_ contextCard: SceneCard) {
+- [5197]     func cloneCopySourceCards(contextCard: SceneCard) -> [SceneCard] {
+- [5206]     func sortedCardsByCanvasOrder(_ cards: [SceneCard]) -> [SceneCard] {
+- [5217]     func handleFountainClipboardPasteShortcutIfPossible(from textView: NSTextView) -> Bool {
+- [5225]     func loadFountainClipboardPastePreview() -> FountainClipboardPastePreview? {
+- [5232]     func cancelFountainClipboardPasteDialog() {
+- [5237]     func applyFountainClipboardPasteSelection(_ option: StructuredTextPasteOption) {
+- [5253]     func restoreFountainClipboardPasteTextFocusIfNeeded() {
+- [5261]     func pasteRawTextIntoFountainClipboardSource(_ rawText: String) {
+- [5270]     func canReuseEditingCardForFountainClipboardImport() -> Bool {
+- [5277]     func insertFountainClipboardImportCards(_ importPayload: FountainClipboardImport) {
+- [5337]     func insertRootLevelFountainClipboardCards(_ cardContents: [String], previousState: ScenarioState) {
+- [5354]     func appendFountainClipboardCards(
+- [5388]     func completeFountainClipboardImport(
+- [5410]     func handlePasteShortcut() {
+- [5427]     func applyPendingPastePlacement(as placement: ClonePastePlacement) {
+- [5447]     func cancelPendingPastePlacement() {
+- [5453]     func applyPendingCloneCardPaste(as placement: ClonePastePlacement) {
+- [5457]     func cancelPendingCloneCardPaste() {
+- [5461]     func pasteCloneCardPayload(
+- [5512]     func resolvePasteDestination(for placement: ClonePastePlacement) -> (parent: SceneCard?, insertionIndex: Int) {
+- [5525]     func resolveClonePasteDestination(for placement: ClonePastePlacement) -> (parent: SceneCard?, insertionIndex: Int) {
+- [5529]     func resolveClonePasteSource(
+- [5560]     func pasteCopiedCardTree() {
+- [5570]     func pasteCardTreePayload(
+- [5612]     func copySourceRootCards() -> [SceneCard] {
+- [5618]     func persistCardTreePayloadToClipboard(_ payload: CardTreeClipboardPayload) -> Bool {
+- [5635]     func persistCloneCardPayloadToClipboard(_ payload: CloneCardClipboardPayload) -> Bool {
+- [5652]     func clearCutCardTreeBuffer() {
+- [5657]     func resolvedCardTreePasteDestination() -> (parent: SceneCard?, insertionIndex: Int) {
+- [5664]     func pasteCutCardTreeIfPossible() -> Bool {
+- [5686]     func encodeClipboardNode(from card: SceneCard) -> CardTreeClipboardNode {
+- [5695]     func instantiateClipboardNode(
+- [5721]     func loadCopiedCardTreePayload() -> CardTreeClipboardPayload? {
+- [5739]     func loadCopiedCloneCardPayload() -> CloneCardClipboardPayload? {
+- [5757]     func exportToFile() {
+- [5773]     func exportToCenteredPDF() {
+- [5776]     func exportToKoreanPDF() {
+- [5779]     func exportToPDF(format: ScriptExportFormatType, defaultName: String) {
+- [5820]     func toggleTimeline() { 
+- [5838]     // MARK: - Search & Add Card
+- [5840]     func openSearch() {
+- [5850]     func closeSearch() {
+- [5862]     func toggleSearch() {
+- [5870]     func addCard(at level: Int, parent: SceneCard?) {
+- [5888]     // MARK: - Insert, Add Child, Delete
+- [5890]     func sortedCardsForUpperCardCreation(_ cards: [SceneCard]) -> [SceneCard]? {
+- [5902]     func selectedSiblingsForParentCreation(contextCard: SceneCard) -> [SceneCard]? {
+- [5914]     func canCreateUpperCardFromSelection(contextCard: SceneCard) -> Bool {
+- [5926]     func upperCardCreationRequest(contextCard: SceneCard) -> UpperCardCreationRequest? {
+- [5934]     func createUpperCardFromSelection(contextCard: SceneCard) {
+- [5939]     func upperCardCreationSiblingLayout(
+- [5971]     func createUpperCardFromSourceCards(
+- [6041]     func createEmptyUpperCard(from request: UpperCardCreationRequest) {
+- [6057]     func createUpperCardWithResolvedSummary(sourceCards: [SceneCard], summary: String) -> SceneCard? {
+- [6066]     func canSummarizeDirectChildren(for parentCard: SceneCard) -> Bool {
+- [6071]     func summarizeDirectChildrenIntoParent(cardID: UUID) {
+- [6155]     func buildChildCardsSummaryPrompt(parentCard _: SceneCard, directChildren: [SceneCard]) -> String {
+- [6163]     func normalizedChildSummaryOutput(_ raw: String) -> String {
+- [6171]     func splitCardAtCaret() {
+- [6217]     func insertSibling(relativeTo card: SceneCard, above: Bool) {
+- [6243]     func insertSibling(above: Bool) {
+- [6248]     func addChildCard(to card: SceneCard) {
+- [6266]     func addChildCard() {
+- [6271]     func addCardToReferenceWindow(_ card: SceneCard) {
+- [6276]     func performDelete(_ card: SceneCard) {
+- [6321]     func performHardDelete(_ card: SceneCard) {
+- [6352]     func performHardDeleteAllTimelineEmptyLeafCards() {
+- [6390]     func resolvedHardDeleteIDs(targetCard card: SceneCard) -> Set<UUID> {
+- [6406]     func applyHardDeleteMutations(_ idsToRemove: Set<UUID>) {
+- [6423]     func applyHardDeleteSelectionState(_ idsToRemove: Set<UUID>, nextCandidate: SceneCard?) {
+- [6439]     func applyHardDeleteEditorAndHistoryState(_ idsToRemove: Set<UUID>) {
+- [6451]     func armFocusDeleteSelectionLock(targetCardID: UUID, duration: TimeInterval = 0.60) {
+- [6456]     func clearFocusDeleteSelectionLock() {
+- [6461]     // MARK: - Delete Selection & Card Tap
+- [6463]     func handleTimelineCardSelect(_ card: SceneCard) {
+- [6475]     func handleTimelineCardDoubleClick(_ card: SceneCard) {
+- [6487]     func beginTimelineLinkedCardEditing(_ card: SceneCard) {
+- [6504]     func deleteSelectedCard() {
+- [6510]     func handleCardTap(_ card: SceneCard) {
+- [6528]     private func mainWorkspaceClickModifiers() -> (command: Bool, shift: Bool) {
+- [6536]     private func resolvedMainWorkspaceLevel(containing cardID: UUID) -> [SceneCard]? {
+- [6542]     private func resolvedMainWorkspaceRangeAnchorID(in level: [SceneCard]) -> UUID? {
+- [6564]     private func mainWorkspaceRangeSelectionIDs(
+- [6578]     private func prepareMainWorkspaceClickTarget(_ card: SceneCard) {
+- [6585]     private func finalizeMainWorkspaceClickTarget(_ card: SceneCard) {
+- [6590]     private func handleMainWorkspacePlainClick(_ card: SceneCard) {
+- [6597]     private func handleMainWorkspaceCommandClick(_ card: SceneCard) {
+- [6616]     private func handleMainWorkspaceRangeClick(_ card: SceneCard, additive: Bool) {
+- [6638]     private func resolveMainWorkspaceClickCaretLocation(for card: SceneCard, clickLocation: CGPoint?) -> Int? {
+- [6652]     func handleMainWorkspaceCardClick(_ card: SceneCard, clickLocation: CGPoint? = nil) {
+- [6689]     func selectedCardsForDeletion() -> [SceneCard] {
+- [6697]     // MARK: - Perform Delete Selection (Full)
+- [6699]     func performDeleteSelection() {
+- [6748]     func prepareFocusModeForDeleteSelectionIfNeeded() {
+- [6758]     func buildLevelMap(from levels: [[SceneCard]]) -> [UUID: Int] {
+- [6768]     func resolveDeleteSelectionOutcome(from selected: [SceneCard]) -> (idsToRemove: Set<UUID>, didChangeContent: Bool) {
+- [6796]     func resolveRemovalAnchorID(selected: [SceneCard], idsToRemove: Set<UUID>) -> UUID? {
+- [6806]     func resolveNextCandidateAfterDelete(
+- [6840]     func applyPreMutationFocusTransitionForDelete(
+- [6865]     func archiveRemovedCards(_ idsToRemove: Set<UUID>) {
+- [6873]     func persistDeleteSelectionChangesIfNeeded(didChangeContent: Bool, idsToRemove: Set<UUID>) {
+- [6878]     func updateSelectionAfterDelete(
+- [6906]     func scheduleFocusModeCaretAfterDelete(nextCandidate: SceneCard?) {
+- [6916]     // MARK: - Focus Navigation After Removal
+- [6918]     func nextFocusFromSiblingGroupAfterRemoval(
+- [6943]     func nextFocusFromColumnAfterRemoval(
+- [6975]     func subtreeIDs(of card: SceneCard) -> Set<UUID> {
+- [6983]     func nextFocusAfterRemoval(
+- [6989]         func candidateFromSiblings(anchorID: UUID) -> SceneCard? {
+- [7044]     func createArchivedCopy(from card: SceneCard) {
+- [7050]     func setCardColor(_ card: SceneCard, hex: String?) {
+
+## wa/WriterIndexBoardSurfaceAppKitPhaseTwo.swift
+
+### 1) 선언·기능 스냅샷
+- [1] import SwiftUI
+- [2] import AppKit
+- [3] import os.signpost
+- [5] private enum IndexBoardSurfaceAppKitConstants {
+- [62] private enum IndexBoardSurfaceAppKitSignpostName {
+- [73] private func withIndexBoardSurfaceAppKitSignpost<T>(
+- [81] private struct IndexBoardSurfaceAppKitTimingMetric {
+- [102] private struct IndexBoardSurfaceAppKitBaselineSession {
+- [130] private struct IndexBoardSurfaceAppKitMotionScene {
+- [146] private enum IndexBoardSurfaceAppKitBaselineLogger {
+- [151]     static func append(session: IndexBoardSurfaceAppKitBaselineSession, didCommit: Bool) {
+- [169]         func timingLine(_ name: String, _ metric: IndexBoardSurfaceAppKitTimingMetric) -> String {
+- [207] private struct IndexBoardSurfaceColorPreset {
+- [227] private func indexBoardSurfaceColorSwatchImage(
+- [258] private func indexBoardSurfaceAppKitSort(_ lhs: BoardSurfaceItem, _ rhs: BoardSurfaceItem) -> Bool {
+- [301] private func indexBoardSurfaceLaneKey(_ laneParentID: UUID?) -> String {
+- [305] private func indexBoardSurfaceAppKitGroupSort(
+- [318] private struct IndexBoardSurfaceAppKitGridBounds {
+- [328] private struct IndexBoardSurfaceAppKitSceneSnapshot {
+- [337] private struct IndexBoardSurfaceAppKitLogicalSnapshot {
+- [345] private enum IndexBoardSurfaceAppKitDropPlacement: Equatable {
+- [350] private struct IndexBoardSurfaceAppKitDragState {
+- [368]     func overlayOrigin() -> CGPoint {
+- [376] private struct IndexBoardSurfaceAppKitPendingCardMove {
+- [385] private enum IndexBoardSurfaceAppKitPlaceholderStyle {
+- [391] private struct IndexBoardSurfaceAppKitSelectionState {
+- [396] private struct IndexBoardSurfaceAppKitViewportSession {
+- [403] private struct IndexBoardSurfaceAppKitGroupDragState {
+- [412]     func overlayOrigin() -> CGPoint {
+- [420] private struct IndexBoardSurfaceAppKitGroupDragPreview {
+- [425] private struct IndexBoardSurfaceAppKitConfiguration {
+- [463] private struct IndexBoardSurfaceAppKitCardRenderState: Equatable {
+- [469] private struct IndexBoardSurfaceAppKitRenderState: Equatable {
+- [484]     func equalsIgnoringViewport(_ other: IndexBoardSurfaceAppKitRenderState) -> Bool {
+- [499] private struct IndexBoardSurfaceAppKitLayoutDiff {
+- [504] private extension IndexBoardSurfaceAppKitConfiguration {
+- [535] private struct IndexBoardSurfaceAppKitCardSnapshot {
+- [540] private struct IndexBoardSurfaceAppKitLaneChipModel {
+- [547] extension IndexBoardSurfaceAppKitLaneChipModel: Equatable {
+- [548]     static func == (
+- [559] private extension CGFloat {
+- [563] private extension CGPoint {
+- [564]     func distance(to other: CGPoint) -> CGFloat {
+- [569] private extension CGRect {
+- [570]     func insetBy(dx: CGFloat, dy: CGFloat, clampToPositive: Bool) -> CGRect {
+- [582] private func indexBoardThemeColor(
+- [598] private func indexBoardThemeBorderColor(
+- [607] private func indexBoardThemePrimaryTextColor(theme: IndexBoardRenderTheme) -> NSColor {
+- [613] private func indexBoardThemeSecondaryTextColor(theme: IndexBoardRenderTheme) -> NSColor {
+- [619] private func indexBoardThemeBoardGradient(theme: IndexBoardRenderTheme) -> NSGradient {
+- [628] private func indexBoardThemeAccentColor(theme: IndexBoardRenderTheme) -> NSColor {
+- [633] private func indexBoardSurfaceResolvedPreviewText(
+- [648] private func indexBoardSurfaceSingleLinePreview(_ text: String) -> String {
+- [657] private final class IndexBoardSurfaceAppKitBackgroundView: NSView {
+- [685] private final class IndexBoardSurfaceAppKitLaneChipView: NSView {
+- [738]     func update(model: IndexBoardSurfaceAppKitLaneChipModel) {
+- [744]     func snapshotImage() -> NSImage? {
+- [800]     private func resolvedTintColor(for model: IndexBoardSurfaceAppKitLaneChipModel) -> NSColor {
+- [812] private class IndexBoardSurfaceAppKitCardView: NSView {
+- [838]     func update(
+- [919]     func snapshotImage() -> NSImage? {
+- [944] private protocol IndexBoardSurfaceAppKitCardInteractionDelegate: AnyObject {
+- [945]     func handleCardMouseDown(cardID: UUID, event: NSEvent, in view: NSView)
+- [946]     func handleCardMouseDragged(cardID: UUID, event: NSEvent, in view: NSView)
+- [947]     func handleCardMouseUp(cardID: UUID, event: NSEvent, in view: NSView)
+- [950] private protocol IndexBoardSurfaceAppKitLaneChipInteractionDelegate: AnyObject {
+- [951]     func menuForLaneChip(parentCardID: UUID, event: NSEvent, in view: NSView) -> NSMenu?
+- [952]     func handleLaneChipMouseDown(parentCardID: UUID, event: NSEvent, in view: NSView)
+- [953]     func handleLaneChipMouseDragged(parentCardID: UUID, event: NSEvent, in view: NSView)
+- [954]     func handleLaneChipMouseUp(parentCardID: UUID, event: NSEvent, in view: NSView)
+- [957] private final class IndexBoardSurfaceAppKitInteractiveCardView: IndexBoardSurfaceAppKitCardView {
+- [981] private final class IndexBoardSurfaceAppKitInlineTextView: NSTextView {
+- [995] private final class IndexBoardSurfaceAppKitDocumentView: NSView, IndexBoardSurfaceAppKitCardInteractionDelegate, IndexBoardSurfaceAppKitLaneChipInteractionDelegate, NSTextViewDelegate {
+- [1475]     fileprivate func consumeDeferredCommitLayoutRequest() -> Bool {
+- [1481]     fileprivate func armMotionSceneCommitBridgeIfNeeded() {
+- [1486]     fileprivate func finishMotionSceneCommitBridgeIfNeeded() {
+- [1492]     func updateConfiguration(_ configuration: IndexBoardSurfaceAppKitConfiguration) {
+- [1532]     func updateConfigurationForViewportOnly(_ configuration: IndexBoardSurfaceAppKitConfiguration) {
+- [1540]     func refreshDisplayAfterLiveMagnify() {
+- [1560]     private func handleCreateParentFromSelectionMenuAction() {
+- [1566]     private func handleToggleParentGroupTempMenuAction() {
+- [1572]     private func handleSetCardColorMenuAction(_ sender: NSMenuItem) {
+- [1579]     private func handleSetGroupColorMenuAction(_ sender: NSMenuItem) {
+- [1586]     private func handleDeleteCardMenuAction() {
+- [1592]     private func handleDeleteParentGroupMenuAction() {
+- [1598]     func ensureCardVisible(_ cardID: UUID?) {
+- [1609]     func refreshHoverIndicatorFromCurrentMouse() {
+- [1629]     func setHoverIndicatorSuppressed(_ suppressed: Bool) {
+- [1636]     func handleCardMouseDown(cardID: UUID, event: NSEvent, in view: NSView) {
+- [1645]     func handleCardMouseDragged(cardID: UUID, event: NSEvent, in view: NSView) {
+- [1668]     func handleCardMouseUp(cardID: UUID, event: NSEvent, in view: NSView) {
+- [1700]     func textDidEndEditing(_ notification: Notification) {
+- [1705]     func textDidChange(_ notification: Notification) {
+- [1709]     func textViewDidChangeSelection(_ notification: Notification) {
+- [1713]     func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+- [1730]     private func resolvedInlineEditableCardID() -> UUID? {
+- [1740]     private func ensureInlineEditor() -> NSTextView {
+- [1804]     private func updateInlineEditorAppearance(for card: SceneCard) {
+- [1834]     private func revealInlineEditorSelection() {
+- [1841]     private func beginInlineEditing(cardID: UUID, seedEvent: NSEvent? = nil) {
+- [1871]     private func endInlineEditing(commit: Bool) {
+- [1890]     private func layoutInlineEditorIfNeeded() {
+- [1902]     func menuForLaneChip(parentCardID: UUID, event: NSEvent, in view: NSView) -> NSMenu? {
+- [1951]     func handleLaneChipMouseDown(parentCardID: UUID, event: NSEvent, in view: NSView) {
+- [1964]     func handleLaneChipMouseDragged(parentCardID: UUID, event: NSEvent, in view: NSView) {
+- [1984]     func handleLaneChipMouseUp(parentCardID: UUID, event: NSEvent, in view: NSView) {
+- [2060]     private func pendingCardMove(
+- [2073]     private func parentGroup(for item: BoardSurfaceItem) -> BoardSurfaceParentGroupPlacement? {
+- [2078]     private func canonicalCardIDsByGroupID(
+- [2119]     private func canonicalizedSnapshotProjection(
+- [2218]     private func resolvedLogicalGridBounds(
+- [2240]     private func resolvedUnpinnedLogicalGridBounds(
+- [2255]     private func snapshotImage(in rect: CGRect) -> NSImage? {
+- [2279]     private func makeRestingSceneSnapshot() -> IndexBoardSurfaceAppKitSceneSnapshot {
+- [2304]     private func interactionCardFrame(for cardID: UUID) -> CGRect? {
+- [2308]     private func interactionChipFrame(for laneParentID: UUID?) -> CGRect {
+- [2315]     private func laneChipParentCardID(at point: CGPoint) -> UUID? {
+- [2337]     private func editableParentCardID(at point: CGPoint) -> UUID? {
+- [2359]     private func resolvedLaneChipHitFrame(for parentCardID: UUID?) -> CGRect {
+- [2365]     private func resolvedEditableParentHeaderHitFrame(
+- [2389]     private func resolvedCurrentCardFrames() -> [UUID: CGRect] {
+- [2415]     private func occupiedGridPositionByCardID() -> [UUID: IndexBoardGridPosition] {
+- [2427]     private func resolvedGridPosition(for item: BoardSurfaceItem) -> IndexBoardGridPosition? {
+- [2438]     private func cardID(at point: CGPoint) -> UUID? {
+- [2445]     private func resolvedTargetParentGroup(
+- [2480]     private func resolvedCardDropTargetFrame(
+- [2500]     private func resolvedDragCardCenter(
+- [2506]     private enum IndexBoardResolvedCardDropTargetGroupMode {
+- [2511]     private func resolvedCardDropTargetGroup(
+- [2526]         func resolvedMode(
+- [2588]     private func resolvedGroupBlockActivationFrame(
+- [2616]     private func resolvedGroupSlotEntryFrame(
+- [2639]     private func movableParentGroupID(at point: CGPoint) -> UUID? {
+- [2665]     private func resolvedParentGroupHandleFrame(
+- [2686]     private func resolvedFlowGridPosition(for slotIndex: Int) -> IndexBoardGridPosition {
+- [2694]     private func resolvedGridSlotRect(for position: IndexBoardGridPosition) -> CGRect {
+- [2706]     private func resolvedFlowSlotRect(for slotIndex: Int) -> CGRect {
+- [2710]     private func resolvedCardFrame(for position: IndexBoardGridPosition) -> CGRect {
+- [2720]     private func resolvedCardFrame(for item: BoardSurfaceItem) -> CGRect? {
+- [2725]     private func resolvedFlowInteractionRect(
+- [2751]     private func resolvedFlowDropSlotIndex(for point: CGPoint, slotCount: Int) -> Int {
+- [2776]     private func resolvedFlowInsertionSlotCenterX(
+- [2788]     private func resolvedRetainedFlowInsertionIndex(
+- [2822]     private func resolvedFlowInsertionIndex(
+- [2860]     private func resolvedNearestGridPosition(for point: CGPoint) -> IndexBoardGridPosition {
+- [2874]     private func resolvedDetachedGridPosition(
+- [2931]     private func stationaryParentGroups(
+- [2940]     private func stationaryDetachedPositions(
+- [2953]     private func referenceDetachedPositions() -> [UUID: IndexBoardGridPosition] {
+- [2963]     private func referenceTempStrips() -> [IndexBoardTempStripState] {
+- [2967]     private func tempLaneParentID() -> UUID? {
+- [2971]     private func resolvedTempGroupWidthsByParentID(
+- [2985]     private func resolvedTempStripMemberWidth(
+- [2997]     private func resolvedTempStripSlotDescriptors(
+- [3014]     private func resolvedTempStripBandFrame(
+- [3029]     private func resolvedDetachedBlockFrame(
+- [3052]     private func resolvedDetachedSlotFrames(
+- [3068]     private func resolvedDetachedBlockDropTarget(
+- [3079]         struct Candidate {
+- [3205]     private func resolvedMovingItems(for draggedCardID: UUID) -> [BoardSurfaceItem] {
+- [3214]     private func sourceTarget(for movingItems: [BoardSurfaceItem], primaryItem: BoardSurfaceItem) -> IndexBoardCardDropTarget {
+- [3249]     private func sourceTarget(for item: BoardSurfaceItem) -> IndexBoardCardDropTarget {
+- [3294]     private func resolvedLocalCardDragPreviewFrames(
+- [3374]     private func beginDrag(cardID: UUID, pointer: CGPoint) {
+- [3466]     private func endDrag(cardID: UUID) {
+- [3519]     private func beginGroupDrag(parentCardID: UUID, pointer: CGPoint) {
+- [3558]     private func endGroupDrag(parentCardID: UUID) {
+- [3600]     private func resolvedGroupDragOrigin(
+- [3611]     private func reconcilePresentationProjection() {
+- [3626]     private func resolvedDropPlacement(for drag: IndexBoardSurfaceAppKitDragState) -> IndexBoardSurfaceAppKitDropPlacement {
+- [3654]     private func resolvedDropTarget(for drag: IndexBoardSurfaceAppKitDragState) -> IndexBoardCardDropTarget {
+- [3730]     private func resolvedGroupFrame(
+- [3752]     private func resolvedPreviewParentGroups(
+- [3786]     private func resolvedLocalGroupDragPreview(
+- [3816]     private func resolvedNearestGroupDragOrigin(
+- [3825]         func isValid(_ origin: IndexBoardGridPosition) -> Bool {
+- [3879]     private func dragFallbackGroupOrigin(
+- [3890]     private func shouldPreferDetachedParking(
+- [3921]     private func isDetachedSourcePreview(_ drag: IndexBoardSurfaceAppKitDragState) -> Bool {
+- [3925]     private func resolvedDetachedSourcePreviewPositions(
+- [3934]     private func resolvedDetachedTargetFrames(
+- [3986]     private func resolvedDetachedIndicatorFrames(
+- [4003]     private func resolvedPreviewTempStrips(
+- [4022]     private func resolvedPresentationSurfaceProjection(for drag: IndexBoardSurfaceAppKitDragState) -> BoardSurfaceProjection {
+- [4036]         func rebuiltFlowPresentation(
+- [4103]         func normalizedPresentation(
+- [4213]     private func resolvedPresentationSurfaceProjection(
+- [4255]     private func applyCardDragUpdate(
+- [4284]     private func applyGroupDragUpdate(
+- [4313]     private func updateLocalCardDragPreview(
+- [4326]     private func updateLocalGroupDragPreview(
+- [4341]     private func resolvedDetachedSelectionPositions(
+- [4361]     private func legacyGroupID(for laneParentID: UUID?) -> IndexBoardGroupID {
+- [4365]     private func applyCurrentLayout(animationDuration: TimeInterval) {
+- [4446]     private func canReuseCardViews(
+- [4460]     private func resolvedLayoutDiff(
+- [4510]     private func updateStartAnchor() {
+- [4534]     private func reconcileCardViews() {
+- [4571]     private func reconcileLaneChipViews(affectedLaneKeys: Set<String>? = nil) {
+- [4612]     private func resolvedLaneChipDisplayText(for lane: BoardSurfaceLane) -> String {
+- [4626]     private func resolvedLaneChipFrames() -> [String: CGRect] {
+- [4645]     private func resolvedParentGroupFrame(
+- [4666]     private func updateLaneWrappers(affectedLaneKeys: Set<String>? = nil) {
+- [4704]     private func resolvedDisplayedParentGroupFrame(
+- [4726]     private func resolvedLaneTintColorToken(for lane: BoardSurfaceLane?) -> String? {
+- [4738]     private func resolvedLaneTintColor(for lane: BoardSurfaceLane?) -> NSColor {
+- [4750]     private func resolvedParentGroupColorHex(parentCardID: UUID) -> String? {
+- [4755]     private func canDeleteParentGroup(parentCardID: UUID) -> Bool {
+- [4772]     private func makeColorMenuItem(
+- [4784]     private func appendColorItems(
+- [4819]     private func resolvedContextMenuColorHex(from representedObject: Any?) -> String? {
+- [4824]     private func refreshColorDependentPresentation() {
+- [4831]     private func updateSelectionLayer() {
+- [4844]     private func normalizedSelectionRect() -> CGRect? {
+- [4854]     private func resolvedSelectedCardIDs(in selectionRect: CGRect) -> Set<UUID> {
+- [4862]     private func updateHoverIndicator(at point: CGPoint) {
+- [4879]     private func clearHoverIndicator() {
+- [4885]     private func resolvedHoverGridPositionCandidate(at point: CGPoint) -> IndexBoardGridPosition? {
+- [4900]     private func updateHoverIndicatorLayer() {
+- [4928]     private func updateIndicatorLayers() {
+- [4988]     private func replaceIndicatorLayers(
+- [5036]     private func resolvedTargetIndicatorPresentation(
+- [5045]     private func resolvedPlaceholderFillColor(style: IndexBoardSurfaceAppKitPlaceholderStyle) -> NSColor {
+- [5060]     private func resolvedPlaceholderStrokeColor(style: IndexBoardSurfaceAppKitPlaceholderStyle) -> NSColor {
+- [5078]     private func resolvedPlaceholderLineWidth(style: IndexBoardSurfaceAppKitPlaceholderStyle) -> CGFloat {
+- [5089]     private func resolvedPlaceholderLineDashPattern(style: IndexBoardSurfaceAppKitPlaceholderStyle) -> [NSNumber]? {
+- [5098]     private func resolvedSourceGapFrames(for drag: IndexBoardSurfaceAppKitDragState) -> [CGRect] {
+- [5106]     private func resolvedFlowTargetFrames(for drag: IndexBoardSurfaceAppKitDragState) -> [CGRect] {
+- [5129]     private func updateOverlayLayers() {
+- [5196]     private func syncMovingCardViewsToOverlay(for drag: IndexBoardSurfaceAppKitDragState) {
+- [5214]     private func resolvedOverlayCardIDs(for drag: IndexBoardSurfaceAppKitDragState) -> [UUID] {
+- [5220]     private func makeSnapshotLayer(image: NSImage, frame: CGRect) -> CALayer? {
+- [5230]     private func cloneLaneWrapperLayer(_ source: CAShapeLayer) -> CAShapeLayer {
+- [5244]     private func setLiveSurfaceHidden(
+- [5278]     private func beginMotionScene(
+- [5367]     private func endMotionScene() {
+- [5376]     private func updateLivePreviewCardFrames(
+- [5392]     private func resolvedPreviewLaneChipFrames(
+- [5413]     private func resolvedPreviewParentGroupFrame(
+- [5436]     private func resolvedPreviewDisplayedParentGroupFrame(
+- [5466]     private func resolvedPreviewLaneWrapperFrames(
+- [5484]     private func replaceMotionSceneIndicatorLayers(
+- [5521]     private func updateMotionSceneLayout() {
+- [5617]     private func beginBaselineSession(kind: String, movingCardCount: Int) {
+- [5628]     private func finishBaselineSession(didCommit: Bool) {
+- [5634]     private func updateBaselineSession(
+- [5642]     private func baselineMeasurementStart() -> CFTimeInterval? {
+- [5647]     private func recordBaselineTiming(
+- [5658]     private func recordBaselineTiming<T>(
+- [5669]     private func recordBaselineDragTick(
+- [5689]     private func ensureRevealIfNeeded() {
+- [5695]     private func startAutoScrollTimer() {
+- [5702]     private func stopAutoScrollTimer() {
+- [5707]     private func handleAutoScrollTick() {
+- [5733]     private func prepareViewportPreservationAfterDrop(_ preservedOrigin: CGPoint?) {
+- [5738]     private func restoreScrollOriginAfterDrop(
+- [5763]     private func autoScrollAxisDelta(position: CGFloat, viewportLength: CGFloat) -> CGFloat {
+- [5777] private final class IndexBoardSurfaceAppKitContainerView: NSView {
+- [5841]     private func installViewportObservers() {
+- [5940]     func update(configuration: IndexBoardSurfaceAppKitConfiguration) {
+- [5985]     private func scheduleDeferredCommitLayoutFlush() {
+- [6001]     private func applyPendingDropPreservedOriginIfNeeded() {
+- [6027]     private func applyConfiguredViewportIfNeeded() {
+- [6068]     private func viewportNeedsExternalApply() -> Bool {
+- [6085]     private func scheduleDeferredViewportReapplyIfNeeded(maxAttempts: Int = 4) {
+- [6095]     private func performDeferredViewportReapply() {
+- [6114]     private func updateInitialViewportPresentation() {
+- [6125]     private func initialViewportRestoreCompleted() -> Bool {
+- [6139]     private func logViewportDebug(_ event: String) {
+- [6157]     private func handleViewportChanged() {
+- [6190]     private func handleMagnificationChanged() {
+- [6196]     private func syncViewportAfterLiveMagnify() {
+- [6210]     private func suspendHoverIndicatorForScroll() {
+- [6215]     private func scheduleViewportCommit() {
+- [6222]     private func commitViewportSessionIfNeeded() {
+- [6238]     private func resumeHoverIndicatorAfterScrollDelay() {
+- [6247]     private func updateViewportSessionFromScrollView() {
+- [6264]     func flushViewportPersistenceForTeardown() {
+- [6279]     private func normalizeScrollViewInsets() {
+- [6287]     private func suppressScrollPocketVisuals() {
+- [6291]     private func hideScrollPocketSubviews(in view: NSView) {
+- [6303]     private func shouldHideScrollPocketSubview(className: String) -> Bool {
+- [6307]     private func resolvedMagnificationCenter() -> CGPoint {
+- [6313] private struct IndexBoardSurfaceAppKitCanvas: NSViewRepresentable {
+- [6316]     func makeNSView(context: Context) -> IndexBoardSurfaceAppKitContainerView {
+- [6320]     func updateNSView(_ nsView: IndexBoardSurfaceAppKitContainerView, context: Context) {
+- [6324]     static func dismantleNSView(_ nsView: IndexBoardSurfaceAppKitContainerView, coordinator: ()) {
+- [6330] struct IndexBoardSurfaceAppKitPhaseTwoView: View {
+- [6385]     var body: some View {
+- [6487]     private func workspaceStyleToolbarButton(
+- [6498]     private func workspaceStyleToolbarButton(
+- [6512]     private func workspaceStyleToolbarButton<Content: View>(
+
+## wa/WriterViews.swift
+
+### 1) 선언·기능 스냅샷
+- [1] import SwiftUI
+- [2] import AppKit
+- [4] final class WeakTextViewBox {
+- [8] struct MainEditorSessionState: Equatable {
+- [17] enum FinishEditingReason: String {
+- [23] // MARK: - ScenarioWriterView (메인 struct + 프로퍼티 + body + 레이아웃)
+- [25] struct ScenarioWriterView: View {
+- [28]     struct InactivePaneSnapshotState {
+- [34]     struct FocusModeSearchMatch: Equatable {
+- [39]     struct UpperCardCreationRequest: Identifiable {
+- [296]     func performWithoutAnimation(_ updates: () -> Void) {
+- [445]     func scheduleMainCanvasRestoreRequest(
+- [496]     func resolvedMainCanvasHorizontalViewportSnapshotOffset() -> CGFloat? {
+- [504]     func mainCanvasInteractionFingerprint() -> Int {
+- [932]     struct MainCanvasRenderState: Equatable {
+- [943]     struct MainCanvasHost: View, Equatable {
+- [958]         static func == (lhs: MainCanvasHost, rhs: MainCanvasHost) -> Bool {
+- [962]         var body: some View {
+- [1018]     enum WorkspaceTrailingPanelMode: Int {
+- [1024]     struct TrailingWorkspacePanelRenderState: Equatable {
+- [1030]     struct TrailingWorkspacePanelHost: View, Equatable {
+- [1037]         static func == (lhs: TrailingWorkspacePanelHost, rhs: TrailingWorkspacePanelHost) -> Bool {
+- [1041]         var body: some View {
+- [1054]     struct HistoryOverlayRenderState: Equatable {
+- [1061]     struct HistoryOverlayHost: View, Equatable {
+- [1070]         static func == (lhs: HistoryOverlayHost, rhs: HistoryOverlayHost) -> Bool {
+- [1074]         var body: some View {
+- [1086]     struct WorkspaceToolbarRenderState: Equatable {
+- [1094]     struct WorkspaceToolbarHost: View, Equatable {
+- [1098]         static func == (lhs: WorkspaceToolbarHost, rhs: WorkspaceToolbarHost) -> Bool {
+- [1102]         var body: some View {
+- [1107]     struct BottomHistoryBarRenderState: Equatable {
+- [1112]     struct BottomHistoryBarHost: View, Equatable {
+- [1116]         static func == (lhs: BottomHistoryBarHost, rhs: BottomHistoryBarHost) -> Bool {
+- [1120]         var body: some View {
+- [1136]     // MARK: - Body
+- [1138]     var body: some View {
+- [1151]     func configuredWorkspaceRoot(for geometry: GeometryProxy) -> some View {
+- [1159]     func workspaceFocusedRoot(for geometry: GeometryProxy) -> some View {
+- [1166]     func workspaceLifecycleBoundRoot<Content: View>(_ root: Content) -> some View {
+- [1176]     func workspacePrimaryLifecycleRoot<Content: View>(_ root: Content) -> some View {
+- [1211]     func workspaceScenarioBoundRoot<Content: View>(_ root: Content) -> some View {
+- [1224]     func workspacePreferenceBoundRoot<Content: View>(_ root: Content) -> some View {
+- [1245]     func workspaceEditorBoundRoot<Content: View>(_ root: Content) -> some View {
+- [1263]     func workspaceCommandBoundRoot<Content: View>(_ root: Content) -> some View {
+- [1386]     func handleWorkspaceAppear() {
+- [1417]     func handleTimelineVisibilityChange(_ isShown: Bool) {
+- [1428]     func handleHistoryBarVisibilityChange(_ isShown: Bool) {
+- [1448]     func handleHistoryIndexChange() {
+- [1465]     func handleActiveCardIDChange(_ newID: UUID?) {
+- [1543]     func handleScenarioCardsVersionChange() {
+- [1558]     func syncMainCanvasInteractionState(emitNavigationEvent: Bool = false) {
+- [1569]     func handleScenarioHistoryVersionChange() {
+- [1581]     func handleScenarioLinkedCardsVersionChange() {
+- [1588]     func handleMainCanvasHorizontalScrollModeChange() {
+- [1593]     func syncScenarioObservedState() {
+- [1597]     func handleWorkspaceDisappear() {
+- [1627]     func handleShowFocusModeChange(_ isOn: Bool) {
+- [1698]     func handleFocusTypewriterEnabledChange(_ isOn: Bool) {
+- [1707]     func handleEditingCardIDChange(oldID: UUID?, newID: UUID?) {
+- [1825]     func markEditingSessionTextMutation() {
+- [1829]     func scheduleEditEndAutoBackup() {
+- [1837]     func startEditEndAutoBackupNow() {
+- [1872]     func handleMainCardLineSpacingChange() {
+- [1879]     func handleFocusModeEditorCardIDChange(_ newID: UUID?) {
+- [1913]     func handleUndoRequestNotification() {
+- [1930]     func handleRedoRequestNotification() {
+- [1947]     func handleToggleFocusModeRequestNotification() {
+- [1954]     func handleSplitPaneFocusRequestNotification(_ notification: Notification) {
+- [2006]     // MARK: - Layout
+- [2017]     func workspaceLayout(for geometry: GeometryProxy) -> some View {
+- [2047]     func primaryWorkspaceColumn(
+- [2097]     func mainCanvasWithOptionalZoom(size: CGSize, availableWidth: CGFloat) -> some View {
+- [2331]     func presentNamedCheckpointDialog() {
+- [2337]     func toggleHistoryPanel() {
+- [2352]     func toggleAIChat() {
+- [2397]     func historyOverlayHost(containerHeight: CGFloat) -> some View {
+- [2496]     func fountainClipboardPasteDialogOptionRow(_ option: StructuredTextPasteOption) -> some View {
+- [2527]     func fountainClipboardPasteDialogOptionTitle(_ option: StructuredTextPasteOption) -> String {
+- [2536]     func fountainClipboardPasteDialogOptionIcon(_ option: StructuredTextPasteOption) -> String {
+- [2546]     func clonePasteDialogOptionRow(placement: ClonePastePlacement) -> some View {
+- [2580]     func clonePasteDialogOptionTitle(_ placement: ClonePastePlacement) -> String {
+- [2589]     func clonePasteDialogOptionIcon(_ placement: ClonePastePlacement) -> String {
+- [2598]     // MARK: - Main Canvas
+- [2601]     func mainCanvas(size: CGSize, availableWidth: CGFloat) -> some View {
+- [2647]     func mainCanvasScrollableContent(size: CGSize, availableWidth: CGFloat) -> some View {
+- [2678]     func mainCanvasLevelColumns(screenHeight: CGFloat) -> some View {
+- [2697]     func filteredCardsForMainCanvasColumn(levelIndex: Int, cards: [SceneCard]) -> [SceneCard] {
+- [2707]     func mainCanvasRenderState(size: CGSize, availableWidth: CGFloat) -> MainCanvasRenderState {
+- [2720]     func mainCanvasContentFingerprint() -> Int {
+- [2766]     func trailingWorkspacePanelMode() -> WorkspaceTrailingPanelMode {
+- [2776]     func trailingWorkspacePanelRenderState() -> TrailingWorkspacePanelRenderState {
+- [2784]     func trailingWorkspacePanelContentFingerprint() -> Int {
+- [2846]     func historyOverlayRenderState(containerHeight: CGFloat, bottomInset: CGFloat) -> HistoryOverlayRenderState {
+- [2855]     func workspaceToolbarRenderState() -> WorkspaceToolbarRenderState {
+- [2865]     func workspaceToolbarContentFingerprint() -> Int {
+- [2879]     func bottomHistoryBarRenderState() -> BottomHistoryBarRenderState {
+- [2886]     func bottomHistoryBarContentFingerprint() -> Int {
+- [2899]     func historyOverlayContentFingerprint() -> Int {
+- [2914]     func handleMainCanvasInnerTap() {
+- [2924]     func handleMainCanvasHistoryIndexChange(hProxy: ScrollViewProxy) {
+- [2934]     func handleMainCanvasActiveCardChange(_ newID: UUID?, hProxy: ScrollViewProxy, availableWidth: CGFloat) {
+- [3022]     func handleMainCanvasMotionIntent(hProxy: ScrollViewProxy, availableWidth: CGFloat) {
+- [3052]     private func resolvedMainCanvasHorizontalMotionAnimated(
+- [3060]     private func scheduleMainCanvasHorizontalMotion(
+- [3118]     private func applyMainCanvasHorizontalFocusAlignment(
+- [3143]     private func applyMainCanvasHorizontalReorderPreserve(availableWidth _: CGFloat) -> Bool {
+- [3179]     func isMainCanvasHorizontallyAligned(
+- [3205]     func handleMainCanvasMotionSessionClose(hProxy: ScrollViewProxy, availableWidth: CGFloat) {
+- [3215]     func handleMainCanvasRestoreRequest(hProxy: ScrollViewProxy, availableWidth: CGFloat) {
+- [3221]     func handleMainCanvasNavigationSettle(hProxy: ScrollViewProxy, availableWidth: CGFloat) {
+- [3244]     func handleMainCanvasAppear(hProxy: ScrollViewProxy, availableWidth: CGFloat) {
+- [3251]     func activateSplitPaneIfNeeded() {
+- [3256]     private func startSplitPaneMouseMonitor() {
+- [3273]     private func stopSplitPaneMouseMonitor() {
+- [3279]     private func isTextViewInCurrentSplitPane(_ textView: NSTextView) -> Bool {
+- [3290]     private func deactivateSplitPaneInput() {
+- [3299]     private func syncScenarioTimestampSuppressionIfNeeded() {
+- [3314]     private func releaseScenarioTimestampSuppressionIfNeeded() {
+- [3320]     private func displayedLevelsData() -> [LevelData] {
+- [3327]     private func displayedMaxLevelCount(for levelsData: [LevelData]) -> Int {
+- [3334]     private func cancelInactivePaneSnapshotRefresh() {
+- [3339]     private func refreshInactivePaneSnapshotNow() {
+- [3347]     private func scheduleInactivePaneSnapshotRefresh() {
+- [3363]     private func syncSplitPaneActiveCardState(_ cardID: UUID?) {
+- [3368]     private struct StartupFocusSnapshot {
+- [3375]     private func startupFocusSnapshot() -> StartupFocusSnapshot? {
+- [3397]     private func restoreStartupFocusIfNeeded() {
+- [3442]     private func restoredStartupViewportOffsets() -> [String: CGFloat] {
+- [3453]     private func mainCanvasHorizontalViewportPersistenceKey() -> String {
+- [3458]     private func restoredMainCanvasHorizontalViewportOffsets() -> [String: CGFloat] {
+- [3469]     private func restoreStartupMainCanvasHorizontalViewportIfNeeded() -> Bool {
+- [3476]     private func restoreStartupViewportIfNeeded() {
+- [3487]     func applyStoredMainColumnViewportOffsets(_ offsets: [String: CGFloat]) {
+- [3531]     private func requestStartupMainCanvasRestoreIfNeeded() {
+- [3539]     private func startupActiveCard() -> SceneCard? {
+- [3552]     func persistLastFocusSnapshot(
+- [3581]     private func persistCurrentFocusSnapshotIfPossible() {
+- [3595]     private func persistCurrentViewportSnapshotIfPossible() {
+- [3629]     private func persistLastEditedCard(_ cardID: UUID) {
+
+## wa/WriterFocusMode.swift
+
+### 1) 선언·기능 스냅샷
+- [1] import SwiftUI
+- [2] import AppKit
+- [4] fileprivate enum FocusSelectionActiveEdge {
+- [10] extension ScenarioWriterView {
+- [16]     private func beginFocusModeExitTeardownWindow() {
+- [38]     private func isReferenceTextView(_ textView: NSTextView) -> Bool {
+- [54]     func focusModeCanvas(size: CGSize) -> some View {
+- [191]     private func focusModeCanvasBackdrop() -> some View {
+- [202]     private func focusModeCanvasScrollContent(size: CGSize, cards: [SceneCard]) -> some View {
+- [213]     private func focusModeCardsColumn(cards: [SceneCard], cardWidth: CGFloat) -> some View {
+- [230]     private func focusModeCardDivider(card: SceneCard, nextCard: SceneCard) -> some View {
+- [246]     private func focusModeCardScrollID(_ cardID: UUID) -> String {
+- [251]     private func beginFocusModeVerticalScrollAuthority(
+- [265]     private func isFocusModeVerticalScrollAuthorityCurrent(_ authority: FocusModeVerticalScrollAuthority?) -> Bool {
+- [270]     private func isFocusModeVerticalScrollAuthorityCurrent(
+- [279]     private func handleFocusModeCanvasActiveCardChange(_ newID: UUID?, proxy: ScrollViewProxy) {
+- [295]     private func consumePendingFocusModeProgrammaticBeginMatch(for id: UUID) -> Bool {
+- [303]     private func handleFocusModeSuppressedScrollIfNeeded(
+- [329]     private func performFocusModeCanvasActiveCardScroll(
+- [348]     private func applyFocusModeCanvasActiveCardEditorState(id: UUID) {
+- [354]     private func scheduleFocusModeCanvasActiveCardBeginEditingIfNeeded(id: UUID) {
+- [362]     private func handleFocusModeCanvasAppear(proxy: ScrollViewProxy) {
+- [373]     private func handleFocusModeFallbackRevealTickChange(proxy: ScrollViewProxy) {
+- [384]     private func handleFocusModeCanvasWidthChange(oldWidth: CGFloat, newWidth: CGFloat) {
+- [395]     private func openFocusModeSearchPopup() {
+- [409]     func closeFocusModeSearchPopup() {
+- [427]     func clearPersistentFocusModeSearchHighlight() {
+- [443]     private func refreshFocusModeSearchResults() {
+- [482]     private func refreshFocusModeSearchResultsIfNeeded() {
+- [487]     private func moveFocusModeSearchSelection(step: Int) {
+- [503]     private func revealFocusModeSearchMatch(_ match: FocusModeSearchMatch) {
+- [524]     private func scheduleFocusModeSearchHighlight(_ match: FocusModeSearchMatch) {
+- [535]     private func applyFocusModeSearchHighlightIfPossible(
+- [566]     private func resolveFocusModeTextView(for card: SceneCard) -> NSTextView? {
+- [574]     private func resolveSingleFocusModeEditableTextView() -> NSTextView? {
+- [600]     func focusModeCardBlock(_ card: SceneCard, cardWidth: CGFloat) -> some View {
+- [659]     private func resolvedFocusModeCardWidth(forCanvasWidth canvasWidth: CGFloat) -> CGFloat {
+- [664]     func activateFocusModeCardFromClick(
+- [705]     func resolveFocusModeClickCaretLocation(
+- [756]     func focusedColumnCards() -> [SceneCard] {
+- [771]     func startFocusModeKeyMonitor() {
+- [778]     func handleFocusModeKeyDown(_ event: NSEvent) -> NSEvent? {
+- [803]     private func handleFocusEscapeShortcut(_ event: NSEvent, flags: NSEvent.ModifierFlags) -> Bool {
+- [817]     private func handleFocusSearchPopupReturnShortcut(
+- [833]     private func handleFocusCardEditingShortcuts(_ event: NSEvent, flags: NSEvent.ModifierFlags) -> Bool {
+- [843]     private func handleFocusFountainClipboardPasteShortcut(
+- [855]     private func shouldPassThroughAfterFocusReturnBoundaryUpdate(
+- [862]     private func shouldPassThroughFocusModeModifierEvent(_ flags: NSEvent.ModifierFlags) -> Bool {
+- [866]     private func isFocusModeVerticalArrowKey(_ event: NSEvent) -> Bool {
+- [870]     func shouldPassThroughFocusModeEvent(_ event: NSEvent) -> Bool {
+- [879]     func handleFocusDeleteAlertShortcutIfNeeded(_ event: NSEvent) -> Bool {
+- [892]     func isPlainFocusEscape(_ event: NSEvent, flags: NSEvent.ModifierFlags) -> Bool {
+- [900]     func isCommandOnlyFlags(_ flags: NSEvent.ModifierFlags) -> Bool {
+- [907]     func isCommandShiftFlags(_ flags: NSEvent.ModifierFlags) -> Bool {
+- [914]     func handleFocusTypewriterToggleShortcut(_ event: NSEvent, isCommandShift: Bool) -> Bool {
+- [924]     func handleFocusDeleteShortcut(_ event: NSEvent, isCommandShift: Bool) -> Bool {
+- [940]     func handleFocusInsertSiblingShortcut(_ event: NSEvent, isCommandOnly: Bool) -> Bool {
+- [950]     func handleFocusOptionArrowSiblingShortcut(_ event: NSEvent, flags: NSEvent.ModifierFlags) -> Bool {
+- [962]     func handleFocusReturnBoundaryState(_ event: NSEvent, flags: NSEvent.ModifierFlags) -> Bool {
+- [976]     func handleFocusTypewriterCaretShortcut(_ event: NSEvent) -> Bool {
+- [989]     func handleFocusModeArrowNavigation(_ event: NSEvent) -> NSEvent? {
+- [1021]     private func focusModeArrowBoundaryState(
+- [1044]     private func consumeFocusModeArrowNavigationWithoutBoundary() {
+- [1053]     private func performFocusModeArrowBoundaryTransition(
+- [1084]     private func shouldForceFocusModeBoundaryReveal(
+- [1115]     func isTypewriterTriggerKey(_ event: NSEvent) -> Bool {
+- [1126]     func clearFocusBoundaryArm() {
+- [1130]     func stopFocusModeKeyMonitor() {
+- [1138]     func startFocusModeScrollMonitor() {
+- [1144]     private func createFocusModeScrollWheelMonitor() -> Any? {
+- [1150]     private func handleFocusModeScrollWheelEvent(_ event: NSEvent) -> NSEvent? {
+- [1154]     private func createFocusModeBoundsObserver() -> NSObjectProtocol {
+- [1164]     private func handleFocusModeBoundsDidChange(_ notification: Notification) {
+- [1177]     private func isFocusModeInternalTextEditorScrollView(_ scrollView: NSScrollView) -> Bool {
+- [1184]     func stopFocusModeScrollMonitor() {
+- [1198]     func focusModeTargetContainerWidth(for textView: NSTextView) -> CGFloat {
+- [1206]     func applyFocusModeTextViewGeometryIfNeeded(_ textView: NSTextView, reason: String = "focus-mode") -> Bool {
+- [1224]     private func shouldApplyFocusModeTextViewGeometryForCaretEnsure(_ textView: NSTextView) -> Bool {
+- [1266]     private func applyFocusModeTextViewSizingIfNeeded(_ textView: NSTextView) -> Bool {
+- [1288]     private func applyFocusModeInnerScrollViewGeometryIfNeeded(_ scrollView: NSScrollView) -> Bool {
+- [1314]     private func applyFocusModeTextContainerGeometryIfNeeded(_ textView: NSTextView) -> Bool {
+- [1345]     private struct FocusModeTextLayoutContext {
+- [1356]     private func applyFocusModeTextTypographyIfNeeded(_ textView: NSTextView) -> Bool {
+- [1398]     private func resolveFocusModeTextLayoutContext(
+- [1438]     private func applyFocusModeFullParagraphStyleIfNeeded(
+- [1462]     private func applyFocusModeTypingParagraphStyleIfNeeded(
+- [1485]     private func makeFocusModeParagraphStyle(
+- [1498]     private func persistFocusModeTypographyState(context: FocusModeTextLayoutContext) {
+- [1505]     func observedFocusModeBodyHeight(for textView: NSTextView) -> CGFloat? {
+- [1521]     func normalizeInactiveFocusModeTextEditorOffsets(
+- [1547]     private struct FocusModeOffsetNormalizationContext {
+- [1555]     private func resolveFocusModeOffsetNormalizationContext() -> FocusModeOffsetNormalizationContext? {
+- [1579]     private func syncFocusModeObservedBodyHeights(
+- [1593]     private func collectEditableFocusModeTextViews(root: NSView) -> [NSTextView] {
+- [1599]     private func resolveFocusModeOffsetNormalizationTextViews(
+- [1626]     private func strictFocusModeOffsetNormalizationCandidates(
+- [1641]     private func fallbackFocusModeOffsetNormalizationCandidatesIfNeeded(
+- [1660]     private func trimFocusModeOffsetNormalizationCandidatesIfNeeded(
+- [1685]     private func sortedFocusModeTextViewsByVerticalPosition(_ views: [NSTextView]) -> [NSTextView] {
+- [1693]     private func mapFocusModeResponderCardsForNormalization(
+- [1726]     private func normalizeFocusModeTextViews(
+- [1747]     private struct FocusModeTextViewNormalizationMetrics {
+- [1754]     private func normalizeSingleFocusModeTextView(
+- [1789]     private func applyFocusModeGeometryForNormalizationIfNeeded(
+- [1801]     private func updateObservedFocusModeBodyHeightForNormalization(
+- [1815]     private func resetFocusModeTextViewScrollOriginIfNeeded(_ textView: NSTextView) -> Bool {
+- [1826]     func requestFocusModeOffsetNormalization(
+- [1844]     private func shouldRunFocusModeOffsetNormalization(reason: String) -> Bool {
+- [1864]     func normalizeSingleTextEditorOffsetIfNeeded(_ textView: NSTextView, reason: String = "single") {
+- [1875]     func collectTextViews(in root: NSView) -> [NSTextView] {
+- [1888]     func startFocusModeCaretMonitor() {
+- [1903]     func handleFocusModeSelectionNotification(_ notification: Notification) {
+- [1914]     private func processFocusModeSelectionNotification(textView: NSTextView) {
+- [1939]     private struct FocusModeSelectionContext {
+- [1946]     private func focusModeSelectionContext(for textView: NSTextView) -> FocusModeSelectionContext {
+- [1959]     private func restoreExpectedFocusSelectionIfNeeded(
+- [1977]     private func handleDuplicateFocusSelectionIfNeeded(
+- [1992]     private func applyFocusSelectionNotification(
+- [2009]     func focusModeSelectionTextView(from notification: Notification) -> NSTextView? {
+- [2021]     func trackedFocusSelectionCardID(for responderID: ObjectIdentifier) -> UUID? {
+- [2026]     func updateFocusSelectionActiveEdge(
+- [2047]     private struct FocusSelectionEndpoints {
+- [2052]     private func normalizedFocusSelectionEndpoints(selected: NSRange, textLength: Int) -> FocusSelectionEndpoints {
+- [2058]     private func previousFocusSelectionEndpointsIfComparable(
+- [2077]     private func applyFocusSelectionActiveEdge(
+- [2098]     func shouldIgnoreTransientProgrammaticSelection(
+- [2126]     func isDuplicateFocusSelection(
+- [2139]     func storeFocusSelectionState(
+- [2156]     private func resolvedFocusCaretPersistenceLocation(selected: NSRange, textLength: Int) -> Int {
+- [2165]     func scheduleFocusCaretEnsureForSelectionChange() {
+- [2183]     private func focusModeSelectionNeedsVerticalEnsure() -> Bool {
+- [2202]     func handleFocusDeferredTypewriterAfterCompositionIfNeeded(textView: NSTextView) {
+- [2209]     func stopFocusModeCaretMonitor() {
+- [2246]     func rememberFocusResponderCardMapping(textView: NSTextView? = nil) {
+- [2253]     func requestFocusModeCaretEnsure(typewriter: Bool, delay: Double = 0.016, force: Bool = false, reason: String = "unspecified") {
+- [2269]     private func shouldAwaitFocusModeLiveEditorLayoutCommit(
+- [2280]     private func shouldWaitForFocusModeCaretRetryLiveLayout(
+- [2300]     private func shouldDeferFocusModeCaretEnsureForPendingLiveLayout(force: Bool) -> Bool {
+- [2313]     private func executeFocusModeCaretEnsureWork(force: Bool) {
+- [2352]     private func resetFocusModeCaretPendingState(clearDeferredTypewriter: Bool) {
+- [2359]     private func resolvedFocusModeCaretEnsureTypewriterMode(textView: NSTextView) -> Bool {
+- [2369]     func ensureFocusModeCaretVisible(
+- [2403]     private struct FocusModeCaretEnsureContext {
+- [2411]     private func resolveFocusModeCaretEnsureContext() -> FocusModeCaretEnsureContext? {
+- [2431]     private func ensureFocusModeSearchRangeVisible(textView: NSTextView, range: NSRange) {
+- [2464]     private struct FocusModeCaretSelectionRects {
+- [2470]     private struct FocusModeCaretViewportContext {
+- [2480]     private func resolveFocusModeCaretSelectionRects(
+- [2495]     private func resolveFocusModeSelectionRects(
+- [2526]     private func clampedFocusModeSelection(_ selection: NSRange, textLength: Int) -> NSRange {
+- [2533]     private func focusModeCaretRectInDocument(
+- [2553]     private func resolveFocusModeCaretViewportContext(outerScrollView: NSScrollView) -> FocusModeCaretViewportContext {
+- [2580]     private func resolveFocusModeCaretTargetY(
+- [2595]     private func resolveFocusModeTypewriterTargetYIfNeeded(
+- [2610]     private func resolveFocusModeStandardCaretTargetY(
+- [2629]     private func resolveFocusModeExpandedSelectionTargetY(
+- [2654]     private func resolveFocusModeCollapsedSelectionTargetY(
+- [2673]     private func applyFocusModeCaretScrollPositionIfNeeded(
+- [2705]     func outerScrollView(containing textView: NSTextView) -> NSScrollView? {
+- [2720]     func beginFocusModeEditing(
+- [2753]     private func applyFocusModeBeginEditingCardTransition(
+- [2771]     private func prepareFocusModeBeginEditingCaret(
+- [2797]     private func scheduleFocusModeBeginEditingCaret(
+- [2815]     private func prepareFocusModeForEditingSwitchIfNeeded(targetCardID: UUID) {
+- [2827]     private func updateActiveCardForFocusModeEditing(
+- [2850]     private func syncFocusModeEditingState(card: SceneCard, switchingToDifferentCard: Bool) {
+- [2865]     private func resolveFocusModeBeginEditingCaretLocation(
+- [2888]     private func configureFocusModeProgrammaticCaretExpectation(
+- [2909]     private func scheduleFocusModeBeginEditingCaretApplications(
+- [2942]     func scheduleFocusModeCaretEnsureBurst() {
+- [2956]     func handleFocusModeCardContentChange(cardID: UUID, oldValue: String, newValue: String) {
+- [2977]     private func canHandleFocusModeCardContentChange(cardID: UUID, oldValue: String, newValue: String) -> Bool {
+- [2985]     private func syncFocusModeContentChangeEditorOffsetIfNeeded() -> Bool {
+- [2992]     private func shouldSuppressFocusModeProgrammaticContentChange(cardID: UUID, newValue: String) -> Bool {
+- [3000]     private func handleFocusSearchShortcut(
+- [3018]     private func isFocusModeResponderComposingText() -> Bool {
+- [3025]     private func prepareFocusTypingCoalescingSessionIfNeeded(cardID: UUID, oldValue: String, now: Date) {
+- [3042]     private func shouldFinalizeFocusTypingForReturnBoundary(
+- [3054]     private func finalizeFocusTypingForStrongBoundaryIfNeeded(
+- [3063]     func handleFocusModeSelectionChanged() {
+- [3077]     func commitFocusModeCardEditIfNeeded() {
+- [3088]     func applyFocusModeCaretWithRetry(expectedCardID: UUID, location: Int, retries: Int, requestID: Int) {
+- [3121]     private func resolvedFocusModeCaretRetryTextView(expectedCardID: UUID) -> NSTextView? {
+- [3154]     private func resolveFocusModeCaretRetryExpectedCard(
+- [3165]     private func handleFocusModeCaretRetryWithResponder(
+- [3194]     private func shouldRetryFocusModeCaretForResponder(
+- [3231]     private func handleFocusModeCaretRetryWithoutResponder(
+- [3263]     private func requestFocusModeBoundaryFallbackRevealIfNeeded(expectedCardID: UUID) {
+- [3275]     private func shouldRetryFocusModeCaretForExcludedResponder(
+- [3300]     private func shouldRetryFocusModeCaretForResponderCardMismatch(
+- [3320]     private func shouldRetryFocusModeCaretForStaleResponderContent(
+- [3340]     private func applyFocusModeCaretSelection(
+- [3386]     private func clearFocusModeExcludedResponder() {
+- [3391]     private func scheduleFocusModeCaretRetry(
+- [3413]     private func completeFocusUndoSelectionEnsureIfNeeded(
+- [3432]     func toggleFocusMode() {
+- [3448]     private func resolveFocusModeEntryTargetCard() -> SceneCard? {
+- [3456]     private func enterFocusMode(with target: SceneCard) {
+- [3469]     private func exitFocusMode() {
+- [3478]     private func applyFocusModeVisibilityState(entering: Bool) {
+- [3493]     private func schedulePostFocusModeToggleFocusUpdate() {
+- [3503]     private func beginFocusModePresentationTransition(entering: Bool) {
+- [3507]     func completeFocusModePresentationTransitionIfNeeded(entering: Bool) {
+- [3519]     func scheduleFocusModePresentationPhaseResetAfterExit() {
+- [3526]     func restoreMainKeyboardFocus() {
+
+## wa/WriterIndexBoardPhaseTwo.swift
+
+### 1) 선언·기능 스냅샷
+- [1] import SwiftUI
+- [2] import AppKit
+- [3] import Combine
+- [5] struct IndexBoardCardDropTarget: Equatable {
+- [50] enum IndexBoardGroupHoverTargetMode: String {
+- [56] func resolvedIndexBoardGroupHoverTargetMode(
+- [71] private struct IndexBoardResolvedGroupMoveContext {
+- [92] private enum IndexBoardPhaseTwoConstants {
+- [100] private struct IndexBoardCardDisplayItem: Identifiable {
+- [104]     static func live(_ card: SceneCard) -> IndexBoardCardDisplayItem {
+- [108]     static func placeholder(cardID: UUID) -> IndexBoardCardDisplayItem {
+- [113] private struct IndexBoardRenderedGroup: Identifiable {
+- [120]     static func live(
+- [133]     static func placeholder(
+- [147] private struct IndexBoardCardDragState {
+- [156]     func pointerInContent(scrollOrigin: CGPoint) -> CGPoint {
+- [163]     func overlayOrigin(scrollOrigin: CGPoint) -> CGPoint {
+- [172] private struct IndexBoardGroupDragState {
+- [180]     func pointerInContent(scrollOrigin: CGPoint) -> CGPoint {
+- [187]     func overlayOrigin(scrollOrigin: CGPoint) -> CGPoint {
+- [196] private struct IndexBoardCardFramePreferenceKey: PreferenceKey {
+- [199]     static func reduce(value: inout [UUID: CGRect], nextValue: () -> [UUID: CGRect]) {
+- [204] private struct IndexBoardGroupFramePreferenceKey: PreferenceKey {
+- [207]     static func reduce(value: inout [IndexBoardGroupID: CGRect], nextValue: () -> [IndexBoardGroupID: CGRect]) {
+- [213] final class IndexBoardScrollController: ObservableObject {
+- [221]     func attach(scrollView: NSScrollView) {
+- [226]     func detach(matching matchingScrollView: NSScrollView? = nil) {
+- [234]     func refresh(from scrollView: NSScrollView) {
+- [246]     func scroll(by delta: CGPoint) {
+- [273]     func ensureVisible(_ rect: CGRect, padding: CGSize = CGSize(width: 36, height: 28)) {
+- [296] struct IndexBoardScrollViewAccessor: NSViewRepresentable {
+- [301]     func makeCoordinator() -> Coordinator {
+- [305]     func makeNSView(context: Context) -> NSView {
+- [309]     func updateNSView(_ view: NSView, context: Context) {
+- [318]     final class Coordinator {
+- [331]         func attach(
+- [375]         private func detach() {
+- [397]         private func scheduleAttachRetry(
+- [418]         private func applyState(
+- [454]         private func installObservers(for scrollView: NSScrollView) {
+- [494]         private func resolveScrollView(from view: NSView) -> NSScrollView? {
+- [507] private struct IndexBoardCardPlaceholderTile: View {
+- [511]     var body: some View {
+- [525] private struct IndexBoardGroupPlaceholderView: View {
+- [529]     var body: some View {
+- [544] private struct IndexBoardInteractiveGroupView: View {
+- [569]     var body: some View {
+- [692] struct IndexBoardPhaseTwoView: View {
+- [761]     var body: some View {
+- [847]     private func renderedGroupView(_ renderedGroup: IndexBoardRenderedGroup) -> some View {
+- [874]     private func groupDragChangedHandler(
+- [883]     private func groupDragEndedHandler(
+- [1031]     private func renderedGroupsForCardDrag(_ drag: IndexBoardCardDragState) -> [IndexBoardRenderedGroup] {
+- [1043]     private func renderedGroupsForGroupDrag(_ drag: IndexBoardGroupDragState) -> [IndexBoardRenderedGroup] {
+- [1060]     private func handleCardDragChanged(_ card: SceneCard, value: DragGesture.Value) {
+- [1103]     private func handleCardDragEnded(_ card: SceneCard, value: DragGesture.Value) {
+- [1117]     private func handleGroupDragChanged(for group: IndexBoardGroupProjection, value: DragGesture.Value) {
+- [1154]     private func handleGroupDragEnded(for group: IndexBoardGroupProjection, value: DragGesture.Value) {
+- [1166]     private func handleAutoScrollTick() {
+- [1182]     private func recalculateActiveDropTarget() {
+- [1192]     private func resolvedCardDropTarget(for drag: IndexBoardCardDragState) -> IndexBoardCardDropTarget {
+- [1221]     private func resolvedGroupTargetIndex(for drag: IndexBoardGroupDragState) -> Int {
+- [1248]     private func resolvedCardSlotRect(
+- [1258]     private func resolvedCardSlotRect(
+- [1275]     private func resolvedCardGridOrigin(for group: IndexBoardGroupProjection) -> CGPoint {
+- [1294]     private func resolvedGroupSlotRects(for groups: [IndexBoardGroupProjection]) -> [(Int, CGRect)] {
+- [1369]     private func autoScrollDelta(for pointerInViewport: CGPoint) -> CGPoint {
+- [1376]     private func autoScrollAxisDelta(position: CGFloat, viewportLength: CGFloat) -> CGFloat {
+- [1390]     private func distance(from point: CGPoint, to rect: CGRect) -> CGFloat {
+- [1396]     private func groupPlaceholderHeight(for groupID: IndexBoardGroupID) -> CGFloat {
+- [1409]     private func cardByID(_ cardID: UUID) -> SceneCard? {
+- [1416]     private func attemptPendingCardReveal() {
+- [1425]     private func scheduleScrollOffsetPersistence(_ offset: CGPoint) {
+- [1441]     private func scheduleZoomPersistence(_ scale: CGFloat) {
+- [1451]     private func cancelDeferredViewportPersistence() {
+- [1458]     private func flushDeferredViewportPersistence() {
+- [1465] private extension IndexBoardCardDragState {
+- [1471] private struct IndexBoardOptionalGestureModifier<G: Gesture>: ViewModifier {
+- [1476]     func body(content: Content) -> some View {
+- [1485] extension ScenarioWriterView {
+- [1486]     private func scheduleIndexBoardCommitCardMutation(
+- [1508]     func commitIndexBoardCardMoveSelection(
+- [1634]     func commitIndexBoardCardMove(
+- [1726]     private func commitDetachedIndexBoardCardMove(
+- [1784]     private func commitDetachedIndexBoardCardMoveSelection(
+- [1846]     func commitIndexBoardGroupMove(
+- [1881]     func commitIndexBoardParentGroupMove(
+- [1932]     func setIndexBoardParentGroupTemp(
+- [1973]     private func applyIndexBoardSurfaceParentOrdering(
+- [2031]     private func applyIndexBoardGroupMove(
+- [2047]     private func applyIndexBoardParentPlacement(
+- [2112]     private func resolvedIndexBoardCardDestination(
+- [2166]     private func resolvedExactIndexBoardCardDestination(
+- [2220]     private func resolvedIndexBoardDetachedPositionsAfterRemovingCards(
+- [2230]     private func resolvedIndexBoardTempGroupWidths(
+- [2244]     private func resolvedUpdatedIndexBoardTempStrips(
+- [2258]     private func applyIndexBoardTempStripOrdering(
+- [2289]     private func reindexIndexBoardDetachedSiblingsVisually(preferredColumns: Int?) {
+- [2297]     private func reindexIndexBoardSiblingsVisually(
+- [2331]     private func resolvedIndexBoardVisualGridPositionByCardID(
+- [2356]     private func resolvedIndexBoardMovingCards(
+- [2385]     private func resolvedDetachedSelectionPositions(
+- [2409]     private func resolvedIndexBoardGroupDestination(
+- [2446]     private func firstValidIndexBoardAncestorParent(
+- [2462]     private func isValidIndexBoardParent(
+
+## wa/WriterSharedTypes.swift
+
+### 1) 선언·기능 스냅샷
+- [1] import SwiftUI
+- [2] import AppKit
+- [3] import AVFoundation
+- [4] import Combine
+- [5] import QuartzCore
+- [9] #if DEBUG
+- [10] func bounceDebugLog(_ message: @autoclosure () -> String) {}
+- [11] #else
+- [12] func bounceDebugLog(_ message: @autoclosure () -> String) {}
+- [13] #endif
+- [15] private enum MainWorkspacePhase0Diagnostics {
+- [26] func mainWorkspacePhase0Mark(_ label: String) {
+- [42] func mainWorkspacePhase0Log(
+- [62] func mainWorkspacePhase0CardID(_ id: UUID?) -> String {
+- [67] private func mainWorkspacePhase0RectSummary(_ rect: NSRect) -> String {
+- [71] func mainWorkspacePhase0TextViewSummary(
+- [109] func mainWorkspacePhase0ResponderSummary(expectedText: String? = nil) -> String {
+- [117] enum SoftBoundaryFeedbackSound {
+- [128] func preloadSoftBoundaryFeedbackSound() {
+- [133] func playSoftBoundaryFeedbackSound() {
+- [142] enum ScenarioCardCategory {
+- [149] enum FocusModeLayoutMetrics {
+- [158]     static func resolvedTextWidth(for cardWidth: CGFloat) -> CGFloat {
+- [163] enum MainEditorLayoutMetrics {
+- [175] enum MainCanvasLayoutMetrics {
+- [188] enum MainCanvasHorizontalScrollMode: Int, CaseIterable, Identifiable {
+- [204] enum MainEditingViewportRevealEdge: Equatable {
+- [209] enum FocusModeVerticalScrollAuthorityKind: String {
+- [216] struct FocusModeVerticalScrollAuthority: Equatable {
+- [222] struct FocusModeWorkspaceSnapshot: Equatable {
+- [232] enum FocusModePresentationPhase: String, Equatable {
+- [239] enum MainSelectionActiveEdge {
+- [244] struct AICandidateTrackingState {
+- [250] struct LevelData {
+- [255] struct DisplayedMainLevelsCacheKey: Equatable {
+- [261] struct MainColumnFocusRequest: Equatable {
+- [272] struct MainColumnLayoutFrame: Equatable {
+- [279] enum MainCardHeightMode: Int, Hashable {
+- [284] struct MainCardHeightCacheKey: Hashable {
+- [294] struct MainCardHeightRecord {
+- [299] struct MainColumnLayoutCacheKey: Hashable {
+- [310] struct MainColumnLayoutSnapshot {
+- [318] final class AppWindowState: ObservableObject {
+- [322] struct IndexBoardCanvasDigestSnapshot: Equatable {
+- [328] struct IndexBoardCanvasDerivedPayload {
+- [336] final class IndexBoardCanvasDerivedCache: ObservableObject {
+- [346]     func resolve(
+- [388] struct MainCardRenderSettings: Equatable {
+- [400] struct ReferenceCardRenderSettings: Equatable {
+- [409] final class WriterInteractionRuntime {
+- [482] final class MainCardDragSessionTracker {
+- [493]     func refreshCommandState() {
+- [499]     func begin() {
+- [550]     func end() {
+- [566] final class MainCanvasViewState: ObservableObject {
+- [567]     struct RestoreRequest: Equatable {
+- [568]         enum Reason: String {
+- [591]     func scheduleRestoreRequest(
+- [609] final class WriterAIFeatureState: ObservableObject {
+- [641] final class WriterEditEndAutoBackupState: ObservableObject {
+- [652] final class ScenarioWriterObservedState: ObservableObject {
+- [664]     func bind(to scenario: Scenario) {
+- [698] enum TimelinePanelLayoutMetrics {
+- [711] // MARK: - Array safe subscript
+- [713] extension Array {
+- [717] // MARK: - 공유 색상 유틸리티 (캐싱)
+- [721] final class HexColorCache: @unchecked Sendable {
+- [725]     func rgb(from hex: String) -> (Double, Double, Double)? {
+- [746] func parseHexRGB(_ hex: String, stripAllHashes: Bool = false) -> (Double, Double, Double)? {
+- [752] func normalizeGeminiModelIDValue(_ raw: String) -> String {
+- [767] // MARK: - Shared Text Measurement Utilities
+- [771] func normalizedSharedMeasurementText(_ text: String) -> String {
+- [781] func makeSharedRenderParagraphStyle(_ lineSpacing: CGFloat) -> NSMutableParagraphStyle {
+- [792] func sharedStableTextFingerprint(_ text: String) -> UInt64 {
+- [801] final class SharedTextHeightMeasurementCache: @unchecked Sendable {
+- [808]     func measureBodyHeight(
+- [862]     private func measurementCacheKey(
+- [881] func sharedMeasuredTextBodyHeight(
+- [899] func sharedResolvedClickCaretLocation(
+- [964] func sharedLiveTextViewBodyHeight(
+- [987] // MARK: - Shared Text Processing Utilities
+- [991] func sharedUTF16ChangeDeltaValue(oldValue: String, newValue: String) -> TextChangeDelta {
+- [1022] func sharedHasParagraphBreakBoundary(in text: NSString, delta: TextChangeDelta) -> Bool {
+- [1041] // MARK: - Fountain Clipboard Parsing
+- [1043] struct FountainClipboardImport {
+- [1058] struct FountainClipboardPastePreview {
+- [1063] enum StructuredTextPasteOption: Equatable {
+- [1068] func parseFountainClipboardImport(from rawText: String) -> FountainClipboardImport? {
+- [1085] func normalizedClipboardText(_ text: String) -> String {
+- [1091] func isFountainSceneHeadingLine(_ line: String) -> Bool {
+- [1107] func buildFountainSceneCards(from lines: [String], startingAt firstSceneIndex: Int) -> [String] {
+- [1135] func parseFountainTitlePageFields(from lines: [String]) -> [String: [String]] {
+- [1169] func parseFountainTitlePageField(_ line: String) -> (key: String, value: String)? {
+- [1178] func normalizedFountainTitlePageFieldKey(_ key: String) -> String {
+- [1184] func buildFountainCoverCardContent(from fields: [String: [String]]) -> String? {
+- [1226] func resolvedFountainContactValues(from fields: [String: [String]]) -> [String]? {
+- [1243] func joinedFountainFieldValues(_ values: [String]?, separator: String) -> String? {
+- [1252] func sharedLineHasSignificantContentBeforeBreak(in text: NSString, breakIndex: Int) -> Bool {
+- [1270] func sharedHasSentenceEndingPeriodBoundarySimple(in text: NSString, delta: TextChangeDelta) -> Bool {
+- [1294] func sharedHasSentenceEndingPeriodBoundaryExtended(in text: NSString, delta: TextChangeDelta) -> Bool {
+- [1313] func sharedIsSentenceEndingPeriod(at index: Int, in text: NSString) -> Bool {
+- [1333] func sharedIsWhitespaceUnit(_ unit: unichar) -> Bool {
+- [1338] func sharedIsDigitAtUTF16Index(_ text: NSString, index: Int) -> Bool {
+- [1345] func sharedIsClosingPunctuationUnit(_ unit: unichar) -> Bool {
+- [1358] func sharedClampTextValue(_ text: String, maxLength: Int, preserveLineBreak: Bool = false) -> String {
+- [1370] func sharedSearchTokensValue(from text: String) -> [String] {
+- [1397] enum CaretScrollCoordinator {
+- [1398]     static func resolvedVerticalTargetY(
+- [1409]     static func resolvedVerticalAnimationDuration(
+- [1421]     static func applyVerticalScrollIfNeeded(
+- [1445]     static func applyAnimatedVerticalScrollIfNeeded(
+- [1484]     static func resolvedHorizontalTargetX(
+- [1495]     static func resolvedHorizontalAnimationDuration(
+- [1507]     static func applyHorizontalScrollIfNeeded(
+- [1531]     static func applyAnimatedHorizontalScrollIfNeeded(
+- [1571] struct MainCanvasHorizontalScrollViewAccessor: NSViewRepresentable {
+- [1574]     func makeCoordinator() -> Coordinator {
+- [1578]     func makeNSView(context: Context) -> NSView {
+- [1582]     func updateNSView(_ view: NSView, context: Context) {
+- [1586]     final class Coordinator {
+- [1599]         func attach(to view: NSView, scrollCoordinator: MainCanvasScrollCoordinator) {
+- [1616]         private func detach() {
+- [1639]         private func scheduleAttachRetry(to view: NSView, scrollCoordinator: MainCanvasScrollCoordinator) {
+- [1651]         private func installObservers(for scrollView: NSScrollView) {
+- [1691]         private func resolveScrollView(from view: NSView) -> NSScrollView? {
+- [1704] struct MainColumnScrollViewAccessor: NSViewRepresentable {
+- [1710]     func makeCoordinator() -> Coordinator {
+- [1714]     func makeNSView(context: Context) -> NSView {
+- [1718]     func updateNSView(_ view: NSView, context: Context) {
+- [1728]     final class Coordinator {
+- [1741]         func attach(
+- [1785]         private func detach() {
+- [1802]         private func scheduleAttachRetry(
+- [1826]         private func installObserver(for scrollView: NSScrollView) {
+- [1837]         private func publishCurrentOffset() {
+- [1847]         private func applyStoredOffsetIfNeeded(_ storedOffsetY: CGFloat) {
+- [1874]         private func resolveScrollView(from view: NSView) -> NSScrollView? {
+- [1887] // MARK: - 히스토리 비교를 위한 타입
+- [1889] enum DiffStatus {
+- [1893] struct SnapshotDiff: Identifiable {
+- [1899] // MARK: - 드롭 위치 식별을 위한 타입
+- [1901] enum DropTarget: Equatable {
+- [1912] struct CardTreeClipboardNode: Codable {
+- [1919] struct CardTreeClipboardPayload: Codable {
+- [1923] struct CloneCardClipboardItem: Codable {
+- [1931] struct CloneCardClipboardPayload: Codable {
+- [1936] enum ClonePastePlacement {
+- [1941] struct ClonePeerMenuDestination: Identifiable {
+- [1946] // MARK: - AI 카드 생성 타입
+- [1948] enum AICardAction: String, CaseIterable, Identifiable {
+- [2022] enum AIGenerationOption: String, CaseIterable, Identifiable, Hashable {
+- [2119] // MARK: - PreferenceKeys
+- [2121] struct FocusModeMeasuredActiveHeightKey: PreferenceKey {
+- [2123]     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+- [2131] struct FocusModeMeasuredInactiveHeightKey: PreferenceKey {
+- [2133]     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+- [2141] struct FocusModeEditorBodyHeightKey: PreferenceKey {
+- [2143]     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+- [2151] struct FocusModeCardRootHeightKey: PreferenceKey {
+- [2153]     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+- [2161] struct FocusModeCardFramePreferenceKey: PreferenceKey {
+- [2163]     static func reduce(value: inout [UUID: CGRect], nextValue: () -> [UUID: CGRect]) {
+- [2168] struct MainColumnCardFramePreferenceKey: PreferenceKey {
+- [2170]     static func reduce(value: inout [UUID: CGRect], nextValue: () -> [UUID: CGRect]) {
+- [2175] struct MainColumnEditorSlotPreferenceKey: PreferenceKey {
+- [2177]     static func reduce(value: inout [UUID: CGRect], nextValue: () -> [UUID: CGRect]) {
+- [2182] struct HistoryBarHeightPreferenceKey: PreferenceKey {
+- [2184]     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+
+## wa/WriterKeyboardHandlers.swift
+
+### 1) 선언·기능 스냅샷
+- [1] import SwiftUI
+- [2] import AppKit
+- [4] extension ScenarioWriterView {
+- [9]     private func monitoredMainKeyboardKeyName(for press: KeyPress) -> String? {
+- [21]     private func monitoredMainKeyboardKeyName(for event: NSEvent) -> String? {
+- [33]     private func logMonitoredMainKeyboardEvent(
+- [50]     func handleGlobalKeyPress(_ press: KeyPress) -> KeyPress.Result {
+- [139]     func handleIndexBoardToggleShortcut(_ press: KeyPress) -> KeyPress.Result? {
+- [155]     func handleSplitPaneCycleShortcut(_ press: KeyPress) -> KeyPress.Result? {
+- [168]     func handleHistoryPreviewClipboardShortcut(_ press: KeyPress, isTyping: Bool) -> KeyPress.Result? {
+- [187]     func handleDeleteAlertShortcut(_ press: KeyPress) -> KeyPress.Result? {
+- [203]     func isClonePastePlacementEnabled(_ placement: ClonePastePlacement) -> Bool {
+- [212]     func resetFountainClipboardPasteDialogSelection() {
+- [216]     func moveFountainClipboardPasteDialogSelection() {
+- [225]     func confirmFountainClipboardPasteDialogSelection() {
+- [229]     func handleFountainClipboardPasteDialogKeyPress(_ press: KeyPress) -> KeyPress.Result {
+- [253]     func handleFountainClipboardPasteDialogKeyDownEvent(_ event: NSEvent) -> Bool {
+- [280]     func isPlainPasteShortcut(_ press: KeyPress) -> Bool {
+- [285]     func resetClonePasteDialogSelection() {
+- [289]     func moveClonePasteDialogSelection() {
+- [302]     func confirmClonePasteDialogSelection() {
+- [307]     func handleClonePasteDialogKeyPress(_ press: KeyPress) -> KeyPress.Result {
+- [331]     func handleClonePasteDialogKeyDownEvent(_ event: NSEvent) -> Bool {
+- [358]     func handleDownPhaseShortcuts(
+- [445]     func handleHistoryNavigationShortcut(_ press: KeyPress, isTyping: Bool) -> KeyPress.Result? {
+- [473]     func handleTypingContextShortcut(_ press: KeyPress, isMainEditorTyping: Bool) -> KeyPress.Result? {
+- [519]     func handleClipboardShortcut(_ press: KeyPress) -> KeyPress.Result? {
+- [538]     func handleCommandShiftMoveShortcut(_ press: KeyPress) -> KeyPress.Result? {
+- [559]     func handleIdleArrowNavigationShortcut(_ press: KeyPress) -> KeyPress.Result? {
+- [577]     func handleCommandCreationAndSearchShortcut(_ press: KeyPress) -> KeyPress.Result? {
+- [626]     func handlePlainEntryShortcut(_ press: KeyPress) -> KeyPress.Result? {
+- [657]     func clearMainEditTabArm() {
+- [662]     func clearKeyboardRangeSelectionAnchor() {
+- [666]     func applyKeyboardRangeSelection(on level: [SceneCard], anchorID: UUID, targetID: UUID) {
+- [678]     func updateKeyboardRangeSelection(from currentCard: SceneCard, to targetCard: SceneCard, in level: [SceneCard]) {
+- [695]     func handleMainEditorBoundaryNavigation(_ press: KeyPress) -> Bool {
+- [703]     func handleMainEditorBoundaryCommand(_ commandSelector: Selector) -> Bool {
+- [733]     private func handleMainEditorBoundaryNavigation(
+- [824]     func handleMainBoundaryUpArrow(
+- [890]     func handleMainBoundaryDownArrow(
+- [955]     func handleMainBoundaryLeftArrow(
+- [998]     func handleMainBoundaryRightArrow(
+- [1066]     func applyMainBoundaryShiftSelection(from editingCard: SceneCard, to target: SceneCard, in level: [SceneCard]) {
+- [1072]     func switchMainEditingTarget(
+- [1114]     func startMainNavKeyMonitor() {
+- [1288]     func stopMainNavKeyMonitor() {
+- [1295]     func clearMainBoundaryFeedbackGate() {
+- [1300]     func playMainBoundaryFeedbackIfNeeded(for keyCode: UInt16, activeID: UUID?) {
+- [1309]     func boundaryFeedbackKeyCode(for key: KeyEquivalent) -> UInt16? {
+- [1319]     func registerMainVerticalArrowPress(for keyCode: UInt16) -> Bool {
+- [1329]     func shouldSuppressCrossCategoryVerticalTransition(
+- [1344]     func clearMainNoChildRightArm() {
+- [1349]     func armMainNoChildRight(for cardID: UUID) {
+- [1354]     func isMainNoChildRightArmed(for cardID: UUID) -> Bool {
+- [1359]     func clearMainBoundaryParentLeftArm() {
+- [1364]     func armMainBoundaryParentLeft(for cardID: UUID) {
+- [1369]     func isMainBoundaryParentLeftArmed(for cardID: UUID) -> Bool {
+- [1374]     func clearMainBoundaryChildRightArm() {
+- [1379]     func armMainBoundaryChildRight(for cardID: UUID) {
+- [1384]     func isMainBoundaryChildRightArmed(for cardID: UUID) -> Bool {
+- [1390]     func preferredChild(for card: SceneCard) -> SceneCard? {
+- [1394]     func preferredChild(for card: SceneCard, matching category: String?) -> SceneCard? {
+- [1407]     func preferredMainNavigationChild(for card: SceneCard, matching category: String?) -> SceneCard? {
+- [1414]     func resolvedMainUnfilteredLevel(at levelIndex: Int) -> [SceneCard]? {
+- [1420]     private func resolvedMainBoundaryNavigableLevel(at levelIndex: Int) -> [SceneCard]? {
+- [1426]     func mainCrossCategoryBoundaryTarget(
+- [1444]     func resolvedMainSelectionLevel(
+- [1457]     func nearestChildInSibling(
+- [1498]     func nearestLevelChildTarget(
+- [1564]     func nearestLevelChildTarget(in level: [SceneCard], around index: Int) -> SceneCard? {
+- [1573]     enum MainRightResolution {
+- [1579]     enum MainArrowDirection {
+- [1586]     func resolvedMainRightTarget(
+- [1626]     func performMainArrowNavigation(
+- [1831]     func handleNavigationKeyCode(_ keyCode: UInt16, isRepeat: Bool = false, isShiftPressed: Bool = false) -> Bool {
+- [1882]     func handleNavigation(press: KeyPress) -> KeyPress.Result {
+- [1945]     func directionForNavigationKeyCode(_ keyCode: UInt16) -> MainArrowDirection? {
+- [1955]     func directionForNavigationKeyPress(_ key: KeyEquivalent) -> MainArrowDirection? {
+- [1965]     func registerHandledMainArrowNavigation(
+- [2011]     enum MoveDirection { case up, down, left, right }
+- [2013]     func moveCardHierarchy(direction: MoveDirection) {
+- [2057]     func moveCardWithinLevel(card: SceneCard, direction: MoveDirection) {
+- [2086]     func normalizeIndices(parent: SceneCard?) {
+
+## wa/WriterIndexBoardScaffolding.swift
+
+### 1) 선언·기능 스냅샷
+- [1] import SwiftUI
+- [2] import AppKit
+- [4] struct IndexBoardScaffoldView: View {
+- [17]     var body: some View {
+- [72]     private func scaffoldMetricRow(label: String, value: String) -> some View {
+- [86] extension ScenarioWriterView {
+- [107]     func handleIndexBoardVisibilityChange(_ isVisible: Bool) {
+- [118]     func handleIndexBoardKeyPress(_ press: KeyPress) -> KeyPress.Result? {
+- [190]     func canBeginIndexBoardInlineEditingFromKeyboard() -> Bool {
+- [201]     func handleIndexBoardSharedPanelShortcut(_ press: KeyPress) -> KeyPress.Result? {
+- [219]     func handleIndexBoardZoomShortcut(_ press: KeyPress) -> KeyPress.Result? {
+- [244]     func indexBoardSourceTitle(for parentID: UUID?) -> String {
+- [250]     func canOpenIndexBoard(sourceParentID: UUID?, sourceDepth: Int) -> Bool {
+- [257]     func handleOpenIndexBoardRequestNotification() {
+- [294]     private func mergedIndexBoardSourceCardIDs(_ liveIDs: [UUID], persistedIDs: [UUID]) -> [UUID] {
+- [305]     private func resolvedFallbackIndexBoardColumnContext() -> (level: Int, parent: SceneCard?, cards: [SceneCard])? {
+- [330]     private func resolvedLiveIndexBoardSourceCards(for source: IndexBoardColumnSource) -> [SceneCard] {
+- [337]     private func confirmIndexBoardSourceReplacement(
+- [352]     func openIndexBoard(sourceParentID: UUID?, sourceDepth: Int, sourceCardIDs: [UUID]) {
+- [411]     func deactivateIndexBoardSessionIfNeeded() -> IndexBoardSessionState? {
+- [430]     func closeIndexBoard() {
+- [443]     func teardownIndexBoardIfNeeded(restoreEntryState: Bool) {
+- [450]     func captureIndexBoardEntrySnapshot() -> IndexBoardEntrySnapshot {
+- [492]     func restoreIndexBoardEntrySnapshot(_ snapshot: IndexBoardEntrySnapshot) {
+- [613]     func restoreIndexBoardExitState(from entrySnapshot: IndexBoardEntrySnapshot) {
+- [681]     func resolvedIndexBoardSurfaceProjection(
+- [733]         func resolvedIsTempDescendant(_ cardID: UUID?) -> Bool {
+- [968]     func resolvedIndexBoardLogicalState(
+- [989]     func applyIndexBoardLogicalState(
+- [1004]     func persistIndexBoardSurfacePresentation(_ surfaceProjection: BoardSurfaceProjection) {
+- [1011]     private func resolvedLiveIndexBoardSourceCards(for session: IndexBoardSessionState) -> [SceneCard] {
+- [1050]     func resolvedIndexBoardProjection(
+- [1080]     func resolvedIndexBoardProjection() -> IndexBoardProjection? {
+- [1085]     private func resolvedIndexBoardMainlineGroupIDs(
+- [1118]     private func normalizedIndexBoardParentGroups(
+- [1152]     private func indexBoardSurfaceGroupsAreConnected(
+- [1168]     private func indexBoardSurfaceGroupSort(
+- [1181]     private func indexBoardSurfaceItemGridSort(
+- [1196]     func indexBoardLaneLabel(
+- [1211]     func indexBoardLaneSubtitle(
+- [1233]     func indexBoardLaneColorToken(for parentCard: SceneCard?, childCards: [SceneCard]) -> String? {
+- [1237]     func indexBoardLaneStatusText(
+- [1253]     func indexBoardGroupTitle(for parentCard: SceneCard?) -> String {
+- [1257]     func indexBoardGroupSubtitle(for parentCard: SceneCard?, childCards: [SceneCard]) -> String {
+- [1261]     func indexBoardGroupStatusText(for parentCard: SceneCard?, childCards: [SceneCard]) -> String {
+- [1274]     func setIndexBoardZoomScale(_ scale: CGFloat) {
+- [1284]     func stepIndexBoardZoom(by delta: CGFloat) {
+- [1288]     func resetIndexBoardZoom() {
+- [1292]     func updateIndexBoardScrollOffset(_ offset: CGPoint) {
+- [1301]     func persistIndexBoardViewport(zoomScale: CGFloat, scrollOffset: CGPoint) {
+- [1310]     func handleIndexBoardCardClick(_ card: SceneCard, orderedCardIDs: [UUID]) {
+- [1332]     func handleIndexBoardCardDragStart(cardID: UUID, movingCardIDs: [UUID]) {
+- [1351]     func handleIndexBoardCommandClick(_ card: SceneCard) {
+- [1365]     func handleIndexBoardRangeClick(_ card: SceneCard, orderedCardIDs: [UUID], additive: Bool) {
+- [1386]     func resolvedIndexBoardRangeAnchorID(in orderedCardIDs: [UUID]) -> UUID? {
+- [1406]     func indexBoardRangeSelectionIDs(
+- [1421]     func applyIndexBoardMarqueeSelection(_ cardIDs: Set<UUID>, orderedCardIDs: [UUID]) {
+- [1436]     func clearIndexBoardSelection() {
+- [1444]     func deleteSelectedIndexBoardCards() {
+- [1452]     func deleteIndexBoardCardFromContextMenu(_ cardID: UUID) {
+- [1469]     func deleteIndexBoardParentGroupFromContextMenu(_ parentCardID: UUID) {
+- [1481]     private func performIndexBoardDeletion(
+- [1525]     private func cleanupIndexBoardSessionAfterDelete(_ removedIDs: Set<UUID>, persist: Bool) {
+- [1554]     private func resolvedNextIndexBoardCandidateAfterDelete(
+- [1584]     private func updateIndexBoardSelectionAfterDelete(
+- [1624]     func updateIndexBoardGroupPosition(parentCardID: UUID, position: IndexBoardGridPosition?) {
+- [1635]     private func indexBoardRowMajorPredecessorGroup(
+- [1649]     private func resolvedIndexBoardParentCreationInsertionContext(
+- [1674]     private func resolvedIndexBoardParentCreationCategory(
+- [1678]         func isSemanticParent(_ card: SceneCard?) -> Bool {
+- [1701]     func createIndexBoardParentFromSelection() {
+- [1798]     func toggleIndexBoardCardFace(_ card: SceneCard) {
+- [1807]     func indexBoardCanvas(size: CGSize) -> some View {
+- [2048]     func openIndexBoardForColumn(level: Int, parent: SceneCard?, cards: [SceneCard]) {
+- [2057]     func indexBoardColumnContextMenu(level: Int, parent: SceneCard?, cards: [SceneCard]) -> some View {
+
+## wa/WriterCardViews.swift
+
+### 1) 선언·기능 스냅샷
+- [1] import SwiftUI
+- [2] import AppKit
+- [3] import UniformTypeIdentifiers
+- [5] private func resolveFocusModeTextFont(_ fontSize: CGFloat) -> NSFont {
+- [10] private func resolveFocusModeTextColor(_ appearance: String) -> NSColor {
+- [14] private func makeFocusModeRenderParagraphStyle(_ lineSpacing: CGFloat) -> NSMutableParagraphStyle {
+- [18] private func makeFocusModeAttributedString(
+- [34] private func resolvedFocusModeObservedBodyHeight(_ textView: NSTextView) -> CGFloat? {
+- [49] private struct FocusModeReadOnlyTextRenderer: NSViewRepresentable {
+- [50]     struct Signature: Equatable {
+- [59]     final class Coordinator {
+- [70]     func makeCoordinator() -> Coordinator {
+- [74]     func makeNSView(context: Context) -> NSTextView {
+- [104]     func updateNSView(_ textView: NSTextView, context: Context) {
+- [108]     private func updateTextView(_ textView: NSTextView, coordinator: Coordinator) {
+- [153] private struct FocusModeEditableTextRenderer: NSViewRepresentable {
+- [154]     struct Signature: Equatable {
+- [163]     final class Coordinator: NSObject, NSTextViewDelegate {
+- [172]         func textView(
+- [181]         func textDidChange(_ notification: Notification) {
+- [202]     func makeCoordinator() -> Coordinator {
+- [206]     func makeNSView(context: Context) -> NSTextView {
+- [237]     func updateNSView(_ textView: NSTextView, context: Context) {
+- [245]     private func reportLiveEditorLayout(from textView: NSTextView) {
+- [257]     private func updateTextView(_ textView: NSTextView, coordinator: Coordinator) {
+- [357] struct MainWorkspaceEditableTextRenderer: NSViewRepresentable {
+- [358]     struct Signature: Equatable {
+- [366]     final class TextView: NSTextView {
+- [374]         private func clampFrameToFixedGeometryIfNeeded() {
+- [440]     final class Coordinator: NSObject, NSTextViewDelegate {
+- [460]         func log(_ event: String, _ textView: NSTextView? = nil, _ details: String = "") {
+- [474]         func textView(
+- [488]         func textDidBeginEditing(_ notification: Notification) {
+- [495]         func textDidEndEditing(_ notification: Notification) {
+- [504]         func textDidChange(_ notification: Notification) {
+- [520]         func textViewDidChangeSelection(_ notification: Notification) {
+- [525]         func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+- [530]         func reportLayout(from textView: NSTextView, reason: String) {
+- [571]         func handleLayoutPass(_ textView: NSTextView) {
+- [575]         func handleFocusStateChange(_ isFocused: Bool) {
+- [579]         func requestFocus(for textView: NSTextView, remainingRetries: Int = 4) {
+- [630]     func makeCoordinator() -> Coordinator {
+- [634]     func makeNSView(context: Context) -> NSTextView {
+- [674]     func updateNSView(_ textView: NSTextView, context: Context) {
+- [696]     static func dismantleNSView(_ textView: NSTextView, coordinator: Coordinator) {
+- [709]     private func updateTextView(_ textView: NSTextView, coordinator: Coordinator) {
+- [815] // MARK: - 카드 사이 및 열 상/하단 빈 공간 드롭 영역
+- [817] struct DropSpacer: View {
+- [827]     var body: some View {
+- [873] // MARK: - 히스토리 프리뷰 카드
+- [875] struct PreviewCardItem: View {
+- [913]     var body: some View {
+- [941] // MARK: - 포커스 모드 카드 에디터
+- [943] struct FocusModeCardEditor: View {
+- [990]     var body: some View {
+- [1052] // MARK: - 메인 카드 아이템
+- [1054] struct CardItem: View {
+- [1055]     private enum InlineInsertZoneEdge {
+- [1270]     private func insertZoneHighlightFill(for edge: InlineInsertZoneEdge) -> AnyShapeStyle {
+- [1361]     private func liveMainResponderBodyHeight() -> CGFloat? {
+- [1368]     private func measureMainEditorBodyHeight(text: String, width: CGFloat) -> CGFloat {
+- [1379]     private func refreshMainEditingMeasuredBodyHeight() {
+- [1397]     private func scheduleMainEditingMeasuredBodyHeightRefresh(immediate: Bool = false) {
+- [1682]     private func cardChromeApplied<Content: View>(to content: Content) -> some View {
+- [1831]     var body: some View {
+- [1867]     private func resolvedBaseRGB() -> (r: Double, g: Double, b: Double) {
+- [1885]     private func rgbFromHex(_ hex: String) -> (r: Double, g: Double, b: Double)? {
+- [1890]     private func mix(base: (r: Double, g: Double, b: Double), overlay: (r: Double, g: Double, b: Double), amount: Double) -> (r: Double, g: Double, b: Double) {
+- [1897]     private func resolvedNamedSnapshotNoteRGB() -> (r: Double, g: Double, b: Double) {
+- [1905]     private func inlineInsertZone(
+- [1939]     private func inlineInsertZoneContent(
+- [1977]     private func cardBodyDropZone(onDrop: @escaping ([NSItemProvider], Bool) -> Void) -> some View {
+- [1997]     private func resolvedActiveRGB() -> (r: Double, g: Double, b: Double) {
+- [2007]     private func resolvedRelatedRGB() -> (r: Double, g: Double, b: Double) {
+- [2017]     private func resolvedDescendantRGB() -> (r: Double, g: Double, b: Double) {
+- [2022] // MARK: - 드래그 앤 드롭 델리게이트 (카드 영역용)
+- [2024] private func isTrailingSiblingBlockDragActive() -> Bool {
+- [2033] private struct CardActionZoneDropDelegate: DropDelegate {
+- [2037]     func dropUpdated(info: DropInfo) -> DropProposal? {
+- [2042]     func dropEntered(info: DropInfo) {
+- [2046]     func dropExited(info: DropInfo) {
+- [2052]     func performDrop(info: DropInfo) -> Bool {
+
+## wa/Models.swift
+
+### 1) 선언·기능 스냅샷
+- [1] import Foundation
+- [2] import Combine
+- [5] final class Scenario: ObservableObject, Identifiable, Hashable {
+- [6]     static func == (lhs: Scenario, rhs: Scenario) -> Bool { lhs.id == rhs.id }
+- [7]     func hash(into hasher: inout Hasher) { hasher.combine(id) }
+- [104]     func invalidateSnapshotCache() {
+- [108]     func markModified(at date: Date = Date()) {
+- [138]     func performWithoutTimestampTracking(_ work: () -> Void) {
+- [149]     func beginInteractiveTimestampSuppression() {
+- [153]     func endInteractiveTimestampSuppression(flush: Bool = true) {
+- [160]     func flushPendingModifiedTimestamp() {
+- [169]     func persistedTimestamp() -> Date {
+- [185]     private func recordPendingModifiedTimestamp(_ date: Date) {
+- [195]     private func applyModifiedTimestamp(_ date: Date) {
+- [200]     func bumpCardsVersion() {
+- [208]     func markSharedCraftDirty() {
+- [216]     func clearSharedCraftDirty() {
+- [220]     func markCardRecordsDirty() {
+- [228]     func markCardContentDirty() {
+- [236]     func markHistoryDirty() {
+- [244]     func markLinkedCardsDirty() {
+- [252]     func performBatchedCardMutation(_ work: () -> Void) {
+- [263]     private func flushBatchedCardMutationIfNeeded() {
+- [291]     func cardByID(_ id: UUID) -> SceneCard? {
+- [296]     func cardLocationByID(_ id: UUID) -> (level: Int, index: Int)? {
+- [301]     func children(for parentID: UUID) -> [SceneCard] {
+- [306]     func childListSignature(parentID: UUID?) -> Int {
+- [314]     func filteredCards(atLevel levelIndex: Int, category: String) -> [SceneCard] {
+- [319]     func clonePeers(for cardID: UUID, excluding excludedCardID: UUID? = nil) -> [SceneCard] {
+- [329]     func isCardCloned(_ cardID: UUID) -> Bool {
+- [337]     func descendantIDs(for cardID: UUID) -> Set<UUID> {
+- [342]     func propagateCloneContent(from sourceCard: SceneCard, content: String) {
+- [356]     func propagateCloneColor(from sourceCard: SceneCard, colorHex: String?) {
+- [370]     func recordLinkedCard(focusCardID: UUID, linkedCardID: UUID, at date: Date = Date()) {
+- [383]     func linkedCards(for focusCardID: UUID) -> [(cardID: UUID, lastEditedAt: Date)] {
+- [399]     func linkedCardEditDate(focusCardID: UUID, linkedCardID: UUID) -> Date? {
+- [403]     func hasLinkedCards(_ focusCardID: UUID) -> Bool {
+- [408]     func isLinkedCard(_ cardID: UUID) -> Bool {
+- [412]     func disconnectLinkedCard(focusCardID: UUID, linkedCardID: UUID) {
+- [422]     func setLinkedCardRecords(_ records: [LinkedCardRecord]) {
+- [436]     func linkedCardRecords(validCardIDs: Set<UUID>? = nil) -> [LinkedCardRecord] {
+- [466]     func pruneLinkedCards(validCardIDs: Set<UUID>) {
+- [480]     func setSplitPaneActiveCard(_ cardID: UUID?, for paneID: Int) {
+- [489]     func splitPaneActiveCardID(for paneID: Int) -> UUID? {
+- [493]     private func rebuildLinkedTargetCardCache() {
+- [507]     private func rebuildIndexIfNeeded() {
+- [579]     private func orderedCardIDSignature(_ cards: [SceneCard]) -> Int {
+- [588]     private func computeDescendantIDs(for cardID: UUID) -> Set<UUID> {
+- [605] final class SceneCard: ObservableObject, Identifiable {
+- [708]     private func markSharedCraftDirtyIfNeeded(previousCategory: String? = nil) {
+- [715]     fileprivate func applyCloneSynchronizedContent(_ newContent: String) {
+- [722]     fileprivate func applyCloneSynchronizedColor(_ newColorHex: String?) {
+- [738]     func updateDescendantsCategory(_ newCategory: String?) {
+- [742]     private func applyDescendantsCategory(_ newCategory: String?) {
+- [750] final class HistorySnapshot: Identifiable {
+- [787] struct CardSnapshot: Codable, Equatable {
+- [810] final class FileStore: ObservableObject {
+- [830]     private struct ScenarioSavePayload {
+- [841]     private struct SavePayload {
+- [846]     private struct ScenarioPayloadCacheEntry {
+- [858]     private struct SharedCraftTreeNodeSnapshot: Equatable {
+- [895]     private struct ScenarioLoadResult {
+- [904]     private func scenarioSortComparator(_ lhs: Scenario, _ rhs: Scenario) -> Bool {
+- [914]     private func orderedCards(_ cards: [SceneCard]) -> [SceneCard] {
+- [923]     private func primaryRootCard(in scenario: Scenario) -> SceneCard? {
+- [927]     private func directChildren(of parent: SceneCard, in scenario: Scenario) -> [SceneCard] {
+- [931]     private func craftRootCards(in scenario: Scenario) -> [SceneCard] {
+- [936]     private func subtreeIDs(from card: SceneCard, in scenario: Scenario) -> Set<UUID> {
+- [944]     private func defaultSharedCraftSnapshot() -> SharedCraftTreeNodeSnapshot {
+- [956]     private func sharedCraftSnapshot(from card: SceneCard, in scenario: Scenario) -> SharedCraftTreeNodeSnapshot {
+- [971]     private func combinedSharedCraftSnapshot(in scenario: Scenario) -> SharedCraftTreeNodeSnapshot? {
+- [992]     private func sharedCraftNodeCount(_ snapshot: SharedCraftTreeNodeSnapshot) -> Int {
+- [998]     private func bestExistingSharedCraftSourceScenario() -> Scenario? {
+- [1018]     private func currentSharedCraftSnapshot(from sourceScenario: Scenario? = nil) -> SharedCraftTreeNodeSnapshot {
+- [1030]     private func latestDirtySharedCraftSourceScenario() -> Scenario? {
+- [1041]     private func hasMissingSharedCraftRoot() -> Bool {
+- [1045]     private func existingSharedCraftSnapshot(in scenario: Scenario) -> SharedCraftTreeNodeSnapshot? {
+- [1049]     private func instantiateSharedCraftSnapshot(
+- [1085]     private func applySharedCraftSnapshot(
+- [1140]     func synchronizeSharedCraftTrees(
+- [1160]     private func resortScenariosInPlace() {
+- [1166]     private func scheduleScenarioResort() {
+- [1177]     private func refreshScenarioMetadataObservers() {
+- [1201]     func load() async {
+- [1381]     func saveAll(immediate: Bool = false) {
+- [1385]     func flushPendingSaves() {
+- [1393]     private func requestSave(immediate: Bool) {
+- [1415]     private func makeSavePayload() -> SavePayload? {
+- [1554]     private func enqueueSavePayload(_ payload: SavePayload) {
+- [1568]     private struct ScenarioSaveResult {
+- [1697]     private func primeSavedCachesFromCurrentState() {
+- [1710]     func addScenario(title: String, fromTemplate template: Scenario? = nil) -> Scenario {
+- [1731]     func makeScenarioTemplate(_ scenario: Scenario) {
+- [1740]     func deleteScenario(_ scenario: Scenario) {
+- [1756]     func removeCard(_ card: SceneCard, from scenario: Scenario) {
+- [1766]     private func collectCardIDs(from card: SceneCard, scenario: Scenario) -> Set<UUID> {
+- [1774]     private func createInitialScenario() {
+- [1788]     private func cloneCards(from template: Scenario, into scenario: Scenario) -> [SceneCard] {
+- [1849]     private func orderedIndexBoardSummaryRecords(
+- [1862]     private func ensureScenarioFolder(for scenarioID: UUID) -> String {
+- [1869]     private func aiThreadsURL(for scenarioID: UUID) -> URL {
+- [1875]     private func aiEmbeddingIndexURL(for scenarioID: UUID) -> URL {
+- [1881]     func aiVectorIndexURL(for scenarioID: UUID) -> URL {
+- [1887]     func loadAIChatThreadsData(for scenarioID: UUID) async -> Data? {
+- [1895]     func saveAIChatThreadsData(_ data: Data?, for scenarioID: UUID) {
+- [1918]     func loadAIEmbeddingIndexData(for scenarioID: UUID) async -> Data? {
+- [1926]     func saveAIEmbeddingIndexData(_ data: Data?, for scenarioID: UUID) {
+- [1950]     func replaceIndexBoardSummaryRecords(
+- [1957]     private func readJSON<T: Decodable>(url: URL, decoder: JSONDecoder) async throws -> T? {
+- [1970] struct ScenarioRecord: Codable {
+- [1980] struct CardRecord: Codable {
+- [1995] struct HistorySnapshotRecord: Codable {
+- [2009] struct LinkedCardRecord: Codable, Equatable {
+
+## wa/WriterHistoryView.swift
+
+### 1) 선언·기능 스냅샷
+- [1] import SwiftUI
+- [2] import AppKit
+- [4] private enum ScenarioHistoryEngine {
+- [12]     static func retentionRule(
+- [30]     static func sortedCardSnapshots(
+- [37]         func appendSubtree(parentID: UUID?) {
+- [62]     static func buildDeltaPayload(
+- [79]     static func shouldInsertFullSnapshotCheckpoint(
+- [95]     static func applySnapshotState(
+- [118] extension ScenarioWriterView {
+- [120]     private func snapshotOrderLess(_ lhs: CardSnapshot, _ rhs: CardSnapshot) -> Bool {
+- [124]     private func snapshotDiffOrderLess(_ lhs: SnapshotDiff, _ rhs: SnapshotDiff) -> Bool {
+- [129]     func previewColumn(for diffs: [SnapshotDiff], level: Int, screenHeight: CGFloat) -> some View {
+- [168]     func selectHistoryPreviewCard(_ diffID: UUID) {
+- [185]     func copyHistoryPreviewCardsToClipboard(fallbackID: UUID? = nil) {
+- [208]     func copyHistoryPreviewContentsToClipboard(fallbackID: UUID? = nil) {
+- [224]     func resolvedHistoryPreviewCopyTargetIDs(fallbackID: UUID?) -> Set<UUID> {
+- [237]     func historyPreviewDiffMap() -> [UUID: SnapshotDiff] {
+- [241]     func autoScrollToChanges(hProxy: ScrollViewProxy) {
+- [251]     func buildPreviewLevels() -> [[SnapshotDiff]] {
+- [433]     struct NamedSnapshotManagerItem: Identifiable {
+- [509]     func namedSnapshotManagerListContainer(items: [NamedSnapshotManagerItem]) -> some View {
+- [516]     func namedSnapshotManagerListContent(items: [NamedSnapshotManagerItem]) -> some View {
+- [538]     func namedSnapshotManagerRow(_ item: NamedSnapshotManagerItem) -> some View {
+- [550]     func namedSnapshotManagerRowLabel(
+- [583]     func namedSnapshotManagerPreviewText(preview: String, color: Color) -> some View {
+- [592]     func namedSnapshotTimestampText(_ date: Date) -> String {
+- [596]     func namedSnapshotManagerRowFill(fillColor: Color) -> some View {
+- [601]     func namedSnapshotManagerRowStroke(strokeColor: Color) -> some View {
+- [627]     func namedSnapshotManagerLinkedNoteEditor(
+- [699]     func beginNamedSnapshotNoteEditing() {
+- [706]     func requestHistoryAutosave(immediate: Bool = false) {
+- [735]     func flushPendingHistoryAutosaveIfNeeded() {
+- [743]     func finishNamedSnapshotNoteEditing(restoreMainFocus: Bool) {
+- [843]     func linkedCardsAnchorCandidateID() -> UUID? {
+- [859]     func resolvedLinkedCardsAnchorID() -> UUID? {
+- [867]     func toggleLinkedCardsFilter() {
+- [878]     func disconnectLinkedCardFromAnchor(linkedCardID: UUID) {
+- [884]     func filteredTimelineCards() -> [SceneCard] {
+- [910]     func timelineSectionTitle() -> String {
+- [917]     func timelineEmptyState() -> (title: String, systemImage: String) {
+- [933]     func namedSnapshotIndex(forNoteCardID noteCardID: UUID) -> Int? {
+- [937]     func isNamedSnapshotNoteCard(_ card: SceneCard) -> Bool {
+- [943]     func openHistoryFromNamedSnapshotNoteCard(_ card: SceneCard) -> Bool {
+- [962]     func filteredNamedSnapshotManagerItems() -> [NamedSnapshotManagerItem] {
+- [974]     func namedSnapshotManagerItems() -> [NamedSnapshotManagerItem] {
+- [990]     func namedSnapshotNoteBodyPreview(item: NamedSnapshotManagerItem) -> String {
+- [992]         let body = card.content
+- [1000]     func selectNamedSnapshotManagerItem(_ item: NamedSnapshotManagerItem) {
+- [1010]     func namedSnapshotNoteBinding(for noteCardID: UUID) -> Binding<String>? {
+- [1031]     func saveNamedCheckpointFromDialog() {
+- [1044]     func normalizedSnapshotName(_ raw: String?) -> String? {
+- [1049]     func snapshotNoteContent(title: String, body: String?) -> String {
+- [1055]     func syncedSnapshotNoteContent(_ content: String, title: String) -> String {
+- [1063]     func updateHistoryKeyMonitor() {
+- [1072]     func handleHistoryEscape() -> Bool {
+- [1100]     func startHistoryKeyMonitor() {
+- [1143]     func stopHistoryKeyMonitor() {
+- [1150]     func beginSnapshotNameEdit(snapshot: HistorySnapshot) {
+- [1155]     func commitSnapshotNameEdit(snapshotID: UUID) {
+- [1178]     func takeSnapshot(
+- [1220]     func createNamedSnapshotNoteCard(title: String, initialBody: String?) -> SceneCard? {
+- [1236]     func syncNamedSnapshotNoteForCurrentSelection(focusEditor: Bool) {
+- [1255]     func ensureNamedSnapshotNoteCard(
+- [1296]     struct HistoryPromotionDecision {
+- [1301]     enum HistoryRetentionTier: String {
+- [1309]     func buildHistorySnapshot(
+- [1393]     func evaluateHistoryPromotion(
+- [1444]     func historyEditScore(
+- [1465]     func applyHistoryRetentionPolicyIfNeeded(force: Bool = false) {
+- [1488]     func compactHistorySnapshots(_ snapshots: [HistorySnapshot], now: Date) -> [HistorySnapshot] {
+- [1495]     func retainedHistoryIndices(from snapshots: [HistorySnapshot], now: Date) -> [Int] {
+- [1526]     func historyRetentionRule(forAge age: TimeInterval) -> (tier: HistoryRetentionTier, interval: TimeInterval) {
+- [1530]     func rebuildHistorySnapshots(from snapshots: [HistorySnapshot], keeping keptIndices: [Int]) -> [HistorySnapshot] {
+- [1582]     func historyStatesByIndex(
+- [1597]     func shouldForceFullHistorySnapshot(
+- [1612]     func fullHistorySnapshot(
+- [1631]     func deltaHistorySnapshot(
+- [1650]     func fallbackLatestRebuiltHistorySnapshot(
+- [1670]     func isSnapshotPromoted(_ snapshot: HistorySnapshot) -> Bool {
+- [1674]     func sortedCardSnapshots(from state: [UUID: CardSnapshot]) -> [CardSnapshot] {
+- [1678]     func buildDeltaPayload(
+- [1685]     func shouldInsertFullSnapshotCheckpoint(in snapshots: [HistorySnapshot]) -> Bool {
+- [1692]     func nextSnapshotTimestamp() -> Date {
+- [1701]     func applySnapshotState(_ snapshot: HistorySnapshot, to state: inout [UUID: CardSnapshot]) {
+- [1705]     func resolvedCardSnapshotMap(
+- [1732]     func resolvedCardSnapshots(
+- [1740]     func enterPreviewMode(at index: Int) {
+- [1771]     func exitPreviewMode() {
+- [1778]     func restoreToSelectedPoint() {
+- [1806]     func previousNamedSnapshotIndex() -> Int? {
+- [1816]     func nextNamedSnapshotIndex() -> Int? {
+- [1826]     func jumpToPreviousNamedSnapshot() {
+- [1832]     func jumpToNextNamedSnapshot() {
+- [1838]     func stepHistoryIndex(by delta: Int) {
+
+## wa/WriterIndexBoardSurfacePhaseTwo.swift
+
+### 1) 선언·기능 스냅샷
+- [1] import SwiftUI
+- [2] import AppKit
+- [3] import Combine
+- [5] private enum IndexBoardSurfacePhaseConstants {
+- [25] private func indexBoardSurfaceItemSort(_ lhs: BoardSurfaceItem, _ rhs: BoardSurfaceItem) -> Bool {
+- [52] private struct IndexBoardSurfaceCardFramePreferenceKey: PreferenceKey {
+- [55]     static func reduce(value: inout [UUID: CGRect], nextValue: () -> [UUID: CGRect]) {
+- [60] private struct IndexBoardGlobalSlotLayout: Layout {
+- [66]     func sizeThatFits(
+- [83]     func placeSubviews(
+- [106] private struct IndexBoardSurfaceCardDragState {
+- [121]     func pointerInContent(scrollOrigin: CGPoint) -> CGPoint {
+- [128]     func overlayOrigin(scrollOrigin: CGPoint) -> CGPoint {
+- [137] private struct IndexBoardSurfaceSelectionDragState {
+- [143] private enum IndexBoardSurfaceDropPlacement: Equatable {
+- [148] private struct IndexBoardSurfaceGridBounds {
+- [158] private enum IndexBoardSurfaceRenderedEntry: Identifiable {
+- [190] private struct IndexBoardSurfaceLaneChipView: View {
+- [239]     var body: some View {
+- [303] private struct IndexBoardSurfacePlaceholderTile: View {
+- [306]     var body: some View {
+- [322] private struct IndexBoardSurfaceSlotView: View {
+- [345]     var body: some View {
+- [408] struct IndexBoardSurfacePhaseTwoView: View {
+- [632]     var body: some View {
+- [751]     private func renderedEntryView(_ entry: IndexBoardSurfaceRenderedEntry) -> some View {
+- [1005]     private func handleCardDragChanged(_ item: BoardSurfaceItem, value: DragGesture.Value) {
+- [1051]     private func handleCardDragEnded(_ item: BoardSurfaceItem, value: DragGesture.Value) {
+- [1071]     private func handleAutoScrollTick() {
+- [1088]     private func recalculateDropPlacement() {
+- [1094]     private func resolvedDropPlacement(for drag: IndexBoardSurfaceCardDragState) -> IndexBoardSurfaceDropPlacement {
+- [1132]     private func resolvedDropTarget(for drag: IndexBoardSurfaceCardDragState) -> IndexBoardCardDropTarget {
+- [1182]     private func resolvedPlaceholderLaneParentID(
+- [1214]     private func resolvedLaneMoveContext(for lane: BoardSurfaceLane) -> (
+- [1240]     private func resolvedMovingItems(for draggedItem: BoardSurfaceItem) -> [BoardSurfaceItem] {
+- [1250]     private func sourceTarget(for movingItems: [BoardSurfaceItem], primaryItem: BoardSurfaceItem) -> IndexBoardCardDropTarget {
+- [1284]     private func sourceTarget(for item: BoardSurfaceItem) -> IndexBoardCardDropTarget {
+- [1312]     private func handleMarqueeSelectionChanged(_ value: DragGesture.Value) {
+- [1338]     private func handleMarqueeSelectionEnded(_ value: DragGesture.Value) {
+- [1348]     private func legacyGroupID(for laneParentID: UUID?) -> IndexBoardGroupID {
+- [1355]     private func settlePresentationProjection(with liveProjection: BoardSurfaceProjection) {
+- [1364]     private func resolvedPresentationSurfaceProjection(
+- [1454]     private func resolvedLaneIndex(for laneParentID: UUID?, fallback: Int) -> Int {
+- [1458]     private func resolvedDetachedSelectionPreviewPositions(
+- [1481]     private func resolvedInitialColumnCount() -> Int {
+- [1491]     private func dragPlaceholderFrames(for drag: IndexBoardSurfaceCardDragState) -> [CGRect] {
+- [1518]     private func resolvedOverlayCardIDs(for drag: IndexBoardSurfaceCardDragState) -> [UUID] {
+- [1524]     private func resolvedSelectedCardIDs(in selectionRect: CGRect) -> Set<UUID> {
+- [1537]     private func resolvedRenderedFrame(for entry: IndexBoardSurfaceRenderedEntry) -> CGRect? {
+- [1546]     private func resolvedRenderedFrame(for item: BoardSurfaceItem) -> CGRect? {
+- [1551]     private func resolvedVisualGridPosition(for item: BoardSurfaceItem) -> IndexBoardGridPosition? {
+- [1573]     private func resolvedFlowGridPosition(for slotIndex: Int) -> IndexBoardGridPosition {
+- [1581]     private func resolvedFlowSlotRect(for slotIndex: Int) -> CGRect {
+- [1585]     private func resolvedGridSlotRect(for gridPosition: IndexBoardGridPosition) -> CGRect {
+- [1596]     private func resolvedCardFrame(for slotFrame: CGRect, reservesLaneSpacer: Bool) -> CGRect {
+- [1605]     private func resolvedDetachedGridPosition(for point: CGPoint, excluding excludedCardIDs: Set<UUID>) -> IndexBoardGridPosition {
+- [1652]     private func resolvedDragCardFrame(for drag: IndexBoardSurfaceCardDragState) -> CGRect {
+- [1659]     private func resolvedFlowInteractionRect(slotCount: Int, usesVerticalHysteresis: Bool) -> CGRect? {
+- [1679]     private func resolvedFlowDropSlotIndex(for point: CGPoint, slotCount: Int) -> Int {
+- [1701]     private func resolvedNearestGridPosition(for point: CGPoint) -> IndexBoardGridPosition {
+- [1714]     private func resolvedLaneTintColor(for lane: BoardSurfaceLane?) -> Color {
+- [1725]     private func autoScrollAxisDelta(position: CGFloat, viewportLength: CGFloat) -> CGFloat {
+- [1739]     private func distance(from point: CGPoint, to rect: CGRect) -> CGFloat {
+- [1745]     private func normalizedSelectionRect(from startPoint: CGPoint, to endPoint: CGPoint) -> CGRect {
+- [1754]     private func attemptPendingCardReveal() {
+- [1763]     private func laneKey(for parentID: UUID?) -> String {
+- [1767]     private func scheduleScrollOffsetPersistence(_ offset: CGPoint) {
+- [1783]     private func scheduleZoomPersistence(_ scale: CGFloat) {
+- [1793]     private func cancelDeferredViewportPersistence() {
+- [1800]     private func flushDeferredViewportPersistence() {
+
+## wa/SettingsView.swift
+
+### 1) 선언·기능 스냅샷
+- [1] import SwiftUI
+- [3] struct SettingsView: View {
+- [4]     private struct ShortcutItem: Identifiable {
+- [10]     private struct ShortcutSection: Identifiable {
+- [16]     private struct GeminiModelOption: Identifiable {
+- [22]     private enum SettingsCategory: String, CaseIterable, Identifiable {
+- [76]     private enum ColorThemePreset: String, CaseIterable, Identifiable {
+- [196]     private struct SavedColorThemePreset: Identifiable, Codable {
+- [209]     private enum PendingConfirmation: String, Identifiable {
+- [366]     private enum SettingsLayout {
+- [463]     var body: some View {
+- [538]     private func sidebarSection(title: String, categories: [SettingsCategory]) -> some View {
+- [570]     private func selectCategory(_ category: SettingsCategory) {
+- [625]     private func categoryView(for category: SettingsCategory, showHeader: Bool) -> some View {
+- [648]     private func categoryCards(for category: SettingsCategory) -> some View {
+- [1090]     private func shortcutSectionCard(_ section: ShortcutSection) -> some View {
+- [1133]     private func hasVisibleCards(in category: SettingsCategory) -> Bool {
+- [1157]     private func cardMatches(title: String, keywords: [String] = []) -> Bool {
+- [1166]     private func shortcutSectionMatches(_ section: ShortcutSection) -> Bool {
+- [1180]     private func settingsCard<Content: View>(
+- [1214]     private func shortcutRow(_ item: ShortcutItem) -> some View {
+- [1267]     private func colorBinding(hex: Binding<String>, fallback: Color) -> Binding<Color> {
+- [1277]     private func themedColorPickerRow(
+- [1301]     private func colorFromHex(_ hex: String) -> Color? {
+- [1306]     private func hexFromColor(_ color: Color) -> String {
+- [1315]     private func resetColorsToDefaults() {
+- [1326]     private func loadCustomColorThemePresets() {
+- [1342]     private func persistCustomColorThemePresets() {
+- [1350]     private func saveCurrentColorsAsPreset() {
+- [1380]     private func applySelectedColorThemePreset() {
+- [1391]     private func applyColorThemeValues(
+- [1411]     private func applyColorThemePreset(_ preset: ColorThemePreset) {
+- [1424]     private func applyColorThemePreset(_ preset: SavedColorThemePreset) {
+- [1437]     private func syncGeminiModelOptionSelection() {
+- [1450]     private func normalizeGeminiModelID(_ raw: String) -> String {
+- [1454]     private func refreshGeminiAPIKeyStatus() {
+- [1463]     private func saveGeminiAPIKey() {
+- [1479]     private func deleteGeminiAPIKey() {
+- [1490]     private func setAISettingsStatus(_ message: String, isError: Bool) {
+- [1495]     private func initializeAutoBackupSettingsIfNeeded() {
+- [1502]     private func selectAutoBackupDirectory() {
+- [1520]     private func setAutoBackupStatus(_ message: String, isError: Bool) {
+- [1525]     private func openWorkspaceFile() {
+- [1535]     private func createWorkspaceFile() {

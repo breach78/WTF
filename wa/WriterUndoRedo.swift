@@ -3,35 +3,6 @@ import AppKit
 
 extension ScenarioWriterView {
 
-    struct CardState {
-        let id: UUID
-        let content: String
-        let orderIndex: Int
-        let createdAt: Date
-        let parentID: UUID?
-        let category: String?
-        let isFloating: Bool
-        let isArchived: Bool
-        let lastSelectedChildID: UUID?
-        let colorHex: String?
-        let cloneGroupID: UUID?
-    }
-
-    struct ScenarioState {
-        let cards: [CardState]
-        let activeCardID: UUID?
-        let activeCaretLocation: Int?
-        let selectedCardIDs: [UUID]
-        let changeCount: Int
-        let indexBoardState: IndexBoardUndoState?
-    }
-
-    struct IndexBoardUndoState {
-        let logicalState: IndexBoardLogicalState
-        let editorDraft: IndexBoardEditorDraft?
-        let summaryRecordsByCardID: [UUID: IndexBoardCardSummaryRecord]
-    }
-
     func captureScenarioState(
         overridingContentForCardID overrideCardID: UUID? = nil,
         overridingContent overrideContent: String? = nil
