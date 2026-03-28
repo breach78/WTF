@@ -1,0 +1,136 @@
+{
+  "source": "/Users/three/app_build/wa/wa/SettingsWorkEnvironmentCards.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "자주 변경하는 항목을 한곳에서 조정합니다.",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 28
+        }
+      },
+      {
+        "comment": "",
+        "key": "메인 모드 행간: %@",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 35
+        }
+      },
+      {
+        "comment": "",
+        "key": "포커스 모드 행간: %@",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 38
+        }
+      },
+      {
+        "comment": "",
+        "key": "앱 종료 시 자동 백업",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 32
+        }
+      },
+      {
+        "comment": "",
+        "key": "포커스 타이프라이터 모드",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 33
+        }
+      },
+      {
+        "comment": "",
+        "key": "메인 모드 행간 (임시): %@",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 45
+        }
+      },
+      {
+        "comment": "",
+        "key": "카드 위아래 간격: %lld",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 48
+        }
+      },
+      {
+        "comment": "",
+        "key": "기본값은 0이며, 필요할 때만 행 간격을 넓혀 보이게 합니다.",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 51
+        }
+      },
+      {
+        "comment": "",
+        "key": "기준선 조정은 타이프라이터 모드가 켜져 있을 때만 적용됩니다.",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 74
+        }
+      },
+      {
+        "comment": "",
+        "key": "타이프라이터 모드 사용",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 60
+        }
+      },
+      {
+        "comment": "",
+        "key": "타이프라이터 기준선",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 62
+        }
+      },
+      {
+        "comment": "",
+        "key": "현재 타이프라이터 모드가 켜져 있습니다.",
+        "location": {
+          "startingColumn": 51,
+          "startingLine": 80
+        }
+      },
+      {
+        "comment": "",
+        "key": "현재 타이프라이터 모드가 꺼져 있습니다.",
+        "location": {
+          "startingColumn": 112,
+          "startingLine": 80
+        }
+      },
+      {
+        "comment": "",
+        "key": "중앙 50%",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 63
+        }
+      },
+      {
+        "comment": "",
+        "key": "기본 60%",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 65
+        }
+      },
+      {
+        "comment": "",
+        "key": "아래 66%",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 67
+        }
+      }
+    ]
+  },
+  "version": 1
+}

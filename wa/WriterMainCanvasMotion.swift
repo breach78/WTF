@@ -103,6 +103,17 @@ enum MainWorkspaceMotionEntryPoints {
         guard !storedOffsets.isEmpty else { return }
         scheduleViewportRestore(storedOffsets)
     }
+
+    static func shouldPublishNavigationSettle(
+        verticalMisalignment: Bool,
+        horizontalMisalignment: Bool,
+        horizontalMode: MainCanvasHorizontalScrollMode
+    ) -> Bool {
+        verticalMisalignment || (
+            horizontalMode == .oneStep &&
+            horizontalMisalignment
+        )
+    }
 }
 
 extension ScenarioWriterView {
@@ -405,6 +416,44 @@ extension ScenarioWriterView {
         mainArrowNavigationSettleWorkItem = nil
     }
 
+    func hasMeasuredMainCanvasHorizontalNavigationSettleMisalignment(
+        targetCardID: UUID,
+        availableWidth: CGFloat
+    ) -> Bool {
+        guard mainCanvasHorizontalScrollMode == .oneStep else { return false }
+        return !isMainCanvasHorizontallyAligned(
+            targetCardID: targetCardID,
+            availableWidth: availableWidth
+        )
+    }
+
+    func hasMeasuredMainColumnNavigationSettleMisalignment() -> Bool {
+        let levels = resolvedDisplayedMainLevelsWithParents()
+        for (level, data) in levels.enumerated() {
+            guard shouldAutoAlignMainColumn(cards: data.cards, activeID: activeCardID) else {
+                continue
+            }
+            guard let targetID = resolvedMainColumnFocusTargetID(in: data.cards) else {
+                continue
+            }
+            let viewportKey = mainColumnViewportStorageKey(level: level)
+            let viewportHeight = mainCanvasScrollCoordinator
+                .scrollView(for: viewportKey)?
+                .documentVisibleRect
+                .height ?? 0
+            guard viewportHeight > 1 else { continue }
+            if hasMeasuredMainColumnNavigationSettleMisalignment(
+                viewportKey: viewportKey,
+                cards: data.cards,
+                targetID: targetID,
+                viewportHeight: viewportHeight
+            ) {
+                return true
+            }
+        }
+        return false
+    }
+
     func scheduleMainArrowNavigationSettle() {
         cancelMainArrowNavigationSettle()
         let workItem = DispatchWorkItem {
@@ -413,9 +462,32 @@ extension ScenarioWriterView {
             guard !showFocusMode else { return }
             guard !isPreviewingHistory else { return }
             guard let activeID = activeCardID, findCard(by: activeID) != nil else { return }
+            let verticalMisalignment = hasMeasuredMainColumnNavigationSettleMisalignment()
+            let horizontalVisibleWidth = mainCanvasScrollCoordinator
+                .resolvedMainCanvasHorizontalScrollView()?
+                .documentVisibleRect
+                .width ?? 0
+            let horizontalMisalignment =
+                horizontalVisibleWidth > 1 &&
+                hasMeasuredMainCanvasHorizontalNavigationSettleMisalignment(
+                    targetCardID: activeID,
+                    availableWidth: max(1, horizontalVisibleWidth)
+                )
+            guard MainWorkspaceMotionEntryPoints.shouldPublishNavigationSettle(
+                verticalMisalignment: verticalMisalignment,
+                horizontalMisalignment: horizontalMisalignment,
+                horizontalMode: mainCanvasHorizontalScrollMode
+            ) else {
+                bounceDebugLog(
+                    "mainArrowNavigationSettle skip target=\(debugCardIDString(activeID)) " +
+                    "vertical=\(verticalMisalignment) horizontal=\(horizontalMisalignment)"
+                )
+                return
+            }
             mainColumnLastFocusRequestByKey = [:]
             bounceDebugLog(
                 "mainArrowNavigationSettle target=\(debugCardIDString(activeID)) " +
+                "vertical=\(verticalMisalignment) horizontal=\(horizontalMisalignment) " +
                 "\(debugFocusStateSummary())"
             )
             _ = mainCanvasScrollCoordinator.publishIntent(
@@ -426,7 +498,9 @@ extension ScenarioWriterView {
                 animated: false,
                 trigger: "navigationSettle"
             )
-            mainNavigationSettleTick += 1
+            if horizontalMisalignment && mainCanvasHorizontalScrollMode == .oneStep {
+                mainNavigationSettleTick += 1
+            }
         }
         mainArrowNavigationSettleWorkItem = workItem
         DispatchQueue.main.asyncAfter(

@@ -1,6 +1,18 @@
 import SwiftUI
 import AppKit
 
+extension MainCanvasHorizontalScrollMode {
+    static var defaultPolicy: MainCanvasHorizontalScrollMode { .oneStep }
+
+    static func normalizePersistedRawValue(_ rawValue: Int) -> Int {
+        guard let mode = MainCanvasHorizontalScrollMode(rawValue: rawValue),
+              mode == .oneStep else {
+            return MainCanvasHorizontalScrollMode.defaultPolicy.rawValue
+        }
+        return mode.rawValue
+    }
+}
+
 extension ScenarioWriterView {
     var quickEaseAnimation: Animation {
         .timingCurve(0.25, 0.10, 0.25, 1.00, duration: 0.24)
@@ -192,7 +204,13 @@ extension ScenarioWriterView {
     }
 
     var mainCanvasHorizontalScrollMode: MainCanvasHorizontalScrollMode {
-        get { MainCanvasHorizontalScrollMode(rawValue: mainCanvasHorizontalScrollModeRawValue) ?? .twoStep }
+        get {
+            MainCanvasHorizontalScrollMode(
+                rawValue: MainCanvasHorizontalScrollMode.normalizePersistedRawValue(
+                    mainCanvasHorizontalScrollModeRawValue
+                )
+            ) ?? .defaultPolicy
+        }
         nonmutating set { mainCanvasHorizontalScrollModeRawValue = newValue.rawValue }
     }
 
@@ -911,6 +929,11 @@ extension ScenarioWriterView {
             }
             .onChange(of: mainCanvasHorizontalScrollModeRawValue) { oldValue, newValue in
                 guard oldValue != newValue else { return }
+                let normalizedValue = MainCanvasHorizontalScrollMode.normalizePersistedRawValue(newValue)
+                if normalizedValue != newValue {
+                    mainCanvasHorizontalScrollModeRawValue = normalizedValue
+                    return
+                }
                 handleMainCanvasHorizontalScrollModeChange()
             }
             .onChange(of: focusTypewriterEnabled) { _, isOn in
@@ -1060,6 +1083,7 @@ extension ScenarioWriterView {
     }
 
     func handleWorkspaceAppear() {
+        _ = normalizeMainCanvasHorizontalScrollModeIfNeeded()
         mainCanvasScrollCoordinator.reset()
         MainCanvasNavigationDiagnostics.shared.reset(
             ownerKey: mainCanvasDiagnosticsOwnerKey,
@@ -1205,6 +1229,13 @@ extension ScenarioWriterView {
             return
         }
         if !preemptivelyFocusedTarget {
+            MainCanvasNavigationDiagnostics.shared.beginFocusIntent(
+                ownerKey: mainCanvasDiagnosticsOwnerKey,
+                trigger: clickFocusNavigationTarget ? "clickFocus" : "activeCardChange",
+                isRepeat: false,
+                sourceCardID: lastActiveCardID,
+                intendedCardID: newID
+            )
             publishMainColumnFocusNavigationIntent(
                 for: newID,
                 trigger: clickFocusNavigationTarget ? "clickFocus" : "activeCardChange"
@@ -1266,6 +1297,16 @@ extension ScenarioWriterView {
         requestMainCanvasRestoreForHorizontalScrollModeChange()
     }
 
+    @discardableResult
+    func normalizeMainCanvasHorizontalScrollModeIfNeeded() -> Bool {
+        let normalizedValue = MainCanvasHorizontalScrollMode.normalizePersistedRawValue(
+            mainCanvasHorizontalScrollModeRawValue
+        )
+        guard normalizedValue != mainCanvasHorizontalScrollModeRawValue else { return false }
+        mainCanvasHorizontalScrollModeRawValue = normalizedValue
+        return true
+    }
+
     func syncScenarioObservedState() {
         scenarioObservedState.bind(to: scenario)
     }
@@ -1274,7 +1315,8 @@ extension ScenarioWriterView {
         teardownIndexBoardIfNeeded(restoreEntryState: false)
         MainCanvasNavigationDiagnostics.shared.emitSummary(
             ownerKey: mainCanvasDiagnosticsOwnerKey,
-            reason: "workspaceDisappear"
+            reason: "workspaceDisappear",
+            horizontalMode: mainCanvasHorizontalScrollMode
         )
         persistCurrentFocusSnapshotIfPossible()
         persistCurrentViewportSnapshotIfPossible()
@@ -2327,27 +2369,78 @@ extension ScenarioWriterView {
                 .onTapGesture {
                     handleMainCanvasInnerTap()
                 }
-            HStack(alignment: .top, spacing: 0) {
-                Spacer().frame(width: availableWidth / 2)
-                if isPreviewingHistory {
+            if isPreviewingHistory {
+                HStack(alignment: .top, spacing: 0) {
+                    Spacer().frame(width: availableWidth / 2)
                     let previewLevels = buildPreviewLevels()
                     ForEach(Array(previewLevels.enumerated()), id: \.offset) { index, diffs in
                         previewColumn(for: diffs, level: index, screenHeight: size.height)
                             .id("preview-col-\(index)")
                     }
-                } else {
+                    Spacer().frame(width: availableWidth / 2)
+                }
+                .background(
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            handleMainCanvasInnerTap()
+                        }
+                )
+            } else if isMainCanvasSurfaceHostB01Enabled {
+                mainCanvasSurfaceScrollableContent(size: size, availableWidth: availableWidth)
+            } else {
+                HStack(alignment: .top, spacing: 0) {
+                    Spacer().frame(width: availableWidth / 2)
                     mainCanvasLevelColumns(screenHeight: size.height)
+                    Spacer().frame(width: availableWidth / 2)
+                }
+                .background(
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            handleMainCanvasInnerTap()
+                        }
+                )
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func mainCanvasSurfaceScrollableContent(size: CGSize, availableWidth: CGFloat) -> some View {
+        let baseLevelsData = displayedLevelsData()
+        let levelsData = displayedMainLevelsData(from: baseLevelsData)
+        let visualMaxLevelCount = displayedMaxLevelCount(for: baseLevelsData)
+        let contentWidth = availableWidth + (CGFloat(visualMaxLevelCount) * columnWidth)
+        ZStack(alignment: .topLeading) {
+            HStack(alignment: .top, spacing: 0) {
+                Spacer().frame(width: availableWidth / 2)
+                ForEach(0..<visualMaxLevelCount, id: \.self) { index in
+                    Color.clear
+                        .frame(width: columnWidth, height: size.height)
+                        .id(index)
                 }
                 Spacer().frame(width: availableWidth / 2)
             }
-            .background(
-                Color.clear
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        handleMainCanvasInnerTap()
-                    }
+
+            MainCanvasSurfaceViewportHost(
+                configuration: mainCanvasSurfaceHostConfiguration(
+                    levelsData: levelsData,
+                    visualMaxLevelCount: visualMaxLevelCount,
+                    size: size,
+                    availableWidth: availableWidth
+                ),
+                scrollCoordinator: mainCanvasScrollCoordinator
             )
+            .frame(width: contentWidth, height: size.height, alignment: .topLeading)
         }
+        .frame(width: contentWidth, height: size.height, alignment: .topLeading)
+        .background(
+            Color.clear
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    handleMainCanvasInnerTap()
+                }
+        )
     }
 
     @ViewBuilder
@@ -2368,6 +2461,101 @@ extension ScenarioWriterView {
                 Color.clear.frame(width: columnWidth)
             }
         }
+    }
+
+    private func mainCanvasSurfaceHostConfiguration(
+        levelsData: [LevelData],
+        visualMaxLevelCount: Int,
+        size: CGSize,
+        availableWidth: CGFloat
+    ) -> MainCanvasSurfaceConfiguration {
+        let descriptors = levelsData.enumerated().compactMap { index, data -> MainCanvasSurfaceViewportDescriptor? in
+            guard index <= 1 || !data.cards.isEmpty else { return nil }
+            let viewportKey = mainColumnViewportStorageKey(level: index)
+            return MainCanvasSurfaceViewportDescriptor(
+                level: index,
+                viewportKey: viewportKey,
+                frame: CGRect(
+                    x: (availableWidth / 2) + (CGFloat(index) * columnWidth),
+                    y: 0,
+                    width: columnWidth,
+                    height: size.height
+                ),
+                desiredOffsetY: mainColumnViewportOffsetByKey[viewportKey] ?? 0,
+                content: AnyView(
+                    mainColumnScrollableBody(
+                        cards: data.cards,
+                        level: index,
+                        parent: data.parent,
+                        screenHeight: size.height
+                    )
+                )
+            )
+        }
+
+        return MainCanvasSurfaceConfiguration(
+            contentSize: CGSize(
+                width: availableWidth + (CGFloat(visualMaxLevelCount) * columnWidth),
+                height: size.height
+            ),
+            activeLevel: resolvedMainCanvasSurfaceActiveLevel(visualMaxLevelCount: visualMaxLevelCount),
+            descriptors: descriptors,
+            onLiveOffsetChange: { viewportKey, offsetY in
+                handleMainCanvasSurfaceLiveOffsetChange(viewportKey: viewportKey, offsetY: offsetY)
+            },
+            onViewportFinalize: { viewportKey, offsetY in
+                handleMainCanvasSurfaceViewportFinalize(viewportKey: viewportKey, offsetY: offsetY)
+            },
+            onDocumentSizeChange: { viewportKey, documentSize in
+                handleMainCanvasSurfaceDocumentSizeChange(
+                    viewportKey: viewportKey,
+                    documentSize: documentSize
+                )
+            }
+        )
+    }
+
+    private func resolvedMainCanvasSurfaceActiveLevel(visualMaxLevelCount: Int) -> Int? {
+        guard visualMaxLevelCount > 0 else { return nil }
+        let fallbackLevel = min(max(0, lastScrolledLevel), visualMaxLevelCount - 1)
+        let activeLevel =
+            activeCardID.flatMap { displayedMainCardLocationByID($0)?.level }
+            ?? resolvedVisibleMainCanvasLevelFromCurrentScrollPosition()
+            ?? fallbackLevel
+        return min(max(0, activeLevel), visualMaxLevelCount - 1)
+    }
+
+    private func handleMainCanvasSurfaceLiveOffsetChange(
+        viewportKey: String,
+        offsetY: CGFloat
+    ) {
+        let previousOffsetY = mainColumnViewportOffsetByKey[viewportKey] ?? 0
+        guard abs(previousOffsetY - offsetY) > 0.5 else { return }
+        mainColumnViewportOffsetByKey[viewportKey] = offsetY
+    }
+
+    private func handleMainCanvasSurfaceViewportFinalize(
+        viewportKey: String,
+        offsetY: CGFloat
+    ) {
+        mainColumnViewportOffsetByKey[viewportKey] = offsetY
+    }
+
+    private func handleMainCanvasSurfaceDocumentSizeChange(
+        viewportKey: String,
+        documentSize: CGSize
+    ) {
+        let previousSize = mainCanvasViewState.surfaceDocumentSizeByViewportKey[viewportKey] ?? .zero
+        guard abs(previousSize.width - documentSize.width) > 0.5 ||
+                abs(previousSize.height - documentSize.height) > 0.5 else {
+            return
+        }
+        mainCanvasViewState.surfaceDocumentSizeByViewportKey[viewportKey] = documentSize
+        indexBoardRestoreTrace(
+            "main_canvas_surface_document_size_changed",
+            "viewportKey=\(viewportKey) width=\(String(format: "%.2f", documentSize.width)) " +
+            "height=\(String(format: "%.2f", documentSize.height))"
+        )
     }
 
     func filteredCardsForMainCanvasColumn(levelIndex: Int, cards: [SceneCard]) -> [SceneCard] {
@@ -2398,6 +2586,7 @@ extension ScenarioWriterView {
         hasher.combine(scenarioCardsVersion)
         hasher.combine(scenarioLinkedCardsVersion)
         hasher.combine(isPreviewingHistory)
+        hasher.combine(isMainCanvasSurfaceHostB01Enabled)
         hasher.combine(aiCandidateState.cardIDs.count)
         for id in aiCandidateState.cardIDs {
             hasher.combine(id)
@@ -2437,6 +2626,14 @@ extension ScenarioWriterView {
             }
         }
         return hasher.finalize()
+    }
+
+    private var isMainCanvasSurfaceHostB01Enabled: Bool {
+#if DEBUG
+        ProcessInfo.processInfo.environment["WA_MAIN_CANVAS_SURFACE_HOST_B01"] == "1"
+#else
+        false
+#endif
     }
 
     func trailingWorkspacePanelMode() -> WorkspaceTrailingPanelMode {
@@ -2900,6 +3097,7 @@ extension ScenarioWriterView {
         guard !isPreviewingHistory else { return }
         guard let targetID = activeCardID, findCard(by: targetID) != nil else { return }
         guard !mainCanvasScrollCoordinator.hasActiveMotionSession() else { return }
+        guard mainCanvasHorizontalScrollMode == .oneStep else { return }
         if shouldSuppressGeneralMainCanvasScrollDuringEditing(targetCardID: targetID) {
             indexBoardRestoreTrace(
                 "main_canvas_navigation_settle_skip",
@@ -2908,10 +3106,24 @@ extension ScenarioWriterView {
             )
             return
         }
+        let resolvedAvailableWidth = mainCanvasScrollCoordinator
+            .resolvedMainCanvasHorizontalScrollView()?
+            .documentVisibleRect
+            .width ?? availableWidth
+        guard hasMeasuredMainCanvasHorizontalNavigationSettleMisalignment(
+            targetCardID: targetID,
+            availableWidth: max(1, resolvedAvailableWidth)
+        ) else {
+            indexBoardRestoreTrace(
+                "main_canvas_navigation_settle_skip",
+                "reason=measuredAligned target=\(debugRestoreUUID(targetID))"
+            )
+            return
+        }
         scrollToColumnIfNeeded(
             targetCardID: targetID,
             proxy: hProxy,
-            availableWidth: availableWidth,
+            availableWidth: max(1, resolvedAvailableWidth),
             force: true,
             animated: false
         )

@@ -4,6 +4,138 @@ import XCTest
 
 @MainActor
 final class MainCanvasScrollCoordinatorMotionSessionTests: XCTestCase {
+    func testPredictedLayoutEnablesNativeDispatchWithoutObservedFrame() {
+        let diagnostics = MainCanvasNavigationDiagnostics.shared
+        diagnostics.setEnabledForTesting(true)
+        defer { diagnostics.setEnabledForTesting(nil) }
+
+        let scenario = Scenario()
+        let card = SceneCard(content: "Predicted native target", scenario: scenario)
+        scenario.cards = [card]
+
+        let view = ScenarioWriterView(scenario: scenario)
+        diagnostics.reset(
+            ownerKey: view.mainCanvasDiagnosticsOwnerKey,
+            scenarioID: scenario.id,
+            splitPaneID: 0
+        )
+
+        let predictedOffset = view.resolvedMainColumnFocusTargetOffset(
+            viewportKey: "test.column",
+            cards: [card],
+            targetID: card.id,
+            viewportHeight: 320,
+            anchorY: 0
+        )
+        diagnostics.beginFocusIntent(
+            ownerKey: view.mainCanvasDiagnosticsOwnerKey,
+            trigger: "activeCardChange",
+            isRepeat: false,
+            sourceCardID: nil,
+            intendedCardID: card.id
+        )
+        diagnostics.beginScrollAnimation(
+            ownerKey: view.mainCanvasDiagnosticsOwnerKey,
+            axis: "vertical",
+            engine: "native",
+            animated: false,
+            target: "test.column|\(card.id.uuidString)",
+            expectedDuration: 0,
+            predictedOnly: true
+        )
+
+        let snapshot = tryUnwrap(diagnostics.snapshot(ownerKey: view.mainCanvasDiagnosticsOwnerKey))
+        XCTAssertNotNil(predictedOffset)
+        XCTAssertEqual(snapshot.predictedNativeScrollCount, 1)
+        XCTAssertEqual(snapshot.predictedNativeScrollMissCount, 0)
+        XCTAssertEqual(snapshot.verticalFallbackScrollCount, 0)
+    }
+
+    func testDiagnosticsTrackClickFocusAndActiveCardChangeFirstMotion() {
+        let diagnostics = MainCanvasNavigationDiagnostics.shared
+        diagnostics.setEnabledForTesting(true)
+        defer { diagnostics.setEnabledForTesting(nil) }
+
+        let ownerKey = "diagnostics-trigger-coverage"
+        diagnostics.reset(ownerKey: ownerKey, scenarioID: UUID(), splitPaneID: 0)
+
+        diagnostics.beginFocusIntent(
+            ownerKey: ownerKey,
+            trigger: "clickFocus",
+            isRepeat: false,
+            sourceCardID: UUID(),
+            intendedCardID: UUID()
+        )
+        diagnostics.beginScrollAnimation(
+            ownerKey: ownerKey,
+            axis: "vertical",
+            engine: "native",
+            animated: false,
+            target: "test.column",
+            expectedDuration: 0
+        )
+
+        diagnostics.beginFocusIntent(
+            ownerKey: ownerKey,
+            trigger: "activeCardChange",
+            isRepeat: false,
+            sourceCardID: UUID(),
+            intendedCardID: UUID()
+        )
+        diagnostics.beginScrollAnimation(
+            ownerKey: ownerKey,
+            axis: "horizontal",
+            engine: "native",
+            animated: false,
+            target: "level:1",
+            expectedDuration: 0,
+            horizontalMode: .oneStep
+        )
+
+        let snapshot = tryUnwrap(diagnostics.snapshot(ownerKey: ownerKey))
+        XCTAssertEqual(snapshot.focusIntentCount, 2)
+        XCTAssertEqual(snapshot.focusToFirstMotionCountByTrigger["clickFocus"], 1)
+        XCTAssertEqual(snapshot.focusToFirstMotionCountByTrigger["activeCardChange"], 1)
+        XCTAssertEqual(snapshot.horizontalOneStepScrollCount, 1)
+    }
+
+    func testTwoStepStoredValueNormalizesToOneStep() {
+        XCTAssertEqual(
+            MainCanvasHorizontalScrollMode.normalizePersistedRawValue(
+                MainCanvasHorizontalScrollMode.twoStep.rawValue
+            ),
+            MainCanvasHorizontalScrollMode.oneStep.rawValue
+        )
+        XCTAssertEqual(
+            MainCanvasHorizontalScrollMode.normalizePersistedRawValue(-1),
+            MainCanvasHorizontalScrollMode.oneStep.rawValue
+        )
+    }
+
+    func testConditionalSettleSkipsFalsePathWithoutMeasuredMisalignment() {
+        XCTAssertFalse(
+            MainWorkspaceMotionEntryPoints.shouldPublishNavigationSettle(
+                verticalMisalignment: false,
+                horizontalMisalignment: false,
+                horizontalMode: .oneStep
+            )
+        )
+        XCTAssertFalse(
+            MainWorkspaceMotionEntryPoints.shouldPublishNavigationSettle(
+                verticalMisalignment: false,
+                horizontalMisalignment: true,
+                horizontalMode: .twoStep
+            )
+        )
+        XCTAssertTrue(
+            MainWorkspaceMotionEntryPoints.shouldPublishNavigationSettle(
+                verticalMisalignment: true,
+                horizontalMisalignment: false,
+                horizontalMode: .oneStep
+            )
+        )
+    }
+
     // Drive retry and timeout ordering with a manual scheduler so the session contract stays deterministic.
     func testKeyboardRetargetCancelsStaleVerificationAndAdvancesRevision() {
         let scheduler = MainCanvasMotionManualScheduler()

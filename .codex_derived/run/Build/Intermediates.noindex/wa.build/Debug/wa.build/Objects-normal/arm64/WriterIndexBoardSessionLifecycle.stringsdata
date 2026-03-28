@@ -1,0 +1,16 @@
+{
+  "source": "/Users/three/app_build/wa/wa/WriterIndexBoardSessionLifecycle.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "인덱스 카드 뷰로 보기",
+        "location": {
+          "startingColumn": 16,
+          "startingLine": 452
+        }
+      }
+    ]
+  },
+  "version": 1
+}

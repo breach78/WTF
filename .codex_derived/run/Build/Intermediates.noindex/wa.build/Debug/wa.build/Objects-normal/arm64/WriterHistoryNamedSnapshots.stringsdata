@@ -1,0 +1,120 @@
+{
+  "source": "/Users/three/app_build/wa/wa/WriterHistoryNamedSnapshots.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "이름 있는 분기점 만들기",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 7
+        }
+      },
+      {
+        "comment": "",
+        "key": "노트 (선택)",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 12
+        }
+      },
+      {
+        "comment": "",
+        "key": "분기점 이름 (예: 주인공 성격 수정)",
+        "location": {
+          "startingColumn": 23,
+          "startingLine": 9
+        }
+      },
+      {
+        "comment": "",
+        "key": "취소",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 33
+        }
+      },
+      {
+        "comment": "",
+        "key": "저장",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 36
+        }
+      },
+      {
+        "comment": "",
+        "key": "네임드 스냅샷/노트 검색...",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 84
+        }
+      },
+      {
+        "comment": "",
+        "key": "",
+        "location": {
+          "startingColumn": 17,
+          "startingLine": 82
+        }
+      },
+      {
+        "comment": "",
+        "key": "네임드 스냅샷 노트",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 108
+        }
+      },
+      {
+        "comment": "",
+        "key": "네임드 스냅샷이 없습니다",
+        "location": {
+          "startingColumn": 46,
+          "startingLine": 144
+        }
+      },
+      {
+        "comment": "",
+        "key": "검색 결과 없음",
+        "location": {
+          "startingColumn": 86,
+          "startingLine": 144
+        }
+      },
+      {
+        "comment": "",
+        "key": "이 시점은 네임드 스냅샷이 아닙니다",
+        "location": {
+          "startingColumn": 21,
+          "startingLine": 231
+        }
+      },
+      {
+        "comment": "",
+        "key": "연결 노트",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 251
+        }
+      },
+      {
+        "comment": "",
+        "key": "완료",
+        "location": {
+          "startingColumn": 53,
+          "startingLine": 255
+        }
+      },
+      {
+        "comment": "",
+        "key": "편집",
+        "location": {
+          "startingColumn": 64,
+          "startingLine": 255
+        }
+      }
+    ]
+  },
+  "version": 1
+}

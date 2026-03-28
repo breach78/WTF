@@ -638,6 +638,7 @@ final class MainCanvasViewState: ObservableObject {
     @Published var focusNavigationTick: Int = 0
     @Published var navigationSettleTick: Int = 0
     @Published var maxLevelCount: Int = 0
+    @Published var surfaceDocumentSizeByViewportKey: [String: CGSize] = [:]
 
     private var restoreRequestSequence: Int = 0
 

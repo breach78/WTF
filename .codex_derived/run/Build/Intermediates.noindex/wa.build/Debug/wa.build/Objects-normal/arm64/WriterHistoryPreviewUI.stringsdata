@@ -1,0 +1,72 @@
+{
+  "source": "/Users/three/app_build/wa/wa/WriterHistoryPreviewUI.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "이름 없는 스냅샷",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 181
+        }
+      },
+      {
+        "comment": "",
+        "key": "%@ %@",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 190
+        }
+      },
+      {
+        "comment": "",
+        "key": "이름 변경",
+        "location": {
+          "startingColumn": 39,
+          "startingLine": 167
+        }
+      },
+      {
+        "comment": "",
+        "key": "타임라인 히스토리",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 187
+        }
+      },
+      {
+        "comment": "",
+        "key": "이전 이름",
+        "location": {
+          "startingColumn": 77,
+          "startingLine": 243
+        }
+      },
+      {
+        "comment": "",
+        "key": "다음 이름",
+        "location": {
+          "startingColumn": 73,
+          "startingLine": 248
+        }
+      },
+      {
+        "comment": "",
+        "key": "미리보기 종료",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 258
+        }
+      },
+      {
+        "comment": "",
+        "key": "이 시점으로 복구",
+        "location": {
+          "startingColumn": 72,
+          "startingLine": 254
+        }
+      }
+    ]
+  },
+  "version": 1
+}

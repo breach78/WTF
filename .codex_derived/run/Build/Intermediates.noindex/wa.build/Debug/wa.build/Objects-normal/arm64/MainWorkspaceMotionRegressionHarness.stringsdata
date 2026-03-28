@@ -1,0 +1,24 @@
+{
+  "source": "/Users/three/app_build/wa/wa/MainWorkspaceMotionRegressionHarness.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "Main Workspace Motion Kernel Harness",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 424
+        }
+      },
+      {
+        "comment": "",
+        "key": "",
+        "location": {
+          "startingColumn": 23,
+          "startingLine": 435
+        }
+      }
+    ]
+  },
+  "version": 1
+}

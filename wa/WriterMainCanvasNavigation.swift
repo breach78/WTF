@@ -551,7 +551,8 @@ extension ScenarioWriterView {
                     engine: "proxy",
                     animated: true,
                     target: "level:\(level)",
-                    expectedDuration: 0.24
+                    expectedDuration: 0.24,
+                    horizontalMode: mainCanvasHorizontalScrollMode
                 )
                 withAnimation(quickEaseAnimation) {
                     proxy.scrollTo(level, anchor: hAnchor)
@@ -563,7 +564,8 @@ extension ScenarioWriterView {
                     engine: "proxy",
                     animated: false,
                     target: "level:\(level)",
-                    expectedDuration: 0
+                    expectedDuration: 0,
+                    horizontalMode: mainCanvasHorizontalScrollMode
                 )
                 performWithoutAnimation {
                     proxy.scrollTo(level, anchor: hAnchor)
@@ -671,7 +673,8 @@ extension ScenarioWriterView {
                 engine: "native",
                 animated: true,
                 target: "level:\(level)",
-                expectedDuration: appliedDuration
+                expectedDuration: appliedDuration,
+                horizontalMode: mainCanvasHorizontalScrollMode
             )
             _ = CaretScrollCoordinator.applyAnimatedHorizontalScrollIfNeeded(
                 scrollView: scrollView,
@@ -702,7 +705,8 @@ extension ScenarioWriterView {
             engine: "native",
             animated: false,
             target: "level:\(level)",
-            expectedDuration: 0
+            expectedDuration: 0,
+            horizontalMode: mainCanvasHorizontalScrollMode
         )
         let applied = CaretScrollCoordinator.applyHorizontalScrollIfNeeded(
             scrollView: scrollView,

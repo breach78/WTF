@@ -1,0 +1,112 @@
+{
+  "source": "/Users/three/app_build/wa/wa/SettingsAICards.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "Gemini 모델",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 13
+        }
+      },
+      {
+        "comment": "",
+        "key": "Gemini 3.1 Pro의 API 모델 ID는 gemini-3.1-pro-preview 입니다. 404가 뜨면 다른 모델을 선택하세요.",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 36
+        }
+      },
+      {
+        "comment": "",
+        "key": "Gemini API 키",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 41
+        }
+      },
+      {
+        "comment": "",
+        "key": "모델 선택",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 16
+        }
+      },
+      {
+        "comment": "",
+        "key": "예: gemini-3.1-pro-preview",
+        "location": {
+          "startingColumn": 23,
+          "startingLine": 30
+        }
+      },
+      {
+        "comment": "",
+        "key": "새 키를 입력하면 덮어씁니다",
+        "location": {
+          "startingColumn": 43,
+          "startingLine": 44
+        }
+      },
+      {
+        "comment": "",
+        "key": "API 키 입력",
+        "location": {
+          "startingColumn": 87,
+          "startingLine": 44
+        }
+      },
+      {
+        "comment": "",
+        "key": "현재 API 키가 저장되어 있습니다.",
+        "location": {
+          "startingColumn": 36,
+          "startingLine": 59
+        }
+      },
+      {
+        "comment": "",
+        "key": "현재 저장된 API 키가 없습니다.",
+        "location": {
+          "startingColumn": 85,
+          "startingLine": 59
+        }
+      },
+      {
+        "comment": "",
+        "key": "직접 입력",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 21
+        }
+      },
+      {
+        "comment": "",
+        "key": "키 업데이트",
+        "location": {
+          "startingColumn": 42,
+          "startingLine": 48
+        }
+      },
+      {
+        "comment": "",
+        "key": "키 저장",
+        "location": {
+          "startingColumn": 63,
+          "startingLine": 48
+        }
+      },
+      {
+        "comment": "",
+        "key": "키 삭제",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 53
+        }
+      }
+    ]
+  },
+  "version": 1
+}

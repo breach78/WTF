@@ -1,0 +1,112 @@
+{
+  "source": "/Users/three/app_build/wa/wa/SettingsView.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "설정 검색",
+        "location": {
+          "startingColumn": 86,
+          "startingLine": 260
+        }
+      },
+      {
+        "comment": "",
+        "key": "작업 파일 초기화",
+        "location": {
+          "startingColumn": 33,
+          "startingLine": 279
+        }
+      },
+      {
+        "comment": "",
+        "key": "현재 작업 파일 연결을 해제하고 다시 선택하도록 초기화합니다.",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 280
+        }
+      },
+      {
+        "comment": "",
+        "key": "초기화",
+        "location": {
+          "startingColumn": 54,
+          "startingLine": 281
+        }
+      },
+      {
+        "comment": "",
+        "key": "취소",
+        "location": {
+          "startingColumn": 51,
+          "startingLine": 285
+        }
+      },
+      {
+        "comment": "",
+        "key": "Gemini API 키 삭제",
+        "location": {
+          "startingColumn": 33,
+          "startingLine": 289
+        }
+      },
+      {
+        "comment": "",
+        "key": "저장된 키를 삭제하면 AI 기능을 다시 사용하려면 키를 재입력해야 합니다.",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 290
+        }
+      },
+      {
+        "comment": "",
+        "key": "삭제",
+        "location": {
+          "startingColumn": 54,
+          "startingLine": 291
+        }
+      },
+      {
+        "comment": "",
+        "key": "취소",
+        "location": {
+          "startingColumn": 51,
+          "startingLine": 294
+        }
+      },
+      {
+        "comment": "",
+        "key": "색상 초기화",
+        "location": {
+          "startingColumn": 33,
+          "startingLine": 298
+        }
+      },
+      {
+        "comment": "",
+        "key": "현재 카드/배경 색상 값을 기본값으로 되돌립니다.",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 299
+        }
+      },
+      {
+        "comment": "",
+        "key": "초기화",
+        "location": {
+          "startingColumn": 54,
+          "startingLine": 300
+        }
+      },
+      {
+        "comment": "",
+        "key": "취소",
+        "location": {
+          "startingColumn": 51,
+          "startingLine": 303
+        }
+      }
+    ]
+  },
+  "version": 1
+}

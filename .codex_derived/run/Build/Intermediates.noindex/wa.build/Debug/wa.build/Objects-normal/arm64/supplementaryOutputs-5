@@ -1,0 +1,86 @@
+{
+  "/Users/three/app_build/wa/wa/WriterHistoryView.swift" : {
+    "const-values" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterHistoryView.swiftconstvalues",
+    "dependencies" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterHistoryView.d",
+    "diagnostics" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterHistoryView.dia",
+    "object" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterHistoryView.o",
+    "swift-dependencies" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterHistoryView.swiftdeps"
+  },
+  "/Users/three/app_build/wa/wa/WriterIndexBoardCardMoveCommit.swift" : {
+    "const-values" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterIndexBoardCardMoveCommit.swiftconstvalues",
+    "dependencies" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterIndexBoardCardMoveCommit.d",
+    "diagnostics" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterIndexBoardCardMoveCommit.dia",
+    "object" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterIndexBoardCardMoveCommit.o",
+    "swift-dependencies" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterIndexBoardCardMoveCommit.swiftdeps"
+  },
+  "/Users/three/app_build/wa/wa/WriterIndexBoardCommitSupport.swift" : {
+    "const-values" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterIndexBoardCommitSupport.swiftconstvalues",
+    "dependencies" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterIndexBoardCommitSupport.d",
+    "diagnostics" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterIndexBoardCommitSupport.dia",
+    "object" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterIndexBoardCommitSupport.o",
+    "swift-dependencies" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterIndexBoardCommitSupport.swiftdeps"
+  },
+  "/Users/three/app_build/wa/wa/WriterIndexBoardDragHarness.swift" : {
+    "const-values" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterIndexBoardDragHarness.swiftconstvalues",
+    "dependencies" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterIndexBoardDragHarness.d",
+    "diagnostics" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterIndexBoardDragHarness.dia",
+    "object" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterIndexBoardDragHarness.o",
+    "swift-dependencies" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterIndexBoardDragHarness.swiftdeps"
+  },
+  "/Users/three/app_build/wa/wa/WriterIndexBoardGroupTempCommit.swift" : {
+    "const-values" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterIndexBoardGroupTempCommit.swiftconstvalues",
+    "dependencies" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterIndexBoardGroupTempCommit.d",
+    "diagnostics" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterIndexBoardGroupTempCommit.dia",
+    "object" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterIndexBoardGroupTempCommit.o",
+    "swift-dependencies" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterIndexBoardGroupTempCommit.swiftdeps"
+  },
+  "/Users/three/app_build/wa/wa/WriterIndexBoardOrderDiagnostics.swift" : {
+    "const-values" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterIndexBoardOrderDiagnostics.swiftconstvalues",
+    "dependencies" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterIndexBoardOrderDiagnostics.d",
+    "diagnostics" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterIndexBoardOrderDiagnostics.dia",
+    "object" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterIndexBoardOrderDiagnostics.o",
+    "swift-dependencies" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterIndexBoardOrderDiagnostics.swiftdeps"
+  },
+  "/Users/three/app_build/wa/wa/WriterIndexBoardPersistencePublish.swift" : {
+    "const-values" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterIndexBoardPersistencePublish.swiftconstvalues",
+    "dependencies" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterIndexBoardPersistencePublish.d",
+    "diagnostics" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterIndexBoardPersistencePublish.dia",
+    "object" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterIndexBoardPersistencePublish.o",
+    "swift-dependencies" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterIndexBoardPersistencePublish.swiftdeps"
+  },
+  "/Users/three/app_build/wa/wa/WriterIndexBoardPhaseFive.swift" : {
+    "const-values" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterIndexBoardPhaseFive.swiftconstvalues",
+    "dependencies" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterIndexBoardPhaseFive.d",
+    "diagnostics" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterIndexBoardPhaseFive.dia",
+    "object" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterIndexBoardPhaseFive.o",
+    "swift-dependencies" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterIndexBoardPhaseFive.swiftdeps"
+  },
+  "/Users/three/app_build/wa/wa/WriterIndexBoardPhaseFour.swift" : {
+    "const-values" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterIndexBoardPhaseFour.swiftconstvalues",
+    "dependencies" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterIndexBoardPhaseFour.d",
+    "diagnostics" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterIndexBoardPhaseFour.dia",
+    "object" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterIndexBoardPhaseFour.o",
+    "swift-dependencies" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterIndexBoardPhaseFour.swiftdeps"
+  },
+  "/Users/three/app_build/wa/wa/WriterIndexBoardPhaseOne.swift" : {
+    "const-values" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterIndexBoardPhaseOne.swiftconstvalues",
+    "dependencies" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterIndexBoardPhaseOne.d",
+    "diagnostics" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterIndexBoardPhaseOne.dia",
+    "object" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterIndexBoardPhaseOne.o",
+    "swift-dependencies" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterIndexBoardPhaseOne.swiftdeps"
+  },
+  "/Users/three/app_build/wa/wa/WriterIndexBoardPhaseSix.swift" : {
+    "const-values" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterIndexBoardPhaseSix.swiftconstvalues",
+    "dependencies" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterIndexBoardPhaseSix.d",
+    "diagnostics" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterIndexBoardPhaseSix.dia",
+    "object" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterIndexBoardPhaseSix.o",
+    "swift-dependencies" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterIndexBoardPhaseSix.swiftdeps"
+  },
+  "/Users/three/app_build/wa/wa/WriterIndexBoardPhaseThree.swift" : {
+    "const-values" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterIndexBoardPhaseThree.swiftconstvalues",
+    "dependencies" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterIndexBoardPhaseThree.d",
+    "diagnostics" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterIndexBoardPhaseThree.dia",
+    "object" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterIndexBoardPhaseThree.o",
+    "swift-dependencies" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterIndexBoardPhaseThree.swiftdeps"
+  }
+}

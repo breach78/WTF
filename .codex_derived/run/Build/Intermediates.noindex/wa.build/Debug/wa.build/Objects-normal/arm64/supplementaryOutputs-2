@@ -1,0 +1,93 @@
+{
+  "/Users/three/app_build/wa/wa/MainContainerView.swift" : {
+    "const-values" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/MainContainerView.swiftconstvalues",
+    "dependencies" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/MainContainerView.d",
+    "diagnostics" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/MainContainerView.dia",
+    "object" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/MainContainerView.o",
+    "swift-dependencies" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/MainContainerView.swiftdeps"
+  },
+  "/Users/three/app_build/wa/wa/MainWorkspaceMotionRegressionHarness.swift" : {
+    "const-values" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/MainWorkspaceMotionRegressionHarness.swiftconstvalues",
+    "dependencies" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/MainWorkspaceMotionRegressionHarness.d",
+    "diagnostics" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/MainWorkspaceMotionRegressionHarness.dia",
+    "object" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/MainWorkspaceMotionRegressionHarness.o",
+    "swift-dependencies" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/MainWorkspaceMotionRegressionHarness.swiftdeps"
+  },
+  "/Users/three/app_build/wa/wa/ReferenceWindow.swift" : {
+    "const-values" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/ReferenceWindow.swiftconstvalues",
+    "dependencies" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/ReferenceWindow.d",
+    "diagnostics" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/ReferenceWindow.dia",
+    "object" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/ReferenceWindow.o",
+    "swift-dependencies" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/ReferenceWindow.swiftdeps"
+  },
+  "/Users/three/app_build/wa/wa/Scenario.swift" : {
+    "const-values" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/Scenario.swiftconstvalues",
+    "dependencies" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/Scenario.d",
+    "diagnostics" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/Scenario.dia",
+    "object" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/Scenario.o",
+    "swift-dependencies" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/Scenario.swiftdeps"
+  },
+  "/Users/three/app_build/wa/wa/ScenarioRow.swift" : {
+    "const-values" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/ScenarioRow.swiftconstvalues",
+    "dependencies" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/ScenarioRow.d",
+    "diagnostics" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/ScenarioRow.dia",
+    "object" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/ScenarioRow.o",
+    "swift-dependencies" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/ScenarioRow.swiftdeps"
+  },
+  "/Users/three/app_build/wa/wa/SceneCard.swift" : {
+    "const-values" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/SceneCard.swiftconstvalues",
+    "dependencies" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/SceneCard.d",
+    "diagnostics" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/SceneCard.dia",
+    "object" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/SceneCard.o",
+    "swift-dependencies" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/SceneCard.swiftdeps"
+  },
+  "/Users/three/app_build/wa/wa/ScriptPDFExport.swift" : {
+    "const-values" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/ScriptPDFExport.swiftconstvalues",
+    "dependencies" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/ScriptPDFExport.d",
+    "diagnostics" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/ScriptPDFExport.dia",
+    "object" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/ScriptPDFExport.o",
+    "swift-dependencies" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/ScriptPDFExport.swiftdeps"
+  },
+  "/Users/three/app_build/wa/wa/SettingsAICards.swift" : {
+    "const-values" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/SettingsAICards.swiftconstvalues",
+    "dependencies" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/SettingsAICards.d",
+    "diagnostics" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/SettingsAICards.dia",
+    "object" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/SettingsAICards.o",
+    "swift-dependencies" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/SettingsAICards.swiftdeps"
+  },
+  "/Users/three/app_build/wa/wa/SettingsAppearanceCards.swift" : {
+    "const-values" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/SettingsAppearanceCards.swiftconstvalues",
+    "dependencies" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/SettingsAppearanceCards.d",
+    "diagnostics" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/SettingsAppearanceCards.dia",
+    "object" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/SettingsAppearanceCards.o",
+    "swift-dependencies" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/SettingsAppearanceCards.swiftdeps"
+  },
+  "/Users/three/app_build/wa/wa/SettingsExportDataAboutCards.swift" : {
+    "const-values" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/SettingsExportDataAboutCards.swiftconstvalues",
+    "dependencies" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/SettingsExportDataAboutCards.d",
+    "diagnostics" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/SettingsExportDataAboutCards.dia",
+    "object" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/SettingsExportDataAboutCards.o",
+    "swift-dependencies" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/SettingsExportDataAboutCards.swiftdeps"
+  },
+  "/Users/three/app_build/wa/wa/SettingsScaffolding.swift" : {
+    "const-values" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/SettingsScaffolding.swiftconstvalues",
+    "dependencies" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/SettingsScaffolding.d",
+    "diagnostics" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/SettingsScaffolding.dia",
+    "object" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/SettingsScaffolding.o",
+    "swift-dependencies" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/SettingsScaffolding.swiftdeps"
+  },
+  "/Users/three/app_build/wa/wa/SettingsStorageHelpers.swift" : {
+    "const-values" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/SettingsStorageHelpers.swiftconstvalues",
+    "dependencies" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/SettingsStorageHelpers.d",
+    "diagnostics" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/SettingsStorageHelpers.dia",
+    "object" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/SettingsStorageHelpers.o",
+    "swift-dependencies" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/SettingsStorageHelpers.swiftdeps"
+  },
+  "/Users/three/app_build/wa/wa/SettingsView.swift" : {
+    "const-values" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/SettingsView.swiftconstvalues",
+    "dependencies" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/SettingsView.d",
+    "diagnostics" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/SettingsView.dia",
+    "object" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/SettingsView.o",
+    "swift-dependencies" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/SettingsView.swiftdeps"
+  }
+}

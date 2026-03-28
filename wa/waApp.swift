@@ -557,7 +557,7 @@ private struct MainWindowSizePersistenceAccessor: NSViewRepresentable {
 struct waApp: App {
     @AppStorage("fontSize") private var fontSize: Double = 14.0
     @AppStorage("mainWorkspaceZoomScale") private var mainWorkspaceZoomScale: Double = 1.0
-    @AppStorage("mainCanvasHorizontalScrollMode") private var mainCanvasHorizontalScrollModeRawValue: Int = MainCanvasHorizontalScrollMode.twoStep.rawValue
+    @AppStorage("mainCanvasHorizontalScrollMode") private var mainCanvasHorizontalScrollModeRawValue: Int = MainCanvasHorizontalScrollMode.defaultPolicy.rawValue
     @AppStorage("focusNavigationAnimationEnabled") private var focusNavigationAnimationEnabled: Bool = false
     @AppStorage("focusTypewriterEnabled") private var focusTypewriterEnabled: Bool = false
     @AppStorage("mainSplitModeEnabled") private var mainSplitModeEnabled: Bool = false
@@ -581,7 +581,9 @@ struct waApp: App {
     @State private var storeSetupRequestID: Int = 0
 #if DEBUG
     private var motionKernelUITestModeEnabled: Bool {
-        ProcessInfo.processInfo.environment["WA_UI_TEST_MODE"] == "motion-kernel"
+        let processInfo = ProcessInfo.processInfo
+        return processInfo.environment["WA_UI_TEST_MODE"] == "motion-kernel"
+            || processInfo.arguments.contains("-WA_UI_TEST_MODE_MOTION_KERNEL")
     }
 #endif
 
@@ -597,86 +599,7 @@ struct waApp: App {
     
     var body: some Scene {
         WindowGroup {
-            ZStack {
-                Color(nsColor: appWindowState.focusModeWindowBackgroundActive ? .black : resolvedWindowBackgroundColor)
-                    .ignoresSafeArea()
-                Group {
-#if DEBUG
-                    if motionKernelUITestModeEnabled {
-                        MainWorkspaceMotionRegressionHarnessView()
-                    } else if let store = store {
-                        MainContainerView()
-                            .environmentObject(store)
-                            .environmentObject(appWindowState)
-                            .environmentObject(referenceCardStore)
-                    } else {
-                        storageSetupView
-                    }
-#else
-                    if let store = store {
-                        // 스토어가 준비되면 메인 뷰 표시
-                        MainContainerView()
-                            .environmentObject(store)
-                            .environmentObject(appWindowState)
-                            .environmentObject(referenceCardStore)
-                    } else {
-                        // 컨테이너가 없으면(최초 실행 시) 설정 화면 표시
-                        storageSetupView
-                    }
-#endif
-                }
-            }
-            .background(MainWindowTitleHider())
-            .background(MainWindowSizePersistenceAccessor())
-            .onAppear {
-                applyApplicationAppearance()
-#if DEBUG
-                guard !motionKernelUITestModeEnabled else { return }
-#endif
-                if !didResetForV2 {
-                    store?.flushPendingSaves()
-                    storageBookmark = nil
-                    store = nil
-                    didResetForV2 = true
-                }
-                if forceWorkspaceReset {
-                    store?.flushPendingSaves()
-                    storageBookmark = nil
-                    store = nil
-                    forceWorkspaceReset = false
-                }
-                initializeAutoBackupSettingsIfNeeded()
-                setupStore()
-                preloadSoftBoundaryFeedbackSound()
-                appWindowState.focusModeWindowBackgroundActive = false
-                hideReferenceWindowOnLaunchOnce()
-            }
-            .onChange(of: appearance) { _, _ in
-                applyApplicationAppearance()
-            }
-            .onChange(of: forceWorkspaceReset) { _, newValue in
-#if DEBUG
-                guard !motionKernelUITestModeEnabled else { return }
-#endif
-                if newValue {
-                    store?.flushPendingSaves()
-                    storageBookmark = nil
-                    store = nil
-                    forceWorkspaceReset = false
-                }
-            }
-            .onChange(of: storageBookmark) { _, _ in
-#if DEBUG
-                guard !motionKernelUITestModeEnabled else { return }
-#endif
-                setupStore()
-            }
-            .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
-#if DEBUG
-                guard !motionKernelUITestModeEnabled else { return }
-#endif
-                handleApplicationWillTerminate()
-            }
+            mainWindowRootView
         }
         .windowStyle(.hiddenTitleBar)
         Window("레퍼런스 카드", id: ReferenceWindowConstants.windowID) {
@@ -789,6 +712,115 @@ struct waApp: App {
         Settings {
             SettingsView(onUpdateStore: { setupStore() })
         }
+    }
+
+    private var mainWindowRootView: some View {
+        let baseView = ZStack {
+            Color(nsColor: appWindowState.focusModeWindowBackgroundActive ? .black : resolvedWindowBackgroundColor)
+                .ignoresSafeArea()
+            Group {
+#if DEBUG
+                if motionKernelUITestModeEnabled {
+                    MainWorkspaceMotionRegressionHarnessView()
+                } else if let store = store {
+                    MainContainerView()
+                        .environmentObject(store)
+                        .environmentObject(appWindowState)
+                        .environmentObject(referenceCardStore)
+                } else {
+                    storageSetupView
+                }
+#else
+                if let store = store {
+                    // 스토어가 준비되면 메인 뷰 표시
+                    MainContainerView()
+                        .environmentObject(store)
+                        .environmentObject(appWindowState)
+                        .environmentObject(referenceCardStore)
+                } else {
+                    // 컨테이너가 없으면(최초 실행 시) 설정 화면 표시
+                    storageSetupView
+                }
+#endif
+            }
+        }
+        .onAppear {
+            applyApplicationAppearance()
+#if DEBUG
+            if motionKernelUITestModeEnabled {
+                DispatchQueue.main.async {
+                    let mainWindows = NSApp.windows.filter { $0.identifier?.rawValue != ReferenceWindowConstants.windowID }
+                    for window in mainWindows {
+                        if window.title.isEmpty {
+                            window.title = "Main Workspace Motion Kernel Harness"
+                        }
+                        window.titleVisibility = .visible
+                        window.titlebarAppearsTransparent = false
+                        window.makeKeyAndOrderFront(nil)
+                        window.orderFrontRegardless()
+                    }
+                    NSRunningApplication.current.activate(options: [.activateAllWindows])
+                    NSApp.activate(ignoringOtherApps: true)
+                }
+                return
+            }
+#endif
+            if !didResetForV2 {
+                store?.flushPendingSaves()
+                storageBookmark = nil
+                store = nil
+                didResetForV2 = true
+            }
+            if forceWorkspaceReset {
+                store?.flushPendingSaves()
+                storageBookmark = nil
+                store = nil
+                forceWorkspaceReset = false
+            }
+            initializeAutoBackupSettingsIfNeeded()
+            setupStore()
+            preloadSoftBoundaryFeedbackSound()
+            appWindowState.focusModeWindowBackgroundActive = false
+            hideReferenceWindowOnLaunchOnce()
+        }
+        .onChange(of: appearance) { _, _ in
+            applyApplicationAppearance()
+        }
+        .onChange(of: forceWorkspaceReset) { _, newValue in
+#if DEBUG
+            guard !motionKernelUITestModeEnabled else { return }
+#endif
+            if newValue {
+                store?.flushPendingSaves()
+                storageBookmark = nil
+                store = nil
+                forceWorkspaceReset = false
+            }
+        }
+        .onChange(of: storageBookmark) { _, _ in
+#if DEBUG
+            guard !motionKernelUITestModeEnabled else { return }
+#endif
+            setupStore()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
+#if DEBUG
+            guard !motionKernelUITestModeEnabled else { return }
+#endif
+            handleApplicationWillTerminate()
+        }
+
+#if DEBUG
+        if motionKernelUITestModeEnabled {
+            return AnyView(baseView)
+        }
+#endif
+
+        return AnyView(
+            baseView
+                .background(MainWindowTitleHider())
+                .background(MainWindowSizePersistenceAccessor())
+        )
     }
     
     // --- 저장소 설정 로직 ---

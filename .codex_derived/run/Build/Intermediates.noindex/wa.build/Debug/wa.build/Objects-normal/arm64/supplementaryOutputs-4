@@ -1,0 +1,86 @@
+{
+  "/Users/three/app_build/wa/wa/WriterCardSelectionAndDeletion.swift" : {
+    "const-values" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterCardSelectionAndDeletion.swiftconstvalues",
+    "dependencies" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterCardSelectionAndDeletion.d",
+    "diagnostics" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterCardSelectionAndDeletion.dia",
+    "object" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterCardSelectionAndDeletion.o",
+    "swift-dependencies" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterCardSelectionAndDeletion.swiftdeps"
+  },
+  "/Users/three/app_build/wa/wa/WriterCardViews.swift" : {
+    "const-values" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterCardViews.swiftconstvalues",
+    "dependencies" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterCardViews.d",
+    "diagnostics" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterCardViews.dia",
+    "object" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterCardViews.o",
+    "swift-dependencies" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterCardViews.swiftdeps"
+  },
+  "/Users/three/app_build/wa/wa/WriterCaretAndScroll.swift" : {
+    "const-values" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterCaretAndScroll.swiftconstvalues",
+    "dependencies" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterCaretAndScroll.d",
+    "diagnostics" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterCaretAndScroll.dia",
+    "object" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterCaretAndScroll.o",
+    "swift-dependencies" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterCaretAndScroll.swiftdeps"
+  },
+  "/Users/three/app_build/wa/wa/WriterClipboardAndExport.swift" : {
+    "const-values" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterClipboardAndExport.swiftconstvalues",
+    "dependencies" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterClipboardAndExport.d",
+    "diagnostics" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterClipboardAndExport.dia",
+    "object" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterClipboardAndExport.o",
+    "swift-dependencies" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterClipboardAndExport.swiftdeps"
+  },
+  "/Users/three/app_build/wa/wa/WriterFocusMode.swift" : {
+    "const-values" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterFocusMode.swiftconstvalues",
+    "dependencies" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterFocusMode.d",
+    "diagnostics" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterFocusMode.dia",
+    "object" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterFocusMode.o",
+    "swift-dependencies" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterFocusMode.swiftdeps"
+  },
+  "/Users/three/app_build/wa/wa/WriterFocusModeEditing.swift" : {
+    "const-values" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterFocusModeEditing.swiftconstvalues",
+    "dependencies" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterFocusModeEditing.d",
+    "diagnostics" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterFocusModeEditing.dia",
+    "object" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterFocusModeEditing.o",
+    "swift-dependencies" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterFocusModeEditing.swiftdeps"
+  },
+  "/Users/three/app_build/wa/wa/WriterFocusModeScroll.swift" : {
+    "const-values" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterFocusModeScroll.swiftconstvalues",
+    "dependencies" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterFocusModeScroll.d",
+    "diagnostics" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterFocusModeScroll.dia",
+    "object" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterFocusModeScroll.o",
+    "swift-dependencies" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterFocusModeScroll.swiftdeps"
+  },
+  "/Users/three/app_build/wa/wa/WriterFocusModeSurface.swift" : {
+    "const-values" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterFocusModeSurface.swiftconstvalues",
+    "dependencies" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterFocusModeSurface.d",
+    "diagnostics" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterFocusModeSurface.dia",
+    "object" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterFocusModeSurface.o",
+    "swift-dependencies" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterFocusModeSurface.swiftdeps"
+  },
+  "/Users/three/app_build/wa/wa/WriterFocusModeTransitions.swift" : {
+    "const-values" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterFocusModeTransitions.swiftconstvalues",
+    "dependencies" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterFocusModeTransitions.d",
+    "diagnostics" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterFocusModeTransitions.dia",
+    "object" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterFocusModeTransitions.o",
+    "swift-dependencies" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterFocusModeTransitions.swiftdeps"
+  },
+  "/Users/three/app_build/wa/wa/WriterHistoryNamedSnapshots.swift" : {
+    "const-values" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterHistoryNamedSnapshots.swiftconstvalues",
+    "dependencies" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterHistoryNamedSnapshots.d",
+    "diagnostics" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterHistoryNamedSnapshots.dia",
+    "object" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterHistoryNamedSnapshots.o",
+    "swift-dependencies" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterHistoryNamedSnapshots.swiftdeps"
+  },
+  "/Users/three/app_build/wa/wa/WriterHistoryPreviewUI.swift" : {
+    "const-values" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterHistoryPreviewUI.swiftconstvalues",
+    "dependencies" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterHistoryPreviewUI.d",
+    "diagnostics" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterHistoryPreviewUI.dia",
+    "object" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterHistoryPreviewUI.o",
+    "swift-dependencies" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterHistoryPreviewUI.swiftdeps"
+  },
+  "/Users/three/app_build/wa/wa/WriterHistorySnapshotEngine.swift" : {
+    "const-values" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterHistorySnapshotEngine.swiftconstvalues",
+    "dependencies" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterHistorySnapshotEngine.d",
+    "diagnostics" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterHistorySnapshotEngine.dia",
+    "object" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterHistorySnapshotEngine.o",
+    "swift-dependencies" : "/Users/three/app_build/wa/.codex_derived/run/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterHistorySnapshotEngine.swiftdeps"
+  }
+}

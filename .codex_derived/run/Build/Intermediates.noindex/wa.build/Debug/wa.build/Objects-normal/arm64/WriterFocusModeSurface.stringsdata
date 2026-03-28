@@ -1,0 +1,24 @@
+{
+  "source": "/Users/three/app_build/wa/wa/WriterFocusModeSurface.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "포커스 모드 검색",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 49
+        }
+      },
+      {
+        "comment": "",
+        "key": "",
+        "location": {
+          "startingColumn": 21,
+          "startingLine": 47
+        }
+      }
+    ]
+  },
+  "version": 1
+}

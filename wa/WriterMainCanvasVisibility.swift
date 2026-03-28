@@ -296,6 +296,56 @@ extension ScenarioWriterView {
         return abs(visibleAnchorY - desiredAnchorY) <= tolerance
     }
 
+    func resolvedMainColumnFocusPrefersTopAnchor(
+        cards: [SceneCard],
+        targetID: UUID,
+        viewportHeight: CGFloat
+    ) -> Bool {
+        let targetHeight = resolvedMainColumnTargetLayout(
+            in: cards,
+            targetID: targetID,
+            viewportHeight: viewportHeight
+        ).map { $0.targetMaxY - $0.targetMinY }
+            ?? findCard(by: targetID).map { resolvedMainCardHeight(for: $0) }
+            ?? 0
+        return targetHeight > viewportHeight
+    }
+
+    func hasMeasuredMainColumnNavigationSettleMisalignment(
+        viewportKey: String,
+        cards: [SceneCard],
+        targetID: UUID,
+        viewportHeight: CGFloat
+    ) -> Bool {
+        guard observedMainColumnTargetFrame(
+            viewportKey: viewportKey,
+            targetID: targetID
+        ) != nil else {
+            return false
+        }
+
+        let prefersTopAnchor = resolvedMainColumnFocusPrefersTopAnchor(
+            cards: cards,
+            targetID: targetID,
+            viewportHeight: viewportHeight
+        )
+        let targetVisible = isMainColumnFocusTargetVisible(
+            viewportKey: viewportKey,
+            cards: cards,
+            targetID: targetID,
+            viewportHeight: viewportHeight,
+            prefersTopAnchor: prefersTopAnchor
+        )
+        let targetAligned = isMainColumnFocusTargetAligned(
+            viewportKey: viewportKey,
+            cards: cards,
+            targetID: targetID,
+            viewportHeight: viewportHeight,
+            prefersTopAnchor: prefersTopAnchor
+        )
+        return !(targetVisible && targetAligned)
+    }
+
     @discardableResult
     func performMainColumnNativeFocusScroll(
         viewportKey: String,
@@ -305,11 +355,17 @@ extension ScenarioWriterView {
         anchorY: CGFloat,
         animated: Bool
     ) -> Bool {
-        guard observedMainColumnTargetFrame(
+        let predictedOnly = observedMainColumnTargetFrame(
             viewportKey: viewportKey,
             targetID: targetID
-        ) != nil else {
-            return false
+        ) == nil
+        var success = false
+        defer {
+            if predictedOnly && !success {
+                MainCanvasNavigationDiagnostics.shared.recordPredictedNativeScrollMiss(
+                    ownerKey: mainCanvasDiagnosticsOwnerKey
+                )
+            }
         }
         guard let scrollView = mainCanvasScrollCoordinator.scrollView(for: viewportKey) else {
             return false
@@ -351,7 +407,8 @@ extension ScenarioWriterView {
                 engine: "native",
                 animated: true,
                 target: "\(viewportKey)|\(targetID.uuidString)",
-                expectedDuration: appliedDuration
+                expectedDuration: appliedDuration,
+                predictedOnly: predictedOnly
             )
             suspendMainColumnViewportCapture(for: appliedDuration + 0.06)
             _ = CaretScrollCoordinator.applyAnimatedVerticalScrollIfNeeded(
@@ -374,6 +431,7 @@ extension ScenarioWriterView {
                 "mode=animated key=\(viewportKey) target=\(mainWorkspacePhase0CardID(targetID)) " +
                 "visibleY=\(visible.origin.y) targetY=\(resolvedTargetY) duration=\(appliedDuration) viewport=\(resolvedViewportHeight)"
             )
+            success = true
             return true
         }
 
@@ -383,7 +441,8 @@ extension ScenarioWriterView {
             engine: "native",
             animated: false,
             target: "\(viewportKey)|\(targetID.uuidString)",
-            expectedDuration: 0
+            expectedDuration: 0,
+            predictedOnly: predictedOnly
         )
         suspendMainColumnViewportCapture(for: 0.12)
         let applied = CaretScrollCoordinator.applyVerticalScrollIfNeeded(
@@ -414,7 +473,8 @@ extension ScenarioWriterView {
             snapToPixel: true
         )
         let currentY = scrollView.contentView.bounds.origin.y
-        return targetReachable && abs(resolvedTargetY - currentY) <= 0.5
+        success = targetReachable && abs(resolvedTargetY - currentY) <= 0.5
+        return success
     }
 
     func shouldSkipMainColumnFocusScroll(
@@ -847,11 +907,17 @@ extension ScenarioWriterView {
         editingRevealEdge: MainEditingViewportRevealEdge?,
         animated: Bool
     ) -> Bool {
-        guard observedMainColumnTargetFrame(
+        let predictedOnly = observedMainColumnTargetFrame(
             viewportKey: viewportKey,
             targetID: targetID
-        ) != nil else {
-            return false
+        ) == nil
+        var success = false
+        defer {
+            if predictedOnly && !success {
+                MainCanvasNavigationDiagnostics.shared.recordPredictedNativeScrollMiss(
+                    ownerKey: mainCanvasDiagnosticsOwnerKey
+                )
+            }
         }
         guard let scrollView = mainCanvasScrollCoordinator.scrollView(for: viewportKey) else {
             return false
@@ -888,6 +954,15 @@ extension ScenarioWriterView {
                 targetY: resolvedTargetY,
                 viewportHeight: resolvedViewportHeight
             )
+            MainCanvasNavigationDiagnostics.shared.beginScrollAnimation(
+                ownerKey: mainCanvasDiagnosticsOwnerKey,
+                axis: "vertical",
+                engine: "native",
+                animated: true,
+                target: "\(viewportKey)|\(targetID.uuidString)",
+                expectedDuration: appliedDuration,
+                predictedOnly: predictedOnly
+            )
             suspendMainColumnViewportCapture(for: appliedDuration + 0.06)
             _ = CaretScrollCoordinator.applyAnimatedVerticalScrollIfNeeded(
                 scrollView: scrollView,
@@ -899,9 +974,19 @@ extension ScenarioWriterView {
                 snapToPixel: true,
                 duration: appliedDuration
             )
+            success = true
             return true
         }
 
+        MainCanvasNavigationDiagnostics.shared.beginScrollAnimation(
+            ownerKey: mainCanvasDiagnosticsOwnerKey,
+            axis: "vertical",
+            engine: "native",
+            animated: false,
+            target: "\(viewportKey)|\(targetID.uuidString)",
+            expectedDuration: 0,
+            predictedOnly: predictedOnly
+        )
         suspendMainColumnViewportCapture(for: 0.12)
         _ = CaretScrollCoordinator.applyVerticalScrollIfNeeded(
             scrollView: scrollView,
@@ -920,7 +1005,8 @@ extension ScenarioWriterView {
             snapToPixel: true
         )
         let currentY = scrollView.contentView.bounds.origin.y
-        return targetReachable && abs(resolvedTargetY - currentY) <= 0.5
+        success = targetReachable && abs(resolvedTargetY - currentY) <= 0.5
+        return success
     }
 
     func applyMainColumnFocusVisibility(
@@ -994,7 +1080,8 @@ extension ScenarioWriterView {
         keepVisibleOnly: Bool,
         editingRevealEdge: MainEditingViewportRevealEdge?,
         animated: Bool,
-        attempt: Int = 0,
+        observedFrameWaitAttempt: Int = 0,
+        correctionAttempted: Bool = false,
         participantHandle: MainCanvasScrollCoordinator.MotionParticipantHandle? = nil,
         allowsEditingTransitionBypass: Bool = false
     ) {
@@ -1005,9 +1092,10 @@ extension ScenarioWriterView {
         ) {
             return
         }
+        let effectiveAnimated = animated && !correctionAttempted
         let delay = mainCanvasScrollCoordinator.motionPolicy.verificationDelay(
-            animated: animated,
-            attempt: attempt
+            animated: effectiveAnimated,
+            attempt: observedFrameWaitAttempt
         )
         let requestKey = mainColumnScrollCacheKey(level: level, parent: parent)
         var verificationWorkItem: DispatchWorkItem?
@@ -1053,10 +1141,22 @@ extension ScenarioWriterView {
                 return
             }
             if !hasObservedTargetFrame {
-                guard attempt < 4 else {
+                guard observedFrameWaitAttempt < 2 else {
+                    bounceDebugLog(
+                        "verifyMainColumnFocus timeout level=\(level) viewportKey=\(viewportKey) " +
+                        "target=\(debugCardIDString(targetID)) correctionAttempted=\(correctionAttempted)"
+                    )
                     mainCanvasScrollCoordinator.updateMotionParticipantState(.timedOut, handle: participantHandle)
                     return
                 }
+                MainCanvasNavigationDiagnostics.shared.recordVerificationRetry(
+                    ownerKey: mainCanvasDiagnosticsOwnerKey,
+                    viewportKey: viewportKey,
+                    attempt: observedFrameWaitAttempt,
+                    targetID: targetID,
+                    observedFrame: false,
+                    animatedRetry: effectiveAnimated
+                )
                 mainCanvasScrollCoordinator.updateMotionParticipantState(.waiting, handle: participantHandle)
                 scheduleMainColumnFocusVerification(
                     viewportKey: viewportKey,
@@ -1070,29 +1170,43 @@ extension ScenarioWriterView {
                     keepVisibleOnly: keepVisibleOnly,
                     editingRevealEdge: editingRevealEdge,
                     animated: animated,
-                    attempt: attempt + 1,
+                    observedFrameWaitAttempt: observedFrameWaitAttempt + 1,
+                    correctionAttempted: correctionAttempted,
                     participantHandle: participantHandle,
                     allowsEditingTransitionBypass: allowsEditingTransitionBypass
                 )
                 return
             }
 
+            guard !correctionAttempted else {
+                bounceDebugLog(
+                    "verifyMainColumnFocus keepCurrent level=\(level) viewportKey=\(viewportKey) " +
+                    "target=\(debugCardIDString(targetID)) " +
+                    "offset=\(debugCGFloat(resolvedMainColumnCurrentOffsetY(viewportKey: viewportKey))) " +
+                    "\(debugMainColumnObservedTargetSummary(viewportKey: viewportKey, targetID: targetID, offsetY: resolvedMainColumnCurrentOffsetY(viewportKey: viewportKey)))"
+                )
+                mainCanvasScrollCoordinator.updateMotionParticipantState(.timedOut, handle: participantHandle)
+                return
+            }
+
             bounceDebugLog(
-                "verifyMainColumnFocus retry level=\(level) viewportKey=\(viewportKey) " +
-                "attempt=\(attempt) target=\(debugCardIDString(targetID)) " +
+                "verifyMainColumnFocus correction level=\(level) viewportKey=\(viewportKey) " +
+                "waitAttempt=\(observedFrameWaitAttempt) target=\(debugCardIDString(targetID)) " +
                 "observed=\(hasObservedTargetFrame) " +
                 "offset=\(debugCGFloat(resolvedMainColumnCurrentOffsetY(viewportKey: viewportKey))) " +
                 "\(debugMainColumnObservedTargetSummary(viewportKey: viewportKey, targetID: targetID, offsetY: resolvedMainColumnCurrentOffsetY(viewportKey: viewportKey)))"
             )
             mainColumnLastFocusRequestByKey.removeValue(forKey: requestKey)
-            let retryAnimated = animated && hasObservedTargetFrame
             MainCanvasNavigationDiagnostics.shared.recordVerificationRetry(
                 ownerKey: mainCanvasDiagnosticsOwnerKey,
                 viewportKey: viewportKey,
-                attempt: attempt,
+                attempt: observedFrameWaitAttempt,
                 targetID: targetID,
                 observedFrame: hasObservedTargetFrame,
-                animatedRetry: retryAnimated
+                animatedRetry: false
+            )
+            MainCanvasNavigationDiagnostics.shared.recordSecondCorrection(
+                ownerKey: mainCanvasDiagnosticsOwnerKey
             )
             mainCanvasScrollCoordinator.updateMotionParticipantState(.moving, handle: participantHandle)
             if keepVisibleOnly {
@@ -1104,7 +1218,7 @@ extension ScenarioWriterView {
                     viewportHeight: viewportHeight,
                     prefersTopAnchor: prefersTopAnchor,
                     editingRevealEdge: editingRevealEdge,
-                    animated: retryAnimated
+                    animated: false
                 )
             } else {
                 applyMainColumnFocusAlignment(
@@ -1114,10 +1228,9 @@ extension ScenarioWriterView {
                     proxy: proxy,
                     viewportHeight: viewportHeight,
                     prefersTopAnchor: prefersTopAnchor,
-                    animated: retryAnimated
+                    animated: false
                 )
             }
-            guard attempt < (hasObservedTargetFrame ? 2 : 4) else { return }
             scheduleMainColumnFocusVerification(
                 viewportKey: viewportKey,
                 cards: cards,
@@ -1129,8 +1242,9 @@ extension ScenarioWriterView {
                 prefersTopAnchor: prefersTopAnchor,
                 keepVisibleOnly: keepVisibleOnly,
                 editingRevealEdge: editingRevealEdge,
-                animated: animated,
-                attempt: attempt + 1,
+                animated: false,
+                observedFrameWaitAttempt: observedFrameWaitAttempt,
+                correctionAttempted: true,
                 participantHandle: participantHandle,
                 allowsEditingTransitionBypass: allowsEditingTransitionBypass
             )
@@ -1160,6 +1274,19 @@ extension ScenarioWriterView {
         cancelPendingMainColumnFocusWorkItem(for: viewportKey)
         cancelPendingMainColumnFocusVerificationWorkItem(for: viewportKey)
         guard shouldAutoAlignMainColumn(cards: cards, activeID: activeCardID) else { return }
+        guard let targetID = resolvedMainColumnFocusTargetID(in: cards) else { return }
+        guard hasMeasuredMainColumnNavigationSettleMisalignment(
+            viewportKey: viewportKey,
+            cards: cards,
+            targetID: targetID,
+            viewportHeight: viewportHeight
+        ) else {
+            bounceDebugLog(
+                "navigationSettle skip level=\(level) viewportKey=\(viewportKey) " +
+                "target=\(debugCardIDString(targetID)) reason=measuredAligned"
+            )
+            return
+        }
         guard let participantHandle = mainCanvasScrollCoordinator.claimMotionParticipant(
             for: viewportKey,
             axis: .vertical,

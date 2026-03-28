@@ -13,6 +13,22 @@ extension ScenarioWriterView {
         let allIDs = Set(cards.map(\.id))
         guard cards.count > 24 else { return allIDs }
 
+        func insertWindow(
+            around centerID: UUID?,
+            radius: Int,
+            into observedIDs: inout Set<UUID>
+        ) {
+            guard let centerID,
+                  let centerIndex = cards.firstIndex(where: { $0.id == centerID }) else {
+                return
+            }
+            let lowerBound = max(cards.startIndex, centerIndex - radius)
+            let upperBound = min(cards.index(before: cards.endIndex), centerIndex + radius)
+            for index in lowerBound...upperBound {
+                observedIDs.insert(cards[index].id)
+            }
+        }
+
         let snapshot = resolvedMainColumnLayoutSnapshot(in: cards, viewportHeight: viewportHeight)
         let visibleRect = resolvedMainColumnVisibleRect(
             viewportKey: viewportKey,
@@ -31,20 +47,20 @@ extension ScenarioWriterView {
             observedIDs.insert(cardID)
         }
 
-        if let targetID = resolvedMainColumnFocusTargetID(in: cards),
-           let targetIndex = cards.firstIndex(where: { $0.id == targetID }) {
-            let lowerBound = max(cards.startIndex, targetIndex - 6)
-            let upperBound = min(cards.index(before: cards.endIndex), targetIndex + 6)
-            for index in lowerBound...upperBound {
-                observedIDs.insert(cards[index].id)
-            }
-        }
+        let focusTargetID = resolvedMainColumnFocusTargetID(in: cards)
+        insertWindow(around: focusTargetID, radius: 8, into: &observedIDs)
+        insertWindow(around: activeCardID, radius: 8, into: &observedIDs)
+        insertWindow(around: editingCardID, radius: 4, into: &observedIDs)
 
         if let activeCardID, allIDs.contains(activeCardID) {
             observedIDs.insert(activeCardID)
         }
         if let editingCardID, allIDs.contains(editingCardID) {
             observedIDs.insert(editingCardID)
+        }
+        for ancestorID in activeAncestorIDs where allIDs.contains(ancestorID) {
+            observedIDs.insert(ancestorID)
+            insertWindow(around: ancestorID, radius: 3, into: &observedIDs)
         }
 
         if observedIDs.isEmpty {
@@ -170,111 +186,124 @@ extension ScenarioWriterView {
     }
 
     @ViewBuilder
-    func column(for cards: [SceneCard], level: Int, parent: SceneCard?, screenHeight: CGFloat) -> some View {
-        let childListSignature = scenario.childListSignature(parentID: parent?.id)
+    func mainColumnScrollableBody(
+        cards: [SceneCard],
+        level: Int,
+        parent: SceneCard?,
+        screenHeight: CGFloat
+    ) -> some View {
         let viewportKey = mainColumnViewportStorageKey(level: level)
         let observedCardIDs = mainColumnGeometryObservationCardIDs(
             in: cards,
             viewportKey: viewportKey,
             viewportHeight: screenHeight
         )
-        VStack(spacing: 0) {
-            ScrollViewReader { proxy in
-                ScrollView(.vertical, showsIndicators: false) {
-                    LazyVStack(spacing: 0) {
-                        if cards.isEmpty {
-                            DropSpacer(target: .columnTop(parent?.id), alignment: .bottom) { providers, includeTrailingSiblingBlock in
-                                handleGeneralDrop(
-                                    providers,
-                                    target: .columnTop(parent?.id),
-                                    includeTrailingSiblingBlock: includeTrailingSiblingBlock
-                                )
-                            }
-                            .frame(height: screenHeight * 0.4)
+        LazyVStack(spacing: 0) {
+            if cards.isEmpty {
+                DropSpacer(target: .columnTop(parent?.id), alignment: .bottom) { providers, includeTrailingSiblingBlock in
+                    handleGeneralDrop(
+                        providers,
+                        target: .columnTop(parent?.id),
+                        includeTrailingSiblingBlock: includeTrailingSiblingBlock
+                    )
+                }
+                .frame(height: screenHeight * 0.4)
 
-                            if level == 0 { addFirstButton(level: level) }
+                if level == 0 { addFirstButton(level: level) }
 
-                            DropSpacer(target: .columnBottom(parent?.id), alignment: .top) { providers, includeTrailingSiblingBlock in
-                                handleGeneralDrop(
-                                    providers,
-                                    target: .columnBottom(parent?.id),
-                                    includeTrailingSiblingBlock: includeTrailingSiblingBlock
-                                )
-                            }
-                            .frame(height: screenHeight * 0.7)
-                        } else {
-                            Color.clear.frame(height: screenHeight * 0.4)
+                DropSpacer(target: .columnBottom(parent?.id), alignment: .top) { providers, includeTrailingSiblingBlock in
+                    handleGeneralDrop(
+                        providers,
+                        target: .columnBottom(parent?.id),
+                        includeTrailingSiblingBlock: includeTrailingSiblingBlock
+                    )
+                }
+                .frame(height: screenHeight * 0.7)
+            } else {
+                Color.clear.frame(height: screenHeight * 0.4)
 
-                            ForEach(Array(cards.enumerated()), id: \.element.id) { index, card in
-                                VStack(spacing: 0) {
-                                    cardRow(
-                                        card,
-                                        proxy: proxy,
-                                        level: level,
-                                        parent: parent,
-                                        columnCards: cards
-                                    )
-                                        .background(
-                                            Group {
-                                                if observedCardIDs.contains(card.id) {
-                                                    GeometryReader { geometry in
-                                                        Color.clear.preference(
-                                                            key: MainColumnCardFramePreferenceKey.self,
-                                                            value: [
-                                                                card.id: geometry.frame(
-                                                                    in: .named(mainColumnViewportCoordinateSpaceName(viewportKey))
-                                                                )
-                                                            ]
-                                                        )
-                                                    }
-                                                }
-                                            }
+                ForEach(Array(cards.enumerated()), id: \.element.id) { index, card in
+                    VStack(spacing: 0) {
+                        cardRow(
+                            card,
+                            level: level,
+                            parent: parent,
+                            columnCards: cards
+                        )
+                        .background(
+                            Group {
+                                if observedCardIDs.contains(card.id) {
+                                    GeometryReader { geometry in
+                                        Color.clear.preference(
+                                            key: MainColumnCardFramePreferenceKey.self,
+                                            value: [
+                                                card.id: geometry.frame(
+                                                    in: .named(mainColumnViewportCoordinateSpaceName(viewportKey))
+                                                )
+                                            ]
                                         )
-
-                                    if index < cards.count - 1 {
-                                        let next = cards[index + 1]
-                                        if card.parent?.id != next.parent?.id {
-                                            Rectangle()
-                                                .fill(appearance == "light" ? Color.black.opacity(0.16) : Color.black.opacity(0.40))
-                                                .frame(height: mainParentGroupSeparatorHeight)
-                                                .padding(.horizontal, 14)
-                                        }
-                                        Color.clear.frame(height: max(0, CGFloat(mainCardVerticalGap)))
                                     }
                                 }
                             }
+                        )
 
-                            Color.clear.frame(height: screenHeight * 0.7)
+                        if index < cards.count - 1 {
+                            let next = cards[index + 1]
+                            if card.parent?.id != next.parent?.id {
+                                Rectangle()
+                                    .fill(appearance == "light" ? Color.black.opacity(0.16) : Color.black.opacity(0.40))
+                                    .frame(height: mainParentGroupSeparatorHeight)
+                                    .padding(.horizontal, 14)
+                            }
+                            Color.clear.frame(height: max(0, CGFloat(mainCardVerticalGap)))
                         }
                     }
-                    .coordinateSpace(name: mainColumnViewportCoordinateSpaceName(viewportKey))
-                    .overlay(alignment: .topLeading) {
-                        mainColumnEditorHostOverlay(
-                            viewportKey: viewportKey,
-                            cards: cards
-                        )
-                    }
-                    .onPreferenceChange(MainColumnCardFramePreferenceKey.self) { frames in
-                        mainColumnObservedCardFramesByKey[viewportKey] = frames
-                        mainCanvasScrollCoordinator.updateObservedFrames(frames, for: viewportKey)
-                    }
-                    .onPreferenceChange(MainColumnEditorSlotPreferenceKey.self) { frames in
-                        mainColumnObservedEditorSlotFramesByKey[viewportKey] = frames
-                        let validCardIDs = Set(cards.map(\.id))
-                        let editingSessionCardIDs = Set(
-                            [mainEditorSession.requestedCardID, mainEditorSession.mountedCardID].compactMap { $0 }
-                        )
-                        var cachedFrames = mainColumnCachedEditorSlotFramesByKey[viewportKey] ?? [:]
-                        cachedFrames = cachedFrames.filter {
-                            validCardIDs.contains($0.key) || editingSessionCardIDs.contains($0.key)
-                        }
-                        for (cardID, frame) in frames where frame.width > 1 && frame.height > 1 {
-                            cachedFrames[cardID] = frame
-                        }
-                        mainColumnCachedEditorSlotFramesByKey[viewportKey] = cachedFrames
-                    }
-                    .padding(.horizontal, MainCanvasLayoutMetrics.columnHorizontalPadding)
-                    .frame(width: columnWidth)
+                }
+            }
+        }
+        .coordinateSpace(name: mainColumnViewportCoordinateSpaceName(viewportKey))
+        .overlay(alignment: .topLeading) {
+            mainColumnEditorHostOverlay(
+                viewportKey: viewportKey,
+                cards: cards
+            )
+        }
+        .onPreferenceChange(MainColumnCardFramePreferenceKey.self) { frames in
+            mainColumnObservedCardFramesByKey[viewportKey] = frames
+            mainCanvasScrollCoordinator.updateObservedFrames(frames, for: viewportKey)
+        }
+        .onPreferenceChange(MainColumnEditorSlotPreferenceKey.self) { frames in
+            mainColumnObservedEditorSlotFramesByKey[viewportKey] = frames
+            let validCardIDs = Set(cards.map(\.id))
+            let editingSessionCardIDs = Set(
+                [mainEditorSession.requestedCardID, mainEditorSession.mountedCardID].compactMap { $0 }
+            )
+            var cachedFrames = mainColumnCachedEditorSlotFramesByKey[viewportKey] ?? [:]
+            cachedFrames = cachedFrames.filter {
+                validCardIDs.contains($0.key) || editingSessionCardIDs.contains($0.key)
+            }
+            for (cardID, frame) in frames where frame.width > 1 && frame.height > 1 {
+                cachedFrames[cardID] = frame
+            }
+            mainColumnCachedEditorSlotFramesByKey[viewportKey] = cachedFrames
+        }
+        .padding(.horizontal, MainCanvasLayoutMetrics.columnHorizontalPadding)
+        .frame(width: columnWidth)
+    }
+
+    @ViewBuilder
+    func column(for cards: [SceneCard], level: Int, parent: SceneCard?, screenHeight: CGFloat) -> some View {
+        let childListSignature = scenario.childListSignature(parentID: parent?.id)
+        let viewportKey = mainColumnViewportStorageKey(level: level)
+        VStack(spacing: 0) {
+            ScrollViewReader { proxy in
+                ScrollView(.vertical, showsIndicators: false) {
+                    mainColumnScrollableBody(
+                        cards: cards,
+                        level: level,
+                        parent: parent,
+                        screenHeight: screenHeight
+                    )
                     .background(
                         mainColumnScrollObserver(
                             viewportKey: viewportKey,
@@ -419,7 +448,6 @@ extension ScenarioWriterView {
     @ViewBuilder
     func cardRow(
         _ card: SceneCard,
-        proxy: ScrollViewProxy,
         level: Int,
         parent: SceneCard?,
         columnCards: [SceneCard]

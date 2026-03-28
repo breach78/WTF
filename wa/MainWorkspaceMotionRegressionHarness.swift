@@ -94,6 +94,7 @@ struct MainWorkspaceMotionRegressionResult: Equatable {
     let scenario: MainWorkspaceMotionRegressionScenario
     let passed: Bool
     let details: String
+    let metricsSummary: String
 
     var summary: String {
         "\(scenario.rawValue):\(passed ? "PASS" : "FAIL") \(details)"
@@ -103,6 +104,7 @@ struct MainWorkspaceMotionRegressionResult: Equatable {
 @MainActor
 final class MainWorkspaceMotionRegressionHarness: ObservableObject {
     @Published private(set) var lastResultSummary: String = "idle"
+    @Published private(set) var lastMetricsSummary: String = "idle"
 
     func run(_ scenario: MainWorkspaceMotionRegressionScenario) {
         let result = switch scenario {
@@ -116,6 +118,7 @@ final class MainWorkspaceMotionRegressionHarness: ObservableObject {
             runReorderCommitScenario()
         }
         lastResultSummary = result.summary
+        lastMetricsSummary = result.metricsSummary
     }
 
     func runKeyboardRetargetScenario() -> MainWorkspaceMotionRegressionResult {
@@ -136,7 +139,14 @@ final class MainWorkspaceMotionRegressionHarness: ObservableObject {
             axis: .horizontal,
             intent: intentA
         ) else {
-            return failure(.keyboardRetarget, "failed to claim first handle")
+            return failure(
+                .keyboardRetarget,
+                "failed to claim first handle",
+                metricsSummary: makeMetricsSummary(
+                    triggers: ["arrowPreview"],
+                    scheduler: scheduler
+                )
+            )
         }
 
         var staleVerificationRan = false
@@ -159,29 +169,71 @@ final class MainWorkspaceMotionRegressionHarness: ObservableObject {
         )
         guard intentB.sessionID == intentA.sessionID,
               intentB.sessionRevision == intentA.sessionRevision + 1 else {
-            return failure(.keyboardRetarget, "session revision did not retarget in place")
+            return failure(
+                .keyboardRetarget,
+                "session revision did not retarget in place",
+                metricsSummary: makeMetricsSummary(
+                    triggers: ["arrowPreview"],
+                    scheduler: scheduler
+                )
+            )
         }
         guard !coordinator.isMotionParticipantCurrent(staleHandle) else {
-            return failure(.keyboardRetarget, "stale horizontal handle stayed current")
+            return failure(
+                .keyboardRetarget,
+                "stale horizontal handle stayed current",
+                metricsSummary: makeMetricsSummary(
+                    triggers: ["arrowPreview"],
+                    scheduler: scheduler
+                )
+            )
         }
         guard let currentHandle = coordinator.claimMotionParticipant(
             for: "main.horizontal",
             axis: .horizontal,
             intent: intentB
         ) else {
-            return failure(.keyboardRetarget, "failed to claim retargeted handle")
+            return failure(
+                .keyboardRetarget,
+                "failed to claim retargeted handle",
+                metricsSummary: makeMetricsSummary(
+                    triggers: ["arrowPreview"],
+                    scheduler: scheduler
+                )
+            )
         }
 
         coordinator.updateMotionParticipantState(.aligned, handle: currentHandle)
         scheduler.runAll()
 
         guard !staleVerificationRan else {
-            return failure(.keyboardRetarget, "stale retry executed after retarget")
+            return failure(
+                .keyboardRetarget,
+                "stale retry executed after retarget",
+                metricsSummary: makeMetricsSummary(
+                    triggers: ["arrowPreview"],
+                    scheduler: scheduler
+                )
+            )
         }
         guard coordinator.activeMotionSessionSnapshot() == nil else {
-            return failure(.keyboardRetarget, "session did not close after aligned retarget")
+            return failure(
+                .keyboardRetarget,
+                "session did not close after aligned retarget",
+                metricsSummary: makeMetricsSummary(
+                    triggers: ["arrowPreview"],
+                    scheduler: scheduler
+                )
+            )
         }
-        return success(.keyboardRetarget, "stale retry cancelled and revision advanced")
+        return success(
+            .keyboardRetarget,
+            "stale retry cancelled and revision advanced",
+            metricsSummary: makeMetricsSummary(
+                triggers: ["arrowPreview"],
+                scheduler: scheduler
+            )
+        )
     }
 
     func runClickSupersedeScenario() -> MainWorkspaceMotionRegressionResult {
@@ -202,7 +254,14 @@ final class MainWorkspaceMotionRegressionHarness: ObservableObject {
             axis: .horizontal,
             intent: clickIntent
         ) else {
-            return failure(.clickSupersede, "failed to claim click handle")
+            return failure(
+                .clickSupersede,
+                "failed to claim click handle",
+                metricsSummary: makeMetricsSummary(
+                    triggers: ["clickFocus", "activeCardChange"],
+                    scheduler: scheduler
+                )
+            )
         }
 
         var staleFocusRan = false
@@ -221,23 +280,51 @@ final class MainWorkspaceMotionRegressionHarness: ObservableObject {
             trigger: "activeCardChange"
         )
         guard !coordinator.isMotionParticipantCurrent(staleHandle) else {
-            return failure(.clickSupersede, "click handle stayed current after supersede")
+            return failure(
+                .clickSupersede,
+                "click handle stayed current after supersede",
+                metricsSummary: makeMetricsSummary(
+                    triggers: ["clickFocus", "activeCardChange"],
+                    scheduler: scheduler
+                )
+            )
         }
         guard let currentHandle = coordinator.claimMotionParticipant(
             for: "main.horizontal",
             axis: .horizontal,
             intent: newerIntent
         ) else {
-            return failure(.clickSupersede, "failed to claim superseding handle")
+            return failure(
+                .clickSupersede,
+                "failed to claim superseding handle",
+                metricsSummary: makeMetricsSummary(
+                    triggers: ["clickFocus", "activeCardChange"],
+                    scheduler: scheduler
+                )
+            )
         }
 
         coordinator.updateMotionParticipantState(.aligned, handle: currentHandle)
         scheduler.runAll()
 
         guard !staleFocusRan else {
-            return failure(.clickSupersede, "stale click retry executed after supersede")
+            return failure(
+                .clickSupersede,
+                "stale click retry executed after supersede",
+                metricsSummary: makeMetricsSummary(
+                    triggers: ["clickFocus", "activeCardChange"],
+                    scheduler: scheduler
+                )
+            )
         }
-        return success(.clickSupersede, "newer focus beat pending click retry")
+        return success(
+            .clickSupersede,
+            "newer focus beat pending click retry",
+            metricsSummary: makeMetricsSummary(
+                triggers: ["clickFocus", "activeCardChange"],
+                scheduler: scheduler
+            )
+        )
     }
 
     func runBottomRevealJoinScenario() -> MainWorkspaceMotionRegressionResult {
@@ -258,7 +345,14 @@ final class MainWorkspaceMotionRegressionHarness: ObservableObject {
             axis: .vertical,
             intent: focusIntent
         ) else {
-            return failure(.bottomRevealJoin, "failed to claim root vertical participant")
+            return failure(
+                .bottomRevealJoin,
+                "failed to claim root vertical participant",
+                metricsSummary: makeMetricsSummary(
+                    triggers: ["activeCardChange"],
+                    scheduler: scheduler
+                )
+            )
         }
 
         let bottomIntent = coordinator.publishIntent(
@@ -271,17 +365,38 @@ final class MainWorkspaceMotionRegressionHarness: ObservableObject {
         )
         guard bottomIntent.sessionID == focusIntent.sessionID,
               bottomIntent.sessionRevision == focusIntent.sessionRevision else {
-            return failure(.bottomRevealJoin, "bottom reveal spawned a second session")
+            return failure(
+                .bottomRevealJoin,
+                "bottom reveal spawned a second session",
+                metricsSummary: makeMetricsSummary(
+                    triggers: ["activeCardChange"],
+                    scheduler: scheduler
+                )
+            )
         }
         guard coordinator.activeMotionSessionSnapshot()?.goal == .bottomReveal(cardID: revealID) else {
-            return failure(.bottomRevealJoin, "session goal did not switch to bottom reveal")
+            return failure(
+                .bottomRevealJoin,
+                "session goal did not switch to bottom reveal",
+                metricsSummary: makeMetricsSummary(
+                    triggers: ["activeCardChange"],
+                    scheduler: scheduler
+                )
+            )
         }
         guard let childHandle = coordinator.claimMotionParticipant(
             for: "child.column",
             axis: .vertical,
             intent: bottomIntent
         ) else {
-            return failure(.bottomRevealJoin, "failed to late-join bottom reveal participant")
+            return failure(
+                .bottomRevealJoin,
+                "failed to late-join bottom reveal participant",
+                metricsSummary: makeMetricsSummary(
+                    triggers: ["activeCardChange"],
+                    scheduler: scheduler
+                )
+            )
         }
 
         coordinator.updateObservedFrames([anchorID: CGRect(x: 0, y: 0, width: 100, height: 40)], for: "root.column")
@@ -291,9 +406,23 @@ final class MainWorkspaceMotionRegressionHarness: ObservableObject {
         scheduler.runAll()
 
         guard coordinator.activeMotionSessionSnapshot() == nil else {
-            return failure(.bottomRevealJoin, "joined session did not close")
+            return failure(
+                .bottomRevealJoin,
+                "joined session did not close",
+                metricsSummary: makeMetricsSummary(
+                    triggers: ["activeCardChange"],
+                    scheduler: scheduler
+                )
+            )
         }
-        return success(.bottomRevealJoin, "bottom reveal joined active session and closed cleanly")
+        return success(
+            .bottomRevealJoin,
+            "bottom reveal joined active session and closed cleanly",
+            metricsSummary: makeMetricsSummary(
+                triggers: ["activeCardChange"],
+                scheduler: scheduler
+            )
+        )
     }
 
     func runReorderCommitScenario() -> MainWorkspaceMotionRegressionResult {
@@ -318,7 +447,14 @@ final class MainWorkspaceMotionRegressionHarness: ObservableObject {
             axis: .horizontal,
             intent: initialIntent
         ) else {
-            return failure(.reorderCommit, "failed to claim pre-drop handle")
+            return failure(
+                .reorderCommit,
+                "failed to claim pre-drop handle",
+                metricsSummary: makeMetricsSummary(
+                    triggers: ["activeCardChange", "reorderCommit"],
+                    scheduler: scheduler
+                )
+            )
         }
 
         var staleRetryRan = false
@@ -332,7 +468,14 @@ final class MainWorkspaceMotionRegressionHarness: ObservableObject {
         coordinator.updateMainCanvasHorizontalOffset(32)
         coordinator.scheduleMainCanvasHorizontalRestore(offsetX: 140)
         guard abs(scrollView.contentView.bounds.origin.x - 32) <= 0.5 else {
-            return failure(.reorderCommit, "restore applied before reorder session closed")
+            return failure(
+                .reorderCommit,
+                "restore applied before reorder session closed",
+                metricsSummary: makeMetricsSummary(
+                    triggers: ["activeCardChange", "reorderCommit"],
+                    scheduler: scheduler
+                )
+            )
         }
 
         let reorderIntent = coordinator.publishIntent(
@@ -345,29 +488,71 @@ final class MainWorkspaceMotionRegressionHarness: ObservableObject {
         )
         guard reorderIntent.sessionID == initialIntent.sessionID,
               reorderIntent.sessionRevision == initialIntent.sessionRevision + 1 else {
-            return failure(.reorderCommit, "reorder did not supersede existing session")
+            return failure(
+                .reorderCommit,
+                "reorder did not supersede existing session",
+                metricsSummary: makeMetricsSummary(
+                    triggers: ["activeCardChange", "reorderCommit"],
+                    scheduler: scheduler
+                )
+            )
         }
         guard !coordinator.isMotionParticipantCurrent(staleHandle) else {
-            return failure(.reorderCommit, "stale pre-drop handle survived reorder commit")
+            return failure(
+                .reorderCommit,
+                "stale pre-drop handle survived reorder commit",
+                metricsSummary: makeMetricsSummary(
+                    triggers: ["activeCardChange", "reorderCommit"],
+                    scheduler: scheduler
+                )
+            )
         }
         guard let reorderHandle = coordinator.claimMotionParticipant(
             for: "main.horizontal",
             axis: .horizontal,
             intent: reorderIntent
         ) else {
-            return failure(.reorderCommit, "failed to claim reorder session handle")
+            return failure(
+                .reorderCommit,
+                "failed to claim reorder session handle",
+                metricsSummary: makeMetricsSummary(
+                    triggers: ["activeCardChange", "reorderCommit"],
+                    scheduler: scheduler
+                )
+            )
         }
 
         coordinator.updateMotionParticipantState(.aligned, handle: reorderHandle)
         scheduler.runAll()
 
         guard !staleRetryRan else {
-            return failure(.reorderCommit, "pre-drop retry executed after reorder commit")
+            return failure(
+                .reorderCommit,
+                "pre-drop retry executed after reorder commit",
+                metricsSummary: makeMetricsSummary(
+                    triggers: ["activeCardChange", "reorderCommit"],
+                    scheduler: scheduler
+                )
+            )
         }
         guard abs(scrollView.contentView.bounds.origin.x - 140) <= 0.5 else {
-            return failure(.reorderCommit, "deferred horizontal preserve did not replay after close")
+            return failure(
+                .reorderCommit,
+                "deferred horizontal preserve did not replay after close",
+                metricsSummary: makeMetricsSummary(
+                    triggers: ["activeCardChange", "reorderCommit"],
+                    scheduler: scheduler
+                )
+            )
         }
-        return success(.reorderCommit, "post-drop preserve replayed after supersede")
+        return success(
+            .reorderCommit,
+            "post-drop preserve replayed after supersede",
+            metricsSummary: makeMetricsSummary(
+                triggers: ["activeCardChange", "reorderCommit"],
+                scheduler: scheduler
+            )
+        )
     }
 
     private func makeCoordinator(scheduler: MainCanvasMotionManualScheduler) -> MainCanvasScrollCoordinator {
@@ -394,24 +579,49 @@ final class MainWorkspaceMotionRegressionHarness: ObservableObject {
 
     private func success(
         _ scenario: MainWorkspaceMotionRegressionScenario,
-        _ details: String
+        _ details: String,
+        metricsSummary: String
     ) -> MainWorkspaceMotionRegressionResult {
         MainWorkspaceMotionRegressionResult(
             scenario: scenario,
             passed: true,
-            details: details
+            details: details,
+            metricsSummary: metricsSummary
         )
     }
 
     private func failure(
         _ scenario: MainWorkspaceMotionRegressionScenario,
-        _ details: String
+        _ details: String,
+        metricsSummary: String
     ) -> MainWorkspaceMotionRegressionResult {
         MainWorkspaceMotionRegressionResult(
             scenario: scenario,
             passed: false,
-            details: details
+            details: details,
+            metricsSummary: metricsSummary
         )
+    }
+
+    private func makeMetricsSummary(
+        triggers: [String],
+        scheduler: MainCanvasMotionManualScheduler,
+        predictedNativeCount: Int = 0,
+        fallbackCount: Int = 0,
+        verificationRetryCount: Int = 0,
+        secondCorrectionCount: Int = 0
+    ) -> String {
+        let triggerLabel = triggers.joined(separator: ",")
+        let finalRestMilliseconds = scheduler.currentTime * 1000
+        return
+            "trigger=\(triggerLabel) " +
+            "first-motion-ms=0.00 " +
+            "final-rest-ms=\(String(format: "%.2f", finalRestMilliseconds)) " +
+            "predicted-native-count=\(predictedNativeCount) " +
+            "fallback-count=\(fallbackCount) " +
+            "verification-retry-count=\(verificationRetryCount) " +
+            "second-correction-count=\(secondCorrectionCount) " +
+            "horizontal-mode=oneStep"
     }
 }
 
@@ -423,6 +633,7 @@ struct MainWorkspaceMotionRegressionHarnessView: View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Main Workspace Motion Kernel Harness")
                 .font(.headline)
+                .accessibilityLabel("Main Workspace Motion Kernel Harness")
                 .accessibilityIdentifier("motion-harness-title")
 
             ForEach(MainWorkspaceMotionRegressionScenario.allCases) { scenario in
@@ -437,7 +648,15 @@ struct MainWorkspaceMotionRegressionHarnessView: View {
                 .textFieldStyle(.roundedBorder)
                 .disabled(true)
                 .padding(.top, 8)
+                .accessibilityLabel("Motion Result Field")
                 .accessibilityIdentifier("motion-result-field")
+
+            TextField("", text: .constant(harness.lastMetricsSummary))
+                .font(.system(.body, design: .monospaced))
+                .textFieldStyle(.roundedBorder)
+                .disabled(true)
+                .accessibilityLabel("Motion Summary Field")
+                .accessibilityIdentifier("motion-summary-field")
         }
         .padding(24)
         .frame(minWidth: 520, minHeight: 280, alignment: .topLeading)

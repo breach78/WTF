@@ -1,0 +1,128 @@
+{
+  "source": "/Users/three/app_build/wa/wa/SettingsAppearanceCards.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "라이트/다크 모드는 유지하고 카드/배경 팔레트만 교체합니다.",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 46
+        }
+      },
+      {
+        "comment": "",
+        "key": "프리셋",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 22
+        }
+      },
+      {
+        "comment": "",
+        "key": "사용자: %@",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 28
+        }
+      },
+      {
+        "comment": "",
+        "key": "선택한 프리셋 적용",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 35
+        }
+      },
+      {
+        "comment": "",
+        "key": "프리셋으로 저장",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 39
+        }
+      },
+      {
+        "comment": "",
+        "key": "인덱스 보드 캔버스에만 적용되고, 작업창/포커스 뷰 색은 바꾸지 않습니다.",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 83
+        }
+      },
+      {
+        "comment": "",
+        "key": "보드 테마",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 55
+        }
+      },
+      {
+        "comment": "",
+        "key": "카드/배경 색 기본값으로",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 125
+        }
+      },
+      {
+        "comment": "",
+        "key": "색상 프리셋 저장",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 133
+        }
+      },
+      {
+        "comment": "",
+        "key": "현재 카드/배경 색 조합을 프리셋 메뉴에 추가합니다.",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 136
+        }
+      },
+      {
+        "comment": "",
+        "key": "프리셋 이름",
+        "location": {
+          "startingColumn": 23,
+          "startingLine": 140
+        }
+      },
+      {
+        "comment": "",
+        "key": "취소",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 154
+        }
+      },
+      {
+        "comment": "",
+        "key": "저장",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 157
+        }
+      },
+      {
+        "comment": "",
+        "key": "라이트",
+        "location": {
+          "startingColumn": 21,
+          "startingLine": 192
+        }
+      },
+      {
+        "comment": "",
+        "key": "다크",
+        "location": {
+          "startingColumn": 21,
+          "startingLine": 196
+        }
+      }
+    ]
+  },
+  "version": 1
+}
