@@ -974,11 +974,7 @@ extension ScenarioWriterView {
         if isMainBoundaryParentLeftArmed(for: editingCard.id) {
             clearMainBoundaryParentLeftArm()
             let parentLength = (parentCard.content as NSString).length
-            switchMainEditingTarget(
-                to: parentCard,
-                caretLocation: parentLength,
-                shouldDiscardEmptyNewCardOnBoundaryMove: shouldDiscardEmptyNewCardOnBoundaryMove
-            )
+            beginCardEditing(parentCard, explicitCaretLocation: parentLength)
             return true
         }
 
@@ -1033,11 +1029,7 @@ extension ScenarioWriterView {
                 allowDoublePressFallback: true
             )
             if case .target(let target) = result {
-                switchMainEditingTarget(
-                    to: target,
-                    caretLocation: 0,
-                    shouldDiscardEmptyNewCardOnBoundaryMove: shouldDiscardEmptyNewCardOnBoundaryMove
-                )
+                beginCardEditing(target, explicitCaretLocation: 0)
             }
             return true
         }

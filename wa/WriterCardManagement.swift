@@ -574,6 +574,33 @@ extension ScenarioWriterView {
         return cards.first(where: { $0.id == targetCardID }) ?? findCard(by: targetCardID)
     }
 
+    private func resolvedPreparedMainEditorHostTargetID(
+        viewportKey: String,
+        cards: [SceneCard]
+    ) -> UUID? {
+        if let mountingTargetID = resolvedMountingMainEditorHostTargetID(viewportKey: viewportKey, cards: cards) {
+            return mountingTargetID
+        }
+        guard isMainWorkspaceEditorSurfaceActive else { return nil }
+        guard editingCardID == nil else { return nil }
+        guard let activeCardID else { return nil }
+        guard cards.contains(where: { $0.id == activeCardID }) else { return nil }
+        guard resolvedMainColumnEditorHostFrame(viewportKey: viewportKey, cardID: activeCardID) != nil else {
+            return nil
+        }
+        return activeCardID
+    }
+
+    private func resolvedPreparedMainColumnEditingHostCard(
+        viewportKey: String,
+        cards: [SceneCard]
+    ) -> SceneCard? {
+        guard let targetCardID = resolvedPreparedMainEditorHostTargetID(viewportKey: viewportKey, cards: cards) else {
+            return nil
+        }
+        return cards.first(where: { $0.id == targetCardID }) ?? findCard(by: targetCardID)
+    }
+
     private func resolvedMainWorkspaceHostBodyHeight(for card: SceneCard) -> CGFloat {
         if mainEditorSession.mountedCardID == card.id,
            let liveBodyHeight = mainEditorSession.liveBodyHeight,
@@ -702,7 +729,10 @@ extension ScenarioWriterView {
         viewportKey: String,
         cards: [SceneCard]
     ) -> some View {
-        let hostFrame = resolvedMainColumnEditorHostFrame(viewportKey: viewportKey, cards: cards)
+        let preparedTargetID = resolvedPreparedMainEditorHostTargetID(viewportKey: viewportKey, cards: cards)
+        let hostFrame = preparedTargetID.flatMap {
+            resolvedMainColumnEditorHostFrame(viewportKey: viewportKey, cardID: $0)
+        }
 
         ZStack(alignment: .topLeading) {
             mainColumnEditorHostScaffold(
@@ -710,12 +740,15 @@ extension ScenarioWriterView {
                 cards: cards
             )
 
-            if let targetCard = resolvedMainColumnEditingHostCard(viewportKey: viewportKey, cards: cards),
+            if let targetCard = resolvedPreparedMainColumnEditingHostCard(viewportKey: viewportKey, cards: cards),
                let hostFrame {
                 mainWorkspaceStableHostEditor(
                     card: targetCard,
                     hostFrame: hostFrame,
-                    isVisible: true
+                    isVisible:
+                        editingCardID == targetCard.id ||
+                        mainEditorSession.requestedCardID == targetCard.id ||
+                        mainEditorSession.mountedCardID == targetCard.id
                 )
             }
         }
