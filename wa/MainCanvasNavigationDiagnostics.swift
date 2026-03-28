@@ -5,6 +5,7 @@ import os
 @MainActor
 final class MainCanvasNavigationDiagnostics {
     static let shared = MainCanvasNavigationDiagnostics()
+    private let isEnabled = false
 
     struct DurationStats {
         var count: Int = 0
@@ -53,6 +54,7 @@ final class MainCanvasNavigationDiagnostics {
     private init() {}
 
     func reset(ownerKey: String, scenarioID: UUID, splitPaneID: Int) {
+        guard isEnabled else { return }
         pendingFocusIntentByOwnerKey.removeValue(forKey: ownerKey)
         countersByOwnerKey[ownerKey] = OwnerCounters()
         os_signpost(
@@ -73,6 +75,7 @@ final class MainCanvasNavigationDiagnostics {
         sourceCardID: UUID?,
         intendedCardID: UUID?
     ) {
+        guard isEnabled else { return }
         guard let direction else { return }
 
         if let pending = pendingFocusIntentByOwnerKey.removeValue(forKey: ownerKey) {
@@ -126,6 +129,7 @@ final class MainCanvasNavigationDiagnostics {
         siblingCount: Int,
         descendantCount: Int
     ) {
+        guard isEnabled else { return }
         var counters = countersByOwnerKey[ownerKey] ?? OwnerCounters()
         counters.relationSyncStats.record(durationMilliseconds)
         countersByOwnerKey[ownerKey] = counters
@@ -169,6 +173,7 @@ final class MainCanvasNavigationDiagnostics {
         containsEditingCard: Bool,
         durationMilliseconds: Double
     ) {
+        guard isEnabled else { return }
         var counters = countersByOwnerKey[ownerKey] ?? OwnerCounters()
         counters.layoutResolveStats.record(durationMilliseconds)
         if !cacheHit {
@@ -198,6 +203,7 @@ final class MainCanvasNavigationDiagnostics {
         target: String,
         expectedDuration: TimeInterval
     ) {
+        guard isEnabled else { return }
         let token = scrollToken(ownerKey: ownerKey, axis: axis, engine: engine)
         if let existingID = pendingScrollSignpostIDsByToken.removeValue(forKey: token) {
             os_signpost(
@@ -264,6 +270,7 @@ final class MainCanvasNavigationDiagnostics {
         observedFrame: Bool,
         animatedRetry: Bool
     ) {
+        guard isEnabled else { return }
         var counters = countersByOwnerKey[ownerKey] ?? OwnerCounters()
         counters.verificationRetryCount += 1
         countersByOwnerKey[ownerKey] = counters
@@ -283,6 +290,7 @@ final class MainCanvasNavigationDiagnostics {
     }
 
     func emitSummary(ownerKey: String, reason: String) {
+        guard isEnabled else { return }
         guard let counters = countersByOwnerKey[ownerKey] else { return }
 
         os_log(
@@ -307,6 +315,7 @@ final class MainCanvasNavigationDiagnostics {
     }
 
     private func endScrollAnimation(ownerKey: String, axis: String, engine: String, status: String) {
+        guard isEnabled else { return }
         let token = scrollToken(ownerKey: ownerKey, axis: axis, engine: engine)
         guard let signpostID = pendingScrollSignpostIDsByToken.removeValue(forKey: token) else { return }
         os_signpost(

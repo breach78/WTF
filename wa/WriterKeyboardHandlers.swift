@@ -699,6 +699,7 @@ extension ScenarioWriterView {
     }
 
     func handleMainEditorBoundaryCommand(_ commandSelector: Selector) -> Bool {
+        let isRepeat = NSApp.currentEvent?.isARepeat ?? false
         switch NSStringFromSelector(commandSelector) {
         case "cancelOperation:":
             clearMainEditTabArm()
@@ -707,21 +708,21 @@ extension ScenarioWriterView {
             }
             return true
         case "moveUp:":
-            return handleMainEditorBoundaryNavigation(key: .upArrow, isShiftSelection: false, isRepeat: false)
+            return handleMainEditorBoundaryNavigation(key: .upArrow, isShiftSelection: false, isRepeat: isRepeat)
         case "moveDown:":
-            return handleMainEditorBoundaryNavigation(key: .downArrow, isShiftSelection: false, isRepeat: false)
+            return handleMainEditorBoundaryNavigation(key: .downArrow, isShiftSelection: false, isRepeat: isRepeat)
         case "moveLeft:":
-            return handleMainEditorBoundaryNavigation(key: .leftArrow, isShiftSelection: false, isRepeat: false)
+            return handleMainEditorBoundaryNavigation(key: .leftArrow, isShiftSelection: false, isRepeat: isRepeat)
         case "moveRight:":
-            return handleMainEditorBoundaryNavigation(key: .rightArrow, isShiftSelection: false, isRepeat: false)
+            return handleMainEditorBoundaryNavigation(key: .rightArrow, isShiftSelection: false, isRepeat: isRepeat)
         case "moveUpAndModifySelection:":
-            return handleMainEditorBoundaryNavigation(key: .upArrow, isShiftSelection: true, isRepeat: false)
+            return handleMainEditorBoundaryNavigation(key: .upArrow, isShiftSelection: true, isRepeat: isRepeat)
         case "moveDownAndModifySelection:":
-            return handleMainEditorBoundaryNavigation(key: .downArrow, isShiftSelection: true, isRepeat: false)
+            return handleMainEditorBoundaryNavigation(key: .downArrow, isShiftSelection: true, isRepeat: isRepeat)
         case "moveLeftAndModifySelection:":
-            return handleMainEditorBoundaryNavigation(key: .leftArrow, isShiftSelection: true, isRepeat: false)
+            return handleMainEditorBoundaryNavigation(key: .leftArrow, isShiftSelection: true, isRepeat: isRepeat)
         case "moveRightAndModifySelection:":
-            return handleMainEditorBoundaryNavigation(key: .rightArrow, isShiftSelection: true, isRepeat: false)
+            return handleMainEditorBoundaryNavigation(key: .rightArrow, isShiftSelection: true, isRepeat: isRepeat)
         default:
             return false
         }
@@ -791,7 +792,8 @@ extension ScenarioWriterView {
                 atTopBoundary: atTopBoundary,
                 cursor: cursor,
                 shouldDiscardEmptyNewCardOnBoundaryMove: shouldDiscardEmptyNewCardOnBoundaryMove,
-                isShiftSelection: isShiftSelection
+                isShiftSelection: isShiftSelection,
+                isRepeat: isRepeat
             )
 
         case .rightArrow:
@@ -805,7 +807,8 @@ extension ScenarioWriterView {
                 cursor: cursor,
                 contentLength: content.length,
                 shouldDiscardEmptyNewCardOnBoundaryMove: shouldDiscardEmptyNewCardOnBoundaryMove,
-                isShiftSelection: isShiftSelection
+                isShiftSelection: isShiftSelection,
+                isRepeat: isRepeat
             )
 
         default:
@@ -953,7 +956,8 @@ extension ScenarioWriterView {
         atTopBoundary: Bool,
         cursor: Int,
         shouldDiscardEmptyNewCardOnBoundaryMove: Bool,
-        isShiftSelection: Bool
+        isShiftSelection: Bool,
+        isRepeat: Bool
     ) -> Bool {
         guard atTopBoundary, cursor == 0 else {
             clearMainBoundaryParentLeftArm()
@@ -967,6 +971,9 @@ extension ScenarioWriterView {
         clearMainEditTabArm()
         clearMainBoundaryChildRightArm()
         clearMainNoChildRightArm()
+        if isRepeat {
+            return true
+        }
         if isShiftSelection {
             applyMainBoundaryShiftSelection(from: editingCard, to: parentCard, in: currentLevel)
             return true
@@ -992,7 +999,8 @@ extension ScenarioWriterView {
         cursor: Int,
         contentLength: Int,
         shouldDiscardEmptyNewCardOnBoundaryMove: Bool,
-        isShiftSelection: Bool
+        isShiftSelection: Bool,
+        isRepeat: Bool
     ) -> Bool {
         guard atBottomBoundary, cursor == contentLength else {
             clearMainBoundaryChildRightArm()
@@ -1003,6 +1011,9 @@ extension ScenarioWriterView {
         clearMainEditTabArm()
         clearMainBoundaryParentLeftArm()
         let nextLevel = (levelIndex + 1 < levels.count) ? levels[levelIndex + 1] : []
+        if isRepeat {
+            return true
+        }
 
         if isShiftSelection {
             clearMainBoundaryChildRightArm()

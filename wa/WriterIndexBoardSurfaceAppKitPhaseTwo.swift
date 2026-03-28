@@ -144,10 +144,12 @@ private struct IndexBoardSurfaceAppKitMotionScene {
 }
 
 private enum IndexBoardSurfaceAppKitBaselineLogger {
+    static let isEnabled = false
     static let logURL = URL(fileURLWithPath: NSTemporaryDirectory())
         .appendingPathComponent("wa_board_motion_baseline.log")
 
     static func append(session: IndexBoardSurfaceAppKitBaselineSession, didCommit: Bool) {
+        guard isEnabled else { return }
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         let durationMilliseconds = (CFAbsoluteTimeGetCurrent() - session.startedTimestamp) * 1000

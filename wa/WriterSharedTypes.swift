@@ -13,6 +13,7 @@ func bounceDebugLog(_ message: @autoclosure () -> String) {}
 #endif
 
 private enum MainWorkspacePhase0Diagnostics {
+    static let isEnabled = false
     static let logURL = URL(fileURLWithPath: "/tmp/wa_main_workspace_phase0.log")
     static let queue = DispatchQueue(label: "wa.main-workspace-phase0")
     static let formatter: ISO8601DateFormatter = {
@@ -23,6 +24,7 @@ private enum MainWorkspacePhase0Diagnostics {
 }
 
 func mainWorkspacePhase0Mark(_ label: String) {
+    guard MainWorkspacePhase0Diagnostics.isEnabled else { return }
     let line = "\n========== \(label) ==========\n"
     let data = Data(line.utf8)
     MainWorkspacePhase0Diagnostics.queue.async {
@@ -41,6 +43,7 @@ func mainWorkspacePhase0Log(
     _ event: String,
     _ details: @autoclosure @escaping () -> String = ""
 ) {
+    guard MainWorkspacePhase0Diagnostics.isEnabled else { return }
     let timestamp = MainWorkspacePhase0Diagnostics.formatter.string(from: Date())
     let line = "[\(timestamp)] \(event) \(details())\n"
     let data = Data(line.utf8)
@@ -788,6 +791,17 @@ func normalizedSharedMeasurementText(_ text: String) -> String {
     return text
 }
 
+func makeSharedRenderParagraphStyle(_ lineSpacing: CGFloat) -> NSMutableParagraphStyle {
+    let paragraphStyle = NSMutableParagraphStyle()
+    paragraphStyle.lineSpacing = lineSpacing
+    paragraphStyle.lineBreakMode = .byWordWrapping
+    paragraphStyle.lineBreakStrategy = [.hangulWordPriority]
+    paragraphStyle.lineHeightMultiple = 1.0
+    paragraphStyle.paragraphSpacing = 0
+    paragraphStyle.paragraphSpacingBefore = 0
+    return paragraphStyle
+}
+
 func sharedStableTextFingerprint(_ text: String) -> UInt64 {
     var hash: UInt64 = 1469598103934665603
     for byte in text.utf8 {
@@ -827,9 +841,7 @@ final class SharedTextHeightMeasurementCache: @unchecked Sendable {
             return CGFloat(cached.doubleValue)
         }
 
-        let paragraphStyle = NSMutableParagraphStyle()
-        paragraphStyle.lineSpacing = lineSpacing
-        paragraphStyle.lineBreakMode = .byWordWrapping
+        let paragraphStyle = makeSharedRenderParagraphStyle(lineSpacing)
 
         let font = NSFont(name: "SansMonoCJKFinalDraft", size: fontSize)
             ?? NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
@@ -912,9 +924,7 @@ func sharedResolvedClickCaretLocation(
     let textLength = (originalText as NSString).length
     guard textLength > 0 else { return 0 }
 
-    let paragraphStyle = NSMutableParagraphStyle()
-    paragraphStyle.lineSpacing = lineSpacing
-    paragraphStyle.lineBreakMode = .byWordWrapping
+    let paragraphStyle = makeSharedRenderParagraphStyle(lineSpacing)
 
     let font = NSFont(name: "SansMonoCJKFinalDraft", size: fontSize)
         ?? NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)

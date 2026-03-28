@@ -1,9 +1,7 @@
 import Foundation
 
 private enum IndexBoardOrderDiagnostics {
-    static let isEnabled =
-        ProcessInfo.processInfo.environment["WA_INDEX_BOARD_ORDER_TRACE"] == "1" ||
-        UserDefaults.standard.bool(forKey: "WAIndexBoardOrderTraceEnabled")
+    static let isEnabled = false
     static let formatter = ISO8601DateFormatter()
 }
 
@@ -23,6 +21,7 @@ func indexBoardOrderDiagnosticsLog(_ message: @autoclosure () -> String) {
 }
 
 private enum IndexBoardDropPerformanceDiagnostics {
+    static let isEnabled = false
     static let logURL = URL(fileURLWithPath: "/tmp/wa_index_board_drop_perf.log")
     static let queue = DispatchQueue(label: "wa.index-board-drop-performance")
     static let formatter: ISO8601DateFormatter = {
@@ -32,6 +31,7 @@ private enum IndexBoardDropPerformanceDiagnostics {
     }()
 
     static func log(_ event: String, details: @autoclosure @escaping () -> String = "") {
+        guard isEnabled else { return }
         let timestamp = formatter.string(from: Date())
         let line = "[\(timestamp)] \(event) \(details())\n"
         queue.async {

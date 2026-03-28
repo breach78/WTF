@@ -12,13 +12,7 @@ private func resolveFocusModeTextColor(_ appearance: String) -> NSColor {
 }
 
 private func makeFocusModeRenderParagraphStyle(_ lineSpacing: CGFloat) -> NSMutableParagraphStyle {
-    let paragraphStyle = NSMutableParagraphStyle()
-    paragraphStyle.lineSpacing = lineSpacing
-    paragraphStyle.lineBreakMode = .byWordWrapping
-    paragraphStyle.lineHeightMultiple = 1.0
-    paragraphStyle.paragraphSpacing = 0
-    paragraphStyle.paragraphSpacingBefore = 0
-    return paragraphStyle
+    makeSharedRenderParagraphStyle(lineSpacing)
 }
 
 private func makeFocusModeAttributedString(

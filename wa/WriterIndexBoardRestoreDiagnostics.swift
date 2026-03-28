@@ -1,6 +1,7 @@
 import Foundation
 
 enum IndexBoardRestoreDiagnostics {
+    static let isEnabled = false
     static let logURL = URL(fileURLWithPath: "/tmp/wa_index_board_restore_trace.log")
 
     private static let queue = DispatchQueue(label: "wa.index-board-restore-diagnostics")
@@ -11,6 +12,7 @@ enum IndexBoardRestoreDiagnostics {
     }()
 
     static func log(_ event: String, details: @autoclosure @escaping () -> String = "") {
+        guard isEnabled else { return }
         let timestamp = formatter.string(from: Date())
         let line = "[\(timestamp)] \(event) \(details())\n"
         queue.async {
