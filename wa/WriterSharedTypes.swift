@@ -206,19 +206,6 @@ enum MainEditingViewportRevealEdge: Equatable {
     case bottom
 }
 
-enum MainVerticalScrollAuthorityKind: String {
-    case columnNavigation
-    case editingTransition
-    case caretEnsure
-    case viewportRestore
-}
-
-struct MainVerticalScrollAuthority: Equatable {
-    let id: Int
-    let kind: MainVerticalScrollAuthorityKind
-    let targetCardID: UUID?
-}
-
 enum FocusModeVerticalScrollAuthorityKind: String {
     case canvasNavigation
     case boundaryTransition
@@ -435,9 +422,10 @@ final class WriterInteractionRuntime {
     var pendingMainEditingViewportRevealEdge: MainEditingViewportRevealEdge? = nil
     var pendingMainEditingSiblingNavigationTargetID: UUID? = nil
     var pendingMainEditingBoundaryNavigationTargetID: UUID? = nil
+    var pendingMainReorderMotionCardIDs: [UUID] = []
+    var pendingMainReorderHorizontalOffsetX: CGFloat? = nil
+    var pendingMainDeferredColumnViewportRestoreOffsets: [String: CGFloat] = [:]
     var pendingActiveCardID: UUID? = nil
-    var mainVerticalScrollAuthoritySequence: Int = 0
-    var mainVerticalScrollAuthorityByViewportKey: [String: MainVerticalScrollAuthority] = [:]
     var resolvedLevelsWithParentsVersion: Int = -1
     var resolvedLevelsWithParentsCache: [LevelData] = []
     var displayedMainLevelsCacheKey: DisplayedMainLevelsCacheKey? = nil
@@ -449,7 +437,6 @@ final class WriterInteractionRuntime {
     var mainColumnObservedEditorSlotFramesByKey: [String: [UUID: CGRect]] = [:]
     var mainColumnLayoutSnapshotByKey: [MainColumnLayoutCacheKey: MainColumnLayoutSnapshot] = [:]
     var mainCardHeightRecordByKey: [MainCardHeightCacheKey: MainCardHeightRecord] = [:]
-    var mainColumnPendingFocusVerificationWorkItemByKey: [String: DispatchWorkItem] = [:]
     var mainColumnViewportCaptureSuspendedUntil: Date = .distantPast
     var mainColumnViewportRestoreUntil: Date = .distantPast
     var mainArrowNavigationSettleWorkItem: DispatchWorkItem? = nil

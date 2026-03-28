@@ -6,11 +6,40 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXContainerItemProxy section */
+		A10000000000000000000009 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = F5FAEF0C2F33B18100B8B032 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = F5FAEF132F33B18100B8B032;
+			remoteInfo = wa;
+		};
+		A1000000000000000000000A /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = F5FAEF0C2F33B18100B8B032 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = F5FAEF132F33B18100B8B032;
+			remoteInfo = wa;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
+		A10000000000000000000001 /* waTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = waTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		A10000000000000000000002 /* waUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = waUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		F5FAEF142F33B18100B8B032 /* wa.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; name = wa.app; path = WTF.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		A10000000000000000000003 /* waTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = waTests;
+			sourceTree = "<group>";
+		};
+		A10000000000000000000004 /* waUITests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = waUITests;
+			sourceTree = "<group>";
+		};
 		F5FAEF162F33B18100B8B032 /* wa */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = wa;
@@ -33,6 +62,8 @@
 			isa = PBXGroup;
 			children = (
 				F5FAEF162F33B18100B8B032 /* wa */,
+				A10000000000000000000003 /* waTests */,
+				A10000000000000000000004 /* waUITests */,
 				F5FAEF152F33B18100B8B032 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -41,6 +72,8 @@
 			isa = PBXGroup;
 			children = (
 				F5FAEF142F33B18100B8B032 /* wa.app */,
+				A10000000000000000000001 /* waTests.xctest */,
+				A10000000000000000000002 /* waUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -70,6 +103,48 @@
 			productReference = F5FAEF142F33B18100B8B032 /* wa.app */;
 			productType = "com.apple.product-type.application";
 		};
+		A1000000000000000000000D /* waTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A10000000000000000000014 /* Build configuration list for PBXNativeTarget "waTests" */;
+			buildPhases = (
+				A10000000000000000000007 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				A1000000000000000000000B /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				A10000000000000000000003 /* waTests */,
+			);
+			name = waTests;
+			packageProductDependencies = (
+			);
+			productName = waTests;
+			productReference = A10000000000000000000001 /* waTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		A1000000000000000000000E /* waUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A10000000000000000000015 /* Build configuration list for PBXNativeTarget "waUITests" */;
+			buildPhases = (
+				A10000000000000000000008 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				A1000000000000000000000C /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				A10000000000000000000004 /* waUITests */,
+			);
+			name = waUITests;
+			packageProductDependencies = (
+			);
+			productName = waUITests;
+			productReference = A10000000000000000000002 /* waUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -80,6 +155,13 @@
 				LastSwiftUpdateCheck = 2630;
 				LastUpgradeCheck = 2630;
 				TargetAttributes = {
+					A1000000000000000000000D = {
+						CreatedOnToolsVersion = 26.3;
+					};
+					A1000000000000000000000E = {
+						CreatedOnToolsVersion = 26.3;
+						TestTargetID = F5FAEF132F33B18100B8B032;
+					};
 					F5FAEF132F33B18100B8B032 = {
 						CreatedOnToolsVersion = 26.3;
 					};
@@ -100,6 +182,8 @@
 			projectRoot = "";
 			targets = (
 				F5FAEF132F33B18100B8B032 /* wa */,
+				A1000000000000000000000D /* waTests */,
+				A1000000000000000000000E /* waUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -115,6 +199,20 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		A10000000000000000000007 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A10000000000000000000008 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		F5FAEF102F33B18100B8B032 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -124,7 +222,112 @@
 		};
 /* End PBXSourcesBuildPhase section */
 
+/* Begin PBXTargetDependency section */
+		A1000000000000000000000B /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = F5FAEF132F33B18100B8B032 /* wa */;
+			targetProxy = A10000000000000000000009 /* PBXContainerItemProxy */;
+		};
+		A1000000000000000000000C /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = F5FAEF132F33B18100B8B032 /* wa */;
+			targetProxy = A1000000000000000000000A /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
 /* Begin XCBuildConfiguration section */
+		A10000000000000000000010 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				DEVELOPMENT_TEAM = 8MPR432N9X;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 26.2;
+				PRODUCT_BUNDLE_IDENTIFIER = com.riwoong.waTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/WTF.app/Contents/MacOS/WTF";
+			};
+			name = Debug;
+		};
+		A10000000000000000000011 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				DEVELOPMENT_TEAM = 8MPR432N9X;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 26.2;
+				PRODUCT_BUNDLE_IDENTIFIER = com.riwoong.waTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/WTF.app/Contents/MacOS/WTF";
+			};
+			name = Release;
+		};
+		A10000000000000000000012 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				DEVELOPMENT_TEAM = 8MPR432N9X;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 26.2;
+				PRODUCT_BUNDLE_IDENTIFIER = com.riwoong.waUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TEST_TARGET_NAME = wa;
+			};
+			name = Debug;
+		};
+		A10000000000000000000013 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				DEVELOPMENT_TEAM = 8MPR432N9X;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 26.2;
+				PRODUCT_BUNDLE_IDENTIFIER = com.riwoong.waUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TEST_TARGET_NAME = wa;
+			};
+			name = Release;
+		};
 		F5FAEF1F2F33B18200B8B032 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -332,6 +535,24 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		A10000000000000000000014 /* Build configuration list for PBXNativeTarget "waTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A10000000000000000000010 /* Debug */,
+				A10000000000000000000011 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		A10000000000000000000015 /* Build configuration list for PBXNativeTarget "waUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A10000000000000000000012 /* Debug */,
+				A10000000000000000000013 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
 		F5FAEF0F2F33B18100B8B032 /* Build configuration list for PBXProject "wa" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (

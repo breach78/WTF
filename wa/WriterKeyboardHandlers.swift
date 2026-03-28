@@ -4,6 +4,8 @@ import AppKit
 extension ScenarioWriterView {
 
     // --- Key Handling Logic ---
+    private var isMainEditingParentChildBoundaryNavigationEnabled: Bool { false }
+
     private func monitoredMainKeyboardKeyName(for press: KeyPress) -> String? {
         switch press.key {
         case .return: "return"
@@ -974,6 +976,10 @@ extension ScenarioWriterView {
         if isRepeat {
             return true
         }
+        if !isMainEditingParentChildBoundaryNavigationEnabled {
+            clearMainBoundaryParentLeftArm()
+            return true
+        }
         if isShiftSelection {
             applyMainBoundaryShiftSelection(from: editingCard, to: parentCard, in: currentLevel)
             return true
@@ -1012,6 +1018,11 @@ extension ScenarioWriterView {
         clearMainBoundaryParentLeftArm()
         let nextLevel = (levelIndex + 1 < levels.count) ? levels[levelIndex + 1] : []
         if isRepeat {
+            return true
+        }
+        if !isMainEditingParentChildBoundaryNavigationEnabled {
+            clearMainBoundaryChildRightArm()
+            clearMainNoChildRightArm()
             return true
         }
 
@@ -1090,6 +1101,7 @@ extension ScenarioWriterView {
         mainProgrammaticCaretExpectedCardID = target.id
         mainProgrammaticCaretExpectedLocation = safeCaretLocation
         mainProgrammaticCaretSelectionIgnoreUntil = Date().addingTimeInterval(0.28)
+        beginMainEditingBoundaryMotionSession(targetCardID: target.id)
         changeActiveCard(to: target, shouldFocusMain: false, deferToMainAsync: false)
         selectedCardIDs = [target.id]
         editingCardID = target.id

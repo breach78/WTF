@@ -505,13 +505,6 @@ extension ScenarioWriterView {
         guard let editingID = editingCardID else { return }
         guard !isMainEditingTransitionPending(targetCardID: editingID) else { return }
         guard let context = resolveMainCaretEnsureContext(for: editingID) else { return }
-        if let viewportKey = resolvedMainColumnViewportKey(forCardID: editingID) {
-            _ = beginMainVerticalScrollAuthority(
-                viewportKey: viewportKey,
-                kind: .caretEnsure,
-                targetCardID: editingID
-            )
-        }
         normalizeMainEditorTextViewOffsetIfNeeded(context.textView, reason: "ensure-visible")
         context.layoutManager.ensureLayout(for: context.textContainer)
 

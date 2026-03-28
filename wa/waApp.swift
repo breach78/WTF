@@ -579,6 +579,11 @@ struct waApp: App {
     @StateObject private var indexBoardRuntime = IndexBoardRuntime.shared
     @State private var didHideReferenceWindowOnLaunch: Bool = false
     @State private var storeSetupRequestID: Int = 0
+#if DEBUG
+    private var motionKernelUITestModeEnabled: Bool {
+        ProcessInfo.processInfo.environment["WA_UI_TEST_MODE"] == "motion-kernel"
+    }
+#endif
 
     init() {
         UserDefaults.standard.set(false, forKey: "TSMLanguageIndicatorEnabled")
@@ -596,6 +601,18 @@ struct waApp: App {
                 Color(nsColor: appWindowState.focusModeWindowBackgroundActive ? .black : resolvedWindowBackgroundColor)
                     .ignoresSafeArea()
                 Group {
+#if DEBUG
+                    if motionKernelUITestModeEnabled {
+                        MainWorkspaceMotionRegressionHarnessView()
+                    } else if let store = store {
+                        MainContainerView()
+                            .environmentObject(store)
+                            .environmentObject(appWindowState)
+                            .environmentObject(referenceCardStore)
+                    } else {
+                        storageSetupView
+                    }
+#else
                     if let store = store {
                         // 스토어가 준비되면 메인 뷰 표시
                         MainContainerView()
@@ -606,12 +623,16 @@ struct waApp: App {
                         // 컨테이너가 없으면(최초 실행 시) 설정 화면 표시
                         storageSetupView
                     }
+#endif
                 }
             }
             .background(MainWindowTitleHider())
             .background(MainWindowSizePersistenceAccessor())
             .onAppear {
                 applyApplicationAppearance()
+#if DEBUG
+                guard !motionKernelUITestModeEnabled else { return }
+#endif
                 if !didResetForV2 {
                     store?.flushPendingSaves()
                     storageBookmark = nil
@@ -634,6 +655,9 @@ struct waApp: App {
                 applyApplicationAppearance()
             }
             .onChange(of: forceWorkspaceReset) { _, newValue in
+#if DEBUG
+                guard !motionKernelUITestModeEnabled else { return }
+#endif
                 if newValue {
                     store?.flushPendingSaves()
                     storageBookmark = nil
@@ -642,9 +666,15 @@ struct waApp: App {
                 }
             }
             .onChange(of: storageBookmark) { _, _ in
+#if DEBUG
+                guard !motionKernelUITestModeEnabled else { return }
+#endif
                 setupStore()
             }
             .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
+#if DEBUG
+                guard !motionKernelUITestModeEnabled else { return }
+#endif
                 handleApplicationWillTerminate()
             }
         }
