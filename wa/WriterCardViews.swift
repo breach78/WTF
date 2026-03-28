@@ -1432,7 +1432,7 @@ struct CardItem: View {
     }
 
     private var shouldReportMainEditorSlotFrame: Bool {
-        mainEditorSlotCoordinateSpaceName != nil && (isActive || isEditing || mainEditorBodyRenderedExternally)
+        mainEditorSlotCoordinateSpaceName != nil
     }
 
     private var externalMainEditorPlaceholder: some View {
