@@ -495,6 +495,64 @@ extension ScenarioWriterView {
         return observedIDs
     }
 
+    func handleMainColumnObservedTargetFrameChange(
+        viewportKey: String,
+        previousFrames: [UUID: CGRect],
+        cards: [SceneCard],
+        level: Int,
+        parent: SceneCard?,
+        proxy: ScrollViewProxy,
+        viewportHeight: CGFloat
+    ) {
+        guard !showFocusMode else { return }
+        guard acceptsKeyboardInput else { return }
+        guard let targetID = resolvedMainColumnFocusTargetID(in: cards) else { return }
+        guard activeCardID == targetID else { return }
+        guard let previousFrame = previousFrames[targetID] else { return }
+        guard let currentFrame = observedMainColumnTargetFrame(
+            viewportKey: viewportKey,
+            targetID: targetID
+        ) else { return }
+
+        let minYDelta = abs(currentFrame.minY - previousFrame.minY)
+        let heightDelta = abs(currentFrame.height - previousFrame.height)
+        guard max(minYDelta, heightDelta) > 0.5 else { return }
+
+        let prefersTopAnchor = currentFrame.height > viewportHeight
+        guard !isMainColumnFocusTargetAligned(
+            viewportKey: viewportKey,
+            cards: cards,
+            targetID: targetID,
+            viewportHeight: viewportHeight,
+            prefersTopAnchor: prefersTopAnchor
+        ) else { return }
+
+        let authority = beginMainVerticalScrollAuthority(
+            viewportKey: viewportKey,
+            kind: editingCardID == targetID ? .editingTransition : .columnNavigation,
+            targetCardID: targetID
+        )
+        mainWorkspacePhase0Log(
+            "observed-focus-frame-change",
+            "level=\(level) key=\(viewportKey) target=\(mainWorkspacePhase0CardID(targetID)) " +
+            "minDelta=\(minYDelta) heightDelta=\(heightDelta) editing=\(mainWorkspacePhase0CardID(editingCardID)) " +
+            "active=\(mainWorkspacePhase0CardID(activeCardID))"
+        )
+        cancelPendingMainColumnFocusWorkItem(for: viewportKey)
+        cancelPendingMainColumnFocusVerificationWorkItem(for: viewportKey)
+        scrollToFocus(
+            in: cards,
+            level: level,
+            parent: parent,
+            proxy: proxy,
+            viewportHeight: viewportHeight,
+            forceAlignment: true,
+            animated: false,
+            reason: "observedTargetFrameChange",
+            authority: authority
+        )
+    }
+
     // MARK: - Resolved Colors & Search
 
     func resolvedBackgroundColor() -> Color {
@@ -816,8 +874,18 @@ extension ScenarioWriterView {
                     }
                     .coordinateSpace(name: mainColumnViewportCoordinateSpaceName(viewportKey))
                     .onPreferenceChange(MainColumnCardFramePreferenceKey.self) { frames in
+                        let previousFrames = mainColumnObservedCardFramesByKey[viewportKey] ?? [:]
                         mainColumnObservedCardFramesByKey[viewportKey] = frames
                         mainCanvasScrollCoordinator.updateObservedFrames(frames, for: viewportKey)
+                        handleMainColumnObservedTargetFrameChange(
+                            viewportKey: viewportKey,
+                            previousFrames: previousFrames,
+                            cards: cards,
+                            level: level,
+                            parent: parent,
+                            proxy: proxy,
+                            viewportHeight: screenHeight
+                        )
                     }
                     .padding(.horizontal, MainCanvasLayoutMetrics.columnHorizontalPadding)
                     .frame(width: columnWidth)
@@ -1515,9 +1583,20 @@ extension ScenarioWriterView {
             viewportKey: viewportKey,
             targetID: targetID
         ) != nil else {
+            mainWorkspacePhase0Log(
+                "native-focus-unavailable",
+                "kind=alignment reason=missingObservedFrame key=\(viewportKey) target=\(mainWorkspacePhase0CardID(targetID)) " +
+                "editing=\(mainWorkspacePhase0CardID(editingCardID)) active=\(mainWorkspacePhase0CardID(activeCardID)) animated=\(animated)"
+            )
             return false
         }
         guard let scrollView = mainCanvasScrollCoordinator.scrollView(for: viewportKey) else {
+            mainWorkspacePhase0Log(
+                "native-focus-unavailable",
+                "kind=alignment reason=missingScrollView key=\(viewportKey) target=\(mainWorkspacePhase0CardID(targetID)) " +
+                "storedOffset=\(mainColumnViewportOffsetByKey[viewportKey] ?? -1) " +
+                "editing=\(mainWorkspacePhase0CardID(editingCardID)) active=\(mainWorkspacePhase0CardID(activeCardID)) animated=\(animated)"
+            )
             return false
         }
         let visible = scrollView.documentVisibleRect
@@ -1529,6 +1608,11 @@ extension ScenarioWriterView {
             viewportHeight: resolvedViewportHeight,
             anchorY: anchorY
         ) else {
+            mainWorkspacePhase0Log(
+                "native-focus-unavailable",
+                "kind=alignment reason=missingTargetOffset key=\(viewportKey) target=\(mainWorkspacePhase0CardID(targetID)) " +
+                "visibleY=\(visible.origin.y) viewport=\(resolvedViewportHeight) animated=\(animated)"
+            )
             return false
         }
 
@@ -1537,7 +1621,14 @@ extension ScenarioWriterView {
         let targetReachable = maxY + 0.5 >= targetOffsetY
 
         if animated {
-            guard targetReachable || targetOffsetY <= 0.5 else { return false }
+            guard targetReachable || targetOffsetY <= 0.5 else {
+                mainWorkspacePhase0Log(
+                    "native-focus-unavailable",
+                    "kind=alignment reason=unreachableTarget key=\(viewportKey) target=\(mainWorkspacePhase0CardID(targetID)) " +
+                    "visibleY=\(visible.origin.y) targetY=\(targetOffsetY) maxY=\(maxY) viewport=\(resolvedViewportHeight)"
+                )
+                return false
+            }
             let resolvedTargetY = CaretScrollCoordinator.resolvedVerticalTargetY(
                 visibleRect: visible,
                 targetY: targetOffsetY,
@@ -1966,6 +2057,13 @@ extension ScenarioWriterView {
         ) {
             return
         }
+
+        mainWorkspacePhase0Log(
+            "focus-alignment-fallback",
+            "key=\(viewportKey) target=\(mainWorkspacePhase0CardID(targetID)) " +
+            "prefersTop=\(prefersTopAnchor) animated=\(animated) " +
+            "editing=\(mainWorkspacePhase0CardID(editingCardID)) active=\(mainWorkspacePhase0CardID(activeCardID))"
+        )
 
         suspendMainColumnViewportCapture(for: animated ? 0.32 : 0.12)
         if animated {

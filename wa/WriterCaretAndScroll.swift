@@ -301,12 +301,18 @@ extension ScenarioWriterView {
         }
         textView.minSize = NSSize(width: 0, height: 0)
         textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
-        if normalizeInnerScrollView, let innerScrollView = textView.enclosingScrollView {
+        if normalizeInnerScrollView, let innerScrollView = resolvedMainEditorInnerScrollView(for: textView) {
             normalizeMainEditorInnerScrollView(innerScrollView)
         }
         if textView.textContainerInset != .zero {
             textView.textContainerInset = .zero
         }
+    }
+
+    private func resolvedMainEditorInnerScrollView(for textView: NSTextView) -> NSScrollView? {
+        guard let scrollView = textView.enclosingScrollView else { return nil }
+        guard scrollView.documentView === textView else { return nil }
+        return scrollView
     }
 
     private func normalizeMainEditorInnerScrollView(_ scrollView: NSScrollView) {
@@ -471,7 +477,8 @@ extension ScenarioWriterView {
     func ensureMainCaretVisible() {
         guard let editingID = editingCardID else { return }
         guard let context = resolveMainCaretEnsureContext() else { return }
-        if let viewportKey = resolvedMainColumnViewportKey(forCardID: editingID) {
+        let viewportKey = resolvedMainColumnViewportKey(forCardID: editingID)
+        if let viewportKey {
             _ = beginMainVerticalScrollAuthority(
                 viewportKey: viewportKey,
                 kind: .caretEnsure,
@@ -491,6 +498,14 @@ extension ScenarioWriterView {
         }
         let viewport = resolveMainCaretViewportContext(outerScrollView: context.outerScrollView)
         let targetY = resolveMainCaretTargetY(selectionRects: selectionRects, viewport: viewport)
+        let currentY = context.outerScrollView.contentView.bounds.origin.y
+        mainWorkspacePhase0Log(
+            "caret-ensure-visible",
+            "card=\(mainWorkspacePhase0CardID(editingID)) key=\(viewportKey ?? "nil") " +
+            "selection=\(selectionRects.selection.location):\(selectionRects.selection.length) " +
+            "currentY=\(currentY) targetY=\(targetY) visibleY=\(viewport.visible.origin.y) " +
+            "caretMinY=\(selectionRects.startRect.minY) caretMaxY=\(selectionRects.endRect.maxY)"
+        )
         applyMainCaretScrollPositionIfNeeded(
             outerScrollView: context.outerScrollView,
             visible: viewport.visible,
@@ -498,6 +513,14 @@ extension ScenarioWriterView {
             minY: viewport.minY,
             maxY: viewport.maxY
         )
+        let afterY = context.outerScrollView.contentView.bounds.origin.y
+        if abs(afterY - currentY) > 0.5 {
+            mainWorkspacePhase0Log(
+                "caret-ensure-applied",
+                "card=\(mainWorkspacePhase0CardID(editingID)) key=\(viewportKey ?? "nil") " +
+                "beforeY=\(currentY) afterY=\(afterY) targetY=\(targetY)"
+            )
+        }
     }
 
     private struct MainCaretEnsureContext {
@@ -670,7 +693,7 @@ extension ScenarioWriterView {
     }
 
     func normalizeMainEditorTextViewOffsetIfNeeded(_ textView: NSTextView, reason: String) {
-        guard let scrollView = textView.enclosingScrollView else { return }
+        guard let scrollView = resolvedMainEditorInnerScrollView(for: textView) else { return }
         let origin = scrollView.contentView.bounds.origin
         let shouldResetX = abs(origin.x) > 0.5
         let shouldResetY = abs(origin.y) > 0.5

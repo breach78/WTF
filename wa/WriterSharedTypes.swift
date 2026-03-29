@@ -2058,6 +2058,13 @@ struct MainColumnScrollViewAccessor: NSViewRepresentable {
             attachRetryWorkItem?.cancel()
             attachRetryWorkItem = nil
             if scrollView !== resolvedScrollView {
+                let previousOffset = scrollView?.contentView.bounds.origin.y ?? .nan
+                let newOffset = resolvedScrollView.contentView.bounds.origin.y
+                mainWorkspacePhase0Log(
+                    "column-scroll-reattach",
+                    "key=\(columnKey) hadPrevious=\(self.scrollView != nil) previousOffset=\(previousOffset) " +
+                    "newOffset=\(newOffset) storedOffset=\(storedOffsetY ?? -1)"
+                )
                 detach()
                 scrollView = resolvedScrollView
                 installObserver(for: resolvedScrollView)
@@ -2077,12 +2084,24 @@ struct MainColumnScrollViewAccessor: NSViewRepresentable {
 
             if keyChanged, let storedOffsetY, storedOffsetY > 1 {
                 applyStoredOffsetIfNeeded(storedOffsetY)
+            } else if !keyChanged, let storedOffsetY, storedOffsetY > 1 {
+                mainWorkspacePhase0Log(
+                    "column-scroll-reattach-no-restore",
+                    "key=\(columnKey) currentOffset=\(resolvedScrollView.contentView.bounds.origin.y) " +
+                    "storedOffset=\(storedOffsetY)"
+                )
             }
         }
 
         private func detach() {
             attachRetryWorkItem?.cancel()
             attachRetryWorkItem = nil
+            if let attachedColumnKey, let scrollView {
+                mainWorkspacePhase0Log(
+                    "column-scroll-detach",
+                    "key=\(attachedColumnKey) liveOffset=\(scrollView.contentView.bounds.origin.y)"
+                )
+            }
             if let attachedColumnKey, let scrollView {
                 scrollCoordinator?.unregister(viewportKey: attachedColumnKey, matching: scrollView)
             }
