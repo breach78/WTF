@@ -94,25 +94,33 @@ final class MainCanvasScrollCoordinator: ObservableObject {
         case verification
     }
 
+    enum MotionCorrectionGateReason: String, Equatable {
+        case quietWindow
+        case sessionClose
+    }
+
     struct MotionPolicy {
         let activeFocusAnimatedDispatchDelay: TimeInterval
         let activeFocusNonAnimatedDispatchDelay: TimeInterval
         let descendantJoinDelay: TimeInterval
         let navigationSettleDelay: TimeInterval
         let sessionTimeout: TimeInterval
+        let correctionGateQuietWindowDelay: TimeInterval
 
         init(
             activeFocusAnimatedDispatchDelay: TimeInterval = 0.01,
             activeFocusNonAnimatedDispatchDelay: TimeInterval = 0.0,
             descendantJoinDelay: TimeInterval = 0.10,
             navigationSettleDelay: TimeInterval = 0.08,
-            sessionTimeout: TimeInterval = 0.65
+            sessionTimeout: TimeInterval = 0.65,
+            correctionGateQuietWindowDelay: TimeInterval = 0.12
         ) {
             self.activeFocusAnimatedDispatchDelay = activeFocusAnimatedDispatchDelay
             self.activeFocusNonAnimatedDispatchDelay = activeFocusNonAnimatedDispatchDelay
             self.descendantJoinDelay = descendantJoinDelay
             self.navigationSettleDelay = navigationSettleDelay
             self.sessionTimeout = sessionTimeout
+            self.correctionGateQuietWindowDelay = correctionGateQuietWindowDelay
         }
 
         func activeFocusDelay(animated: Bool) -> TimeInterval {
@@ -140,6 +148,13 @@ final class MainCanvasScrollCoordinator: ObservableObject {
         let currentIntentID: Int
         let goal: MotionGoal
         let joinWindowOpen: Bool
+    }
+
+    struct MotionCorrectionGateSnapshot: Equatable {
+        let serial: Int
+        let sessionID: Int
+        let revision: Int
+        let reason: MotionCorrectionGateReason
     }
 
     struct NavigationIntent: Equatable {
@@ -192,10 +207,12 @@ final class MainCanvasScrollCoordinator: ObservableObject {
         var joinWindowOpen: Bool
         var participants: [MotionParticipantKey: MotionParticipantRecord]
         var timeoutWorkItem: DispatchWorkItem?
+        var correctionGateQuietWorkItem: DispatchWorkItem?
     }
 
     @Published private(set) var navigationIntentTick: Int = 0
     @Published private(set) var motionSessionCloseTick: Int = 0
+    @Published private(set) var motionCorrectionGateTick: Int = 0
 
     let motionPolicy: MotionPolicy
 
@@ -211,7 +228,10 @@ final class MainCanvasScrollCoordinator: ObservableObject {
     private var mainCanvasHorizontalOffsetSnapshot: CGFloat?
     private var pendingMainCanvasHorizontalRestoreX: CGFloat?
     private var motionSessionSequence: Int = 0
+    private var motionCorrectionGateSequence: Int = 0
     private var activeMotionSession: MotionSessionRecord?
+    private var latestMotionCorrectionGate: MotionCorrectionGateSnapshot?
+    private var consumedMotionCorrectionSessionIDs: Set<Int> = []
     private var scheduledMotionTasks: [MotionTaskKey: DispatchWorkItem] = [:]
 
     init(
@@ -229,6 +249,7 @@ final class MainCanvasScrollCoordinator: ObservableObject {
         intentSequence = 0
         navigationIntentTick = 0
         motionSessionCloseTick = 0
+        motionCorrectionGateTick = 0
         latestGlobalIntent = nil
         latestScopedIntentByViewportKey = [:]
         lastConsumedIntentIDByViewportKey = [:]
@@ -236,6 +257,8 @@ final class MainCanvasScrollCoordinator: ObservableObject {
         mainCanvasHorizontalScrollView = nil
         mainCanvasHorizontalOffsetSnapshot = nil
         pendingMainCanvasHorizontalRestoreX = nil
+        latestMotionCorrectionGate = nil
+        consumedMotionCorrectionSessionIDs.removeAll(keepingCapacity: false)
         pruneReleasedScrollViews()
     }
 
@@ -305,6 +328,16 @@ final class MainCanvasScrollCoordinator: ObservableObject {
 
     func hasActiveMotionSession() -> Bool {
         activeMotionSession != nil
+    }
+
+    func motionCorrectionGateSnapshot() -> MotionCorrectionGateSnapshot? {
+        latestMotionCorrectionGate
+    }
+
+    func consumeMotionCorrectionBudget(forSessionID sessionID: Int) -> Bool {
+        guard !consumedMotionCorrectionSessionIDs.contains(sessionID) else { return false }
+        consumedMotionCorrectionSessionIDs.insert(sessionID)
+        return true
     }
 
     func claimMotionParticipant(
@@ -416,6 +449,7 @@ final class MainCanvasScrollCoordinator: ObservableObject {
 
     func cancelActiveMotionSession(reason: String) {
         guard var session = activeMotionSession else { return }
+        cancelCorrectionGateQuietWorkItem(for: &session)
         for key in session.participants.keys {
             var participant = session.participants[key]
             participant?.state = .cancelled
@@ -434,6 +468,7 @@ final class MainCanvasScrollCoordinator: ObservableObject {
               session.revision == handle.revision else {
             return
         }
+        cancelCorrectionGateQuietWorkItem(for: &session)
         session.joinWindowOpen = false
         session.lifecycle = .settling
         activeMotionSession = session
@@ -584,6 +619,7 @@ final class MainCanvasScrollCoordinator: ObservableObject {
             if var session = activeMotionSession {
                 cancelAllScheduledMotionTasks()
                 cancelTimeoutWorkItem(for: &session)
+                cancelCorrectionGateQuietWorkItem(for: &session)
                 session.revision &+= 1
                 session.currentIntentID = intentID
                 session.goal = goal
@@ -591,14 +627,19 @@ final class MainCanvasScrollCoordinator: ObservableObject {
                 session.joinWindowOpen = true
                 session.participants.removeAll(keepingCapacity: true)
                 scheduleTimeoutWorkItem(for: &session)
+                scheduleCorrectionGateQuietWorkItem(for: &session)
                 activeMotionSession = session
                 return session
             }
-            return startMotionSession(goal: goal, intentID: intentID)
+            var session = startMotionSession(goal: goal, intentID: intentID)
+            scheduleCorrectionGateQuietWorkItem(for: &session)
+            activeMotionSession = session
+            return session
 
         case .settleRecovery:
             if var session = activeMotionSession {
                 cancelTimeoutWorkItem(for: &session)
+                cancelCorrectionGateQuietWorkItem(for: &session)
                 session.currentIntentID = intentID
                 session.goal = goal
                 session.lifecycle = .settling
@@ -618,6 +659,10 @@ final class MainCanvasScrollCoordinator: ObservableObject {
                 session.currentIntentID = intentID
                 if kind == .bottomReveal {
                     session.goal = goal
+                }
+                cancelCorrectionGateQuietWorkItem(for: &session)
+                if session.lifecycle == .collecting {
+                    scheduleCorrectionGateQuietWorkItem(for: &session)
                 }
                 activeMotionSession = session
                 return session
@@ -639,7 +684,8 @@ final class MainCanvasScrollCoordinator: ObservableObject {
             lifecycle: .collecting,
             joinWindowOpen: true,
             participants: [:],
-            timeoutWorkItem: nil
+            timeoutWorkItem: nil,
+            correctionGateQuietWorkItem: nil
         )
         scheduleTimeoutWorkItem(for: &session)
         activeMotionSession = session
@@ -650,7 +696,7 @@ final class MainCanvasScrollCoordinator: ObservableObject {
         let sessionID = session.id
         let revision = session.revision
         let workItem = DispatchWorkItem { [weak self] in
-            Task { @MainActor in
+            MainActor.assumeIsolated {
                 self?.handleMotionSessionTimeout(sessionID: sessionID, revision: revision)
             }
         }
@@ -661,6 +707,53 @@ final class MainCanvasScrollCoordinator: ObservableObject {
     private func cancelTimeoutWorkItem(for session: inout MotionSessionRecord) {
         session.timeoutWorkItem?.cancel()
         session.timeoutWorkItem = nil
+    }
+
+    private func scheduleCorrectionGateQuietWorkItem(for session: inout MotionSessionRecord) {
+        cancelCorrectionGateQuietWorkItem(for: &session)
+        guard session.lifecycle == .collecting else { return }
+        guard !consumedMotionCorrectionSessionIDs.contains(session.id) else { return }
+
+        let sessionID = session.id
+        let revision = session.revision
+        let currentIntentID = session.currentIntentID
+        let workItem = DispatchWorkItem { [weak self] in
+            MainActor.assumeIsolated {
+                self?.handleCorrectionGateQuietWindow(
+                    sessionID: sessionID,
+                    revision: revision,
+                    intentID: currentIntentID
+                )
+            }
+        }
+        session.correctionGateQuietWorkItem = workItem
+        scheduleMotionWorkItem(motionPolicy.correctionGateQuietWindowDelay, workItem)
+    }
+
+    private func cancelCorrectionGateQuietWorkItem(for session: inout MotionSessionRecord) {
+        session.correctionGateQuietWorkItem?.cancel()
+        session.correctionGateQuietWorkItem = nil
+    }
+
+    private func handleCorrectionGateQuietWindow(
+        sessionID: Int,
+        revision: Int,
+        intentID: Int
+    ) {
+        guard var session = activeMotionSession,
+              session.id == sessionID,
+              session.revision == revision,
+              session.currentIntentID == intentID,
+              session.lifecycle == .collecting else {
+            return
+        }
+        session.correctionGateQuietWorkItem = nil
+        activeMotionSession = session
+        publishMotionCorrectionGate(
+            sessionID: sessionID,
+            revision: revision,
+            reason: .quietWindow
+        )
     }
 
     private func handleMotionSessionTimeout(sessionID: Int, revision: Int) {
@@ -679,6 +772,7 @@ final class MainCanvasScrollCoordinator: ObservableObject {
             session.participants[key] = participant
             cancelScheduledMotionTasks(for: key)
         }
+        cancelCorrectionGateQuietWorkItem(for: &session)
         cancelTimeoutWorkItem(for: &session)
         activeMotionSession = session
         closeActiveMotionSessionIfFinished(force: true)
@@ -689,10 +783,13 @@ final class MainCanvasScrollCoordinator: ObservableObject {
         let participants = Array(session.participants.values)
         let shouldClose = force || (!participants.isEmpty && participants.allSatisfy { $0.state.isTerminal })
         guard shouldClose else { return }
+        let sessionID = session.id
+        let revision = session.revision
+        cancelCorrectionGateQuietWorkItem(for: &session)
         cancelTimeoutWorkItem(for: &session)
         cancelAllScheduledMotionTasks()
         activeMotionSession = nil
-        finalizeMotionSessionClose()
+        finalizeMotionSessionClose(sessionID: sessionID, revision: revision)
     }
 
     private func motionTaskKey(
@@ -723,11 +820,36 @@ final class MainCanvasScrollCoordinator: ObservableObject {
         scrollViewEntriesByViewportKey = scrollViewEntriesByViewportKey.filter { $0.value.scrollView != nil }
     }
 
-    private func finalizeMotionSessionClose() {
+    private func finalizeMotionSessionClose(
+        sessionID: Int? = nil,
+        revision: Int? = nil
+    ) {
+        if let sessionID, let revision {
+            publishMotionCorrectionGate(
+                sessionID: sessionID,
+                revision: revision,
+                reason: .sessionClose
+            )
+        }
         motionSessionCloseTick &+= 1
         if let scrollView = mainCanvasHorizontalScrollView {
             applyPendingMainCanvasHorizontalRestoreIfNeeded(to: scrollView)
         }
+    }
+
+    private func publishMotionCorrectionGate(
+        sessionID: Int,
+        revision: Int,
+        reason: MotionCorrectionGateReason
+    ) {
+        motionCorrectionGateSequence &+= 1
+        latestMotionCorrectionGate = MotionCorrectionGateSnapshot(
+            serial: motionCorrectionGateSequence,
+            sessionID: sessionID,
+            revision: revision,
+            reason: reason
+        )
+        motionCorrectionGateTick &+= 1
     }
 
     private func applyPendingMainCanvasHorizontalRestoreIfNeeded(to scrollView: NSScrollView) {

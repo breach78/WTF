@@ -1,11 +1,20 @@
 import AppKit
 import SwiftUI
 
+struct MainCanvasSurfacePredictedTarget: Equatable {
+    let targetCardID: UUID
+    let targetMinY: CGFloat
+    let targetMaxY: CGFloat
+    let layoutKey: MainColumnLayoutCacheKey
+}
+
 struct MainCanvasSurfaceViewportDescriptor: Identifiable {
     let level: Int
     let viewportKey: String
     let frame: CGRect
     let desiredOffsetY: CGFloat
+    let predictedFocusTarget: MainCanvasSurfacePredictedTarget?
+    let predictedBottomRevealTarget: MainCanvasSurfacePredictedTarget?
     let content: AnyView
 
     var id: String { viewportKey }
@@ -15,6 +24,10 @@ struct MainCanvasSurfaceConfiguration {
     let contentSize: CGSize
     let activeLevel: Int?
     let descriptors: [MainCanvasSurfaceViewportDescriptor]
+    let motionSessionCloseTick: Int
+    let motionCorrectionGateTick: Int
+    let motionCorrectionGateSnapshot: MainCanvasScrollCoordinator.MotionCorrectionGateSnapshot?
+    let diagnosticsOwnerKey: String
     let onLiveOffsetChange: (String, CGFloat) -> Void
     let onViewportFinalize: (String, CGFloat) -> Void
     let onDocumentSizeChange: (String, CGSize) -> Void
@@ -247,9 +260,31 @@ final class MainCanvasSurfaceViewportContainerView: NSView {
 private final class MainCanvasColumnViewportNode: NSView {
     override var isFlipped: Bool { true }
 
+    private enum PendingMotionKind {
+        case focus
+        case bottomReveal
+    }
+
+    private struct PendingMotion {
+        let sessionID: Int
+        let sessionRevision: Int
+        let intentID: Int
+        let kind: PendingMotionKind
+        let capturedTarget: MainCanvasSurfacePredictedTarget
+        var latestTarget: MainCanvasSurfacePredictedTarget
+        var correctionRequired: Bool
+    }
+
+    private struct MotionDispatchResult {
+        let duration: TimeInterval
+        let requiresCorrection: Bool
+        let reachedTarget: Bool
+    }
+
     private let scrollView = NSScrollView(frame: .zero)
     private let hostingView = NSHostingView(rootView: AnyView(EmptyView()))
     private let viewportKey: String
+    private var currentDescriptor: MainCanvasSurfaceViewportDescriptor
     private var desiredOffsetY: CGFloat
     private var configuration: MainCanvasSurfaceConfiguration
     private weak var scrollCoordinator: MainCanvasScrollCoordinator?
@@ -261,6 +296,9 @@ private final class MainCanvasColumnViewportNode: NSView {
     private var lastReportedDocumentSize: CGSize = .zero
     private var isApplyingDesiredOffset = false
     private var isRestoringInitialViewport = true
+    private var pendingMotion: PendingMotion?
+    private var lastProcessedMotionSessionCloseTick: Int
+    private var lastProcessedMotionCorrectionGateTick: Int
 
     init(
         descriptor: MainCanvasSurfaceViewportDescriptor,
@@ -268,9 +306,12 @@ private final class MainCanvasColumnViewportNode: NSView {
         scrollCoordinator: MainCanvasScrollCoordinator?
     ) {
         self.viewportKey = descriptor.viewportKey
+        self.currentDescriptor = descriptor
         self.desiredOffsetY = max(0, descriptor.desiredOffsetY)
         self.configuration = configuration
         self.scrollCoordinator = scrollCoordinator
+        self.lastProcessedMotionSessionCloseTick = configuration.motionSessionCloseTick
+        self.lastProcessedMotionCorrectionGateTick = configuration.motionCorrectionGateTick
         super.init(frame: descriptor.frame)
         configureScrollView()
         hostingView.rootView = descriptor.content
@@ -313,6 +354,7 @@ private final class MainCanvasColumnViewportNode: NSView {
         configuration: MainCanvasSurfaceConfiguration,
         scrollCoordinator: MainCanvasScrollCoordinator?
     ) {
+        self.currentDescriptor = descriptor
         self.configuration = configuration
         self.scrollCoordinator = scrollCoordinator
         desiredOffsetY = max(0, descriptor.desiredOffsetY)
@@ -321,8 +363,12 @@ private final class MainCanvasColumnViewportNode: NSView {
         registerScrollViewIfNeeded()
         refreshDocumentLayout()
         applyDesiredOffsetIfNeeded()
+        consumeMotionIntentIfNeeded(descriptor: descriptor)
+        refreshPendingMotionState(descriptor: descriptor)
         scheduleDeferredRestoreIfNeeded()
         updateInitialViewportPresentation()
+        handleMotionCorrectionGateIfNeeded()
+        handleMotionSessionCloseIfNeeded()
     }
 
     func flushViewportPersistenceForTeardown() {
@@ -395,6 +441,7 @@ private final class MainCanvasColumnViewportNode: NSView {
 
         if sizeChanged(from: lastReportedDocumentSize, to: nextDocumentSize) {
             lastReportedDocumentSize = nextDocumentSize
+            markPendingMotionCorrectionRequired()
             configuration.onDocumentSizeChange(viewportKey, nextDocumentSize)
         }
 
@@ -406,6 +453,7 @@ private final class MainCanvasColumnViewportNode: NSView {
         let maxOffsetY = resolvedMaximumOffsetY()
         let clampedOffsetY = min(currentOffsetY, maxOffsetY)
         guard abs(currentOffsetY - clampedOffsetY) > 0.5 else { return }
+        markPendingMotionCorrectionRequired()
         isApplyingDesiredOffset = true
         scrollView.contentView.setBoundsOrigin(NSPoint(x: 0, y: clampedOffsetY))
         scrollView.reflectScrolledClipView(scrollView.contentView)
@@ -493,6 +541,311 @@ private final class MainCanvasColumnViewportNode: NSView {
         let documentHeight = hostingView.frame.height
         let viewportHeight = max(1, scrollView.contentView.bounds.height)
         return max(0, documentHeight - viewportHeight)
+    }
+
+    private func consumeMotionIntentIfNeeded(
+        descriptor: MainCanvasSurfaceViewportDescriptor
+    ) {
+        guard let scrollCoordinator,
+              let intent = scrollCoordinator.consumeLatestIntent(for: viewportKey) else {
+            return
+        }
+
+        switch intent.kind {
+        case .focusChange, .childListChange, .columnAppear:
+            guard let predictedTarget = descriptor.predictedFocusTarget else { return }
+            dispatchMotion(
+                kind: .focus,
+                predictedTarget: predictedTarget,
+                intent: intent,
+                scrollCoordinator: scrollCoordinator
+            )
+        case .bottomReveal:
+            guard let predictedTarget = descriptor.predictedBottomRevealTarget else { return }
+            dispatchMotion(
+                kind: .bottomReveal,
+                predictedTarget: predictedTarget,
+                intent: intent,
+                scrollCoordinator: scrollCoordinator
+            )
+        case .settleRecovery:
+            return
+        }
+    }
+
+    private func dispatchMotion(
+        kind: PendingMotionKind,
+        predictedTarget: MainCanvasSurfacePredictedTarget,
+        intent: MainCanvasScrollCoordinator.NavigationIntent,
+        scrollCoordinator: MainCanvasScrollCoordinator
+    ) {
+        guard let participantHandle = scrollCoordinator.claimMotionParticipant(
+            for: viewportKey,
+            axis: .vertical,
+            intent: intent
+        ) else {
+            return
+        }
+
+        var motion = PendingMotion(
+            sessionID: intent.sessionID,
+            sessionRevision: intent.sessionRevision,
+            intentID: intent.id,
+            kind: kind,
+            capturedTarget: predictedTarget,
+            latestTarget: predictedTarget,
+            correctionRequired: false
+        )
+        let dispatch = applyPredictedMotion(
+            kind: kind,
+            predictedTarget: predictedTarget,
+            animated: intent.animated
+        )
+        motion.correctionRequired = dispatch.requiresCorrection
+        pendingMotion = motion
+
+        if !dispatch.reachedTarget {
+            MainCanvasNavigationDiagnostics.shared.recordPredictedNativeScrollMiss(
+                ownerKey: configuration.diagnosticsOwnerKey
+            )
+        }
+
+        guard dispatch.duration > 0.001 else {
+            scrollCoordinator.updateMotionParticipantState(.aligned, handle: participantHandle)
+            return
+        }
+
+        scrollCoordinator.updateMotionParticipantState(.moving, handle: participantHandle)
+        var completionWorkItem: DispatchWorkItem?
+        completionWorkItem = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            defer {
+                scrollCoordinator.clearMotionTask(
+                    kind: .focus,
+                    handle: participantHandle
+                )
+            }
+            guard scrollCoordinator.isMotionParticipantCurrent(participantHandle) else { return }
+            self.refreshPendingMotionState(descriptor: self.currentDescriptor)
+            scrollCoordinator.updateMotionParticipantState(.aligned, handle: participantHandle)
+        }
+        if let completionWorkItem {
+            scrollCoordinator.replaceMotionTask(
+                completionWorkItem,
+                kind: .focus,
+                handle: participantHandle
+            )
+            DispatchQueue.main.asyncAfter(
+                deadline: .now() + dispatch.duration,
+                execute: completionWorkItem
+            )
+        }
+    }
+
+    private func applyPredictedMotion(
+        kind: PendingMotionKind,
+        predictedTarget: MainCanvasSurfacePredictedTarget,
+        animated: Bool
+    ) -> MotionDispatchResult {
+        let visibleRect = scrollView.documentVisibleRect
+        let resolvedViewportHeight = max(1, visibleRect.height)
+        let desiredTargetY = resolvedTargetOffsetY(
+            kind: kind,
+            predictedTarget: predictedTarget,
+            viewportHeight: resolvedViewportHeight
+        )
+        let maxY = resolvedMaximumOffsetY()
+        let reachable = desiredTargetY <= maxY + 0.5
+        let targetLabel = "\(viewportKey)|\(predictedTarget.targetCardID.uuidString)"
+
+        if animated {
+            let resolvedTargetY = CaretScrollCoordinator.resolvedVerticalTargetY(
+                visibleRect: visibleRect,
+                targetY: desiredTargetY,
+                minY: 0,
+                maxY: maxY,
+                snapToPixel: true
+            )
+            let duration = abs(resolvedTargetY - visibleRect.origin.y) <= 0.5
+                ? 0
+                : CaretScrollCoordinator.resolvedVerticalAnimationDuration(
+                    currentY: visibleRect.origin.y,
+                    targetY: resolvedTargetY,
+                    viewportHeight: resolvedViewportHeight
+                )
+            MainCanvasNavigationDiagnostics.shared.beginScrollAnimation(
+                ownerKey: configuration.diagnosticsOwnerKey,
+                axis: "vertical",
+                engine: "native",
+                animated: true,
+                target: targetLabel,
+                expectedDuration: duration,
+                predictedOnly: true
+            )
+            _ = CaretScrollCoordinator.applyAnimatedVerticalScrollIfNeeded(
+                scrollView: scrollView,
+                visibleRect: visibleRect,
+                targetY: desiredTargetY,
+                minY: 0,
+                maxY: maxY,
+                deadZone: 0.5,
+                snapToPixel: true,
+                duration: duration
+            )
+            return MotionDispatchResult(
+                duration: duration,
+                requiresCorrection: !reachable,
+                reachedTarget: reachable
+            )
+        }
+
+        MainCanvasNavigationDiagnostics.shared.beginScrollAnimation(
+            ownerKey: configuration.diagnosticsOwnerKey,
+            axis: "vertical",
+            engine: "native",
+            animated: false,
+            target: targetLabel,
+            expectedDuration: 0,
+            predictedOnly: true
+        )
+        _ = CaretScrollCoordinator.applyVerticalScrollIfNeeded(
+            scrollView: scrollView,
+            visibleRect: visibleRect,
+            targetY: desiredTargetY,
+            minY: 0,
+            maxY: maxY,
+            deadZone: 0.5,
+            snapToPixel: true
+        )
+        return MotionDispatchResult(
+            duration: 0,
+            requiresCorrection: !reachable,
+            reachedTarget: reachable
+        )
+    }
+
+    private func refreshPendingMotionState(
+        descriptor: MainCanvasSurfaceViewportDescriptor
+    ) {
+        guard var pendingMotion else { return }
+        let latestTarget = resolvedPredictedTarget(
+            for: pendingMotion.kind,
+            descriptor: descriptor
+        )
+        guard let latestTarget else {
+            pendingMotion.correctionRequired = true
+            self.pendingMotion = pendingMotion
+            return
+        }
+        if latestTarget != pendingMotion.latestTarget {
+            pendingMotion.correctionRequired = true
+            pendingMotion.latestTarget = latestTarget
+        }
+        let desiredTargetY = resolvedTargetOffsetY(
+            kind: pendingMotion.kind,
+            predictedTarget: latestTarget,
+            viewportHeight: max(1, scrollView.documentVisibleRect.height)
+        )
+        if desiredTargetY > resolvedMaximumOffsetY() + 0.5 {
+            pendingMotion.correctionRequired = true
+        }
+        self.pendingMotion = pendingMotion
+    }
+
+    private func handleMotionSessionCloseIfNeeded() {
+        guard configuration.motionSessionCloseTick != lastProcessedMotionSessionCloseTick else {
+            return
+        }
+        lastProcessedMotionSessionCloseTick = configuration.motionSessionCloseTick
+        guard let pendingMotion else { return }
+        guard let correctionGateSnapshot = configuration.motionCorrectionGateSnapshot,
+              correctionGateSnapshot.reason == .sessionClose,
+              correctionGateSnapshot.sessionID == pendingMotion.sessionID,
+              correctionGateSnapshot.revision == pendingMotion.sessionRevision else {
+            self.pendingMotion = nil
+            return
+        }
+        self.pendingMotion = nil
+    }
+
+    private func handleMotionCorrectionGateIfNeeded() {
+        guard configuration.motionCorrectionGateTick != lastProcessedMotionCorrectionGateTick else {
+            return
+        }
+        lastProcessedMotionCorrectionGateTick = configuration.motionCorrectionGateTick
+        guard let correctionGateSnapshot = configuration.motionCorrectionGateSnapshot,
+              var pendingMotion,
+              correctionGateSnapshot.sessionID == pendingMotion.sessionID,
+              correctionGateSnapshot.revision == pendingMotion.sessionRevision else {
+            return
+        }
+        guard pendingMotion.correctionRequired else {
+            self.pendingMotion = pendingMotion
+            return
+        }
+
+        let correctedOffsetY = min(
+            resolvedTargetOffsetY(
+                kind: pendingMotion.kind,
+                predictedTarget: pendingMotion.latestTarget,
+                viewportHeight: max(1, scrollView.documentVisibleRect.height)
+            ),
+            resolvedMaximumOffsetY()
+        )
+        let currentOffsetY = max(0, scrollView.contentView.bounds.origin.y)
+        let tolerance: CGFloat = pendingMotion.kind == .focus ? 16 : 22
+        guard abs(currentOffsetY - correctedOffsetY) > tolerance else {
+            pendingMotion.correctionRequired = false
+            self.pendingMotion = pendingMotion
+            return
+        }
+        guard let scrollCoordinator,
+              scrollCoordinator.consumeMotionCorrectionBudget(forSessionID: pendingMotion.sessionID) else {
+            self.pendingMotion = pendingMotion
+            return
+        }
+
+        MainCanvasNavigationDiagnostics.shared.recordSecondCorrection(
+            ownerKey: configuration.diagnosticsOwnerKey
+        )
+        isApplyingDesiredOffset = true
+        scrollView.contentView.setBoundsOrigin(NSPoint(x: 0, y: correctedOffsetY))
+        scrollView.reflectScrolledClipView(scrollView.contentView)
+        isApplyingDesiredOffset = false
+        publishOffsetIfNeeded(correctedOffsetY)
+        pendingMotion.correctionRequired = false
+        self.pendingMotion = pendingMotion
+    }
+
+    private func resolvedPredictedTarget(
+        for kind: PendingMotionKind,
+        descriptor: MainCanvasSurfaceViewportDescriptor
+    ) -> MainCanvasSurfacePredictedTarget? {
+        switch kind {
+        case .focus:
+            return descriptor.predictedFocusTarget
+        case .bottomReveal:
+            return descriptor.predictedBottomRevealTarget
+        }
+    }
+
+    private func resolvedTargetOffsetY(
+        kind: PendingMotionKind,
+        predictedTarget: MainCanvasSurfacePredictedTarget,
+        viewportHeight: CGFloat
+    ) -> CGFloat {
+        switch kind {
+        case .focus:
+            return max(0, predictedTarget.targetMinY)
+        case .bottomReveal:
+            return max(0, predictedTarget.targetMaxY - viewportHeight)
+        }
+    }
+
+    private func markPendingMotionCorrectionRequired() {
+        guard var pendingMotion else { return }
+        pendingMotion.correctionRequired = true
+        self.pendingMotion = pendingMotion
     }
 
     private func sizeChanged(from lhs: CGSize, to rhs: CGSize) -> Bool {

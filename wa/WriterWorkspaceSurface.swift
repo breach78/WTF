@@ -2472,6 +2472,21 @@ extension ScenarioWriterView {
         let descriptors = levelsData.enumerated().compactMap { index, data -> MainCanvasSurfaceViewportDescriptor? in
             guard index <= 1 || !data.cards.isEmpty else { return nil }
             let viewportKey = mainColumnViewportStorageKey(level: index)
+            let layoutSnapshot = resolvedMainColumnLayoutSnapshot(
+                in: data.cards,
+                viewportHeight: size.height
+            )
+            let predictedFocusTarget = resolvedMainColumnFocusTargetID(in: data.cards).flatMap { targetID in
+                mainCanvasSurfacePredictedTarget(
+                    targetID: targetID,
+                    snapshot: layoutSnapshot
+                )
+            }
+            let predictedBottomRevealTarget = mainCanvasSurfacePredictedBottomRevealTarget(
+                cards: data.cards,
+                viewportHeight: size.height,
+                snapshot: layoutSnapshot
+            )
             return MainCanvasSurfaceViewportDescriptor(
                 level: index,
                 viewportKey: viewportKey,
@@ -2482,6 +2497,8 @@ extension ScenarioWriterView {
                     height: size.height
                 ),
                 desiredOffsetY: mainColumnViewportOffsetByKey[viewportKey] ?? 0,
+                predictedFocusTarget: predictedFocusTarget,
+                predictedBottomRevealTarget: predictedBottomRevealTarget,
                 content: AnyView(
                     mainColumnScrollableBody(
                         cards: data.cards,
@@ -2500,6 +2517,10 @@ extension ScenarioWriterView {
             ),
             activeLevel: resolvedMainCanvasSurfaceActiveLevel(visualMaxLevelCount: visualMaxLevelCount),
             descriptors: descriptors,
+            motionSessionCloseTick: mainCanvasScrollCoordinator.motionSessionCloseTick,
+            motionCorrectionGateTick: mainCanvasScrollCoordinator.motionCorrectionGateTick,
+            motionCorrectionGateSnapshot: mainCanvasScrollCoordinator.motionCorrectionGateSnapshot(),
+            diagnosticsOwnerKey: mainCanvasDiagnosticsOwnerKey,
             onLiveOffsetChange: { viewportKey, offsetY in
                 handleMainCanvasSurfaceLiveOffsetChange(viewportKey: viewportKey, offsetY: offsetY)
             },
@@ -2513,6 +2534,36 @@ extension ScenarioWriterView {
                 )
             }
         )
+    }
+
+    private func mainCanvasSurfacePredictedTarget(
+        targetID: UUID,
+        snapshot: MainColumnLayoutSnapshot
+    ) -> MainCanvasSurfacePredictedTarget? {
+        guard let frame = snapshot.framesByCardID[targetID] else { return nil }
+        return MainCanvasSurfacePredictedTarget(
+            targetCardID: targetID,
+            targetMinY: frame.minY,
+            targetMaxY: frame.maxY,
+            layoutKey: snapshot.key
+        )
+    }
+
+    private func mainCanvasSurfacePredictedBottomRevealTarget(
+        cards: [SceneCard],
+        viewportHeight: CGFloat,
+        snapshot: MainColumnLayoutSnapshot
+    ) -> MainCanvasSurfacePredictedTarget? {
+        guard let activeCardID else { return nil }
+        guard cards.last?.id == activeCardID else { return nil }
+        guard let target = mainCanvasSurfacePredictedTarget(
+            targetID: activeCardID,
+            snapshot: snapshot
+        ) else {
+            return nil
+        }
+        guard (target.targetMaxY - target.targetMinY) > viewportHeight else { return nil }
+        return target
     }
 
     private func resolvedMainCanvasSurfaceActiveLevel(visualMaxLevelCount: Int) -> Int? {

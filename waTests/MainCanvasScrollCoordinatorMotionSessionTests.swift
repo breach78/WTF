@@ -276,6 +276,80 @@ final class MainCanvasScrollCoordinatorMotionSessionTests: XCTestCase {
         XCTAssertNil(coordinator.activeMotionSessionSnapshot())
     }
 
+    func testCorrectionGateQuietWindowWaitsUntilRepeatStops() {
+        let scheduler = MainCanvasMotionManualScheduler()
+        let coordinator = makeCoordinator(scheduler: scheduler)
+        let firstTargetID = UUID()
+        let secondTargetID = UUID()
+
+        let firstIntent = coordinator.publishIntent(
+            kind: .focusChange,
+            scope: .allColumns,
+            targetCardID: firstTargetID,
+            expectedActiveCardID: firstTargetID,
+            animated: true,
+            trigger: "arrowPreview"
+        )
+        XCTAssertNil(coordinator.motionCorrectionGateSnapshot())
+
+        scheduler.advance(by: coordinator.motionPolicy.correctionGateQuietWindowDelay * 0.5)
+        XCTAssertNil(coordinator.motionCorrectionGateSnapshot())
+
+        let secondIntent = coordinator.publishIntent(
+            kind: .focusChange,
+            scope: .allColumns,
+            targetCardID: secondTargetID,
+            expectedActiveCardID: secondTargetID,
+            animated: true,
+            trigger: "arrowPreview"
+        )
+        XCTAssertEqual(secondIntent.sessionID, firstIntent.sessionID)
+        XCTAssertEqual(secondIntent.sessionRevision, firstIntent.sessionRevision + 1)
+
+        scheduler.advance(by: coordinator.motionPolicy.correctionGateQuietWindowDelay * 0.75)
+        XCTAssertNil(coordinator.motionCorrectionGateSnapshot())
+
+        scheduler.advance(by: coordinator.motionPolicy.correctionGateQuietWindowDelay * 0.5)
+        let gate = tryUnwrap(coordinator.motionCorrectionGateSnapshot())
+        XCTAssertEqual(gate.reason, .quietWindow)
+        XCTAssertEqual(gate.sessionID, secondIntent.sessionID)
+        XCTAssertEqual(gate.revision, secondIntent.sessionRevision)
+        XCTAssertTrue(coordinator.consumeMotionCorrectionBudget(forSessionID: gate.sessionID))
+        XCTAssertFalse(coordinator.consumeMotionCorrectionBudget(forSessionID: gate.sessionID))
+    }
+
+    func testCorrectionGatePublishesOnSessionCloseAndBudgetStaysSingleUse() {
+        let scheduler = MainCanvasMotionManualScheduler()
+        let coordinator = makeCoordinator(scheduler: scheduler)
+        let targetID = UUID()
+
+        let intent = coordinator.publishIntent(
+            kind: .focusChange,
+            scope: .allColumns,
+            targetCardID: targetID,
+            expectedActiveCardID: targetID,
+            animated: false,
+            trigger: "activeCardChange"
+        )
+        let handle = tryUnwrap(
+            coordinator.claimMotionParticipant(
+                for: "close.column",
+                axis: .horizontal,
+                intent: intent
+            )
+        )
+
+        coordinator.updateMotionParticipantState(.aligned, handle: handle)
+        scheduler.runAll()
+
+        let gate = tryUnwrap(coordinator.motionCorrectionGateSnapshot())
+        XCTAssertEqual(gate.reason, .sessionClose)
+        XCTAssertEqual(gate.sessionID, intent.sessionID)
+        XCTAssertFalse(coordinator.hasActiveMotionSession())
+        XCTAssertTrue(coordinator.consumeMotionCorrectionBudget(forSessionID: gate.sessionID))
+        XCTAssertFalse(coordinator.consumeMotionCorrectionBudget(forSessionID: gate.sessionID))
+    }
+
     func testDeferredHorizontalRestoreReplaysAfterSessionClose() {
         let scheduler = MainCanvasMotionManualScheduler()
         let coordinator = makeCoordinator(scheduler: scheduler)
