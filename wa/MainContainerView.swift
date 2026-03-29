@@ -65,6 +65,7 @@ struct MainContainerView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .ignoresSafeArea(.container, edges: .top)
             .overlay {
                 if isSidebarVisible && sidebarOpenedFromToggle {
                     Color.black.opacity(0.001)

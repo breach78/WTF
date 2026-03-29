@@ -295,8 +295,13 @@ extension ScenarioWriterView {
         } else {
             pendingActiveCardID = nil
         }
+        MainCanvasNavigationDiagnostics.shared.beginActiveCardMutation(
+            ownerKey: mainCanvasDiagnosticsOwnerKey,
+            requestedCardID: card.id
+        )
         pendingActiveCardID = card.id
         let apply = {
+            let applyStartedAt = CACurrentMediaTime()
             defer { pendingActiveCardID = nil }
             let previousActiveID = activeCardID
             let previousRememberedChildID = card.parent?.lastSelectedChildID
@@ -322,6 +327,11 @@ extension ScenarioWriterView {
                 "active-card-change",
                 "previous=\(mainWorkspacePhase0CardID(previousActiveID)) active=\(mainWorkspacePhase0CardID(activeCardID)) " +
                 "editing=\(mainWorkspacePhase0CardID(editingCardID)) shouldFocusMain=\(shouldFocusMain)"
+            )
+            MainCanvasNavigationDiagnostics.shared.recordActiveCardMutationApplied(
+                ownerKey: mainCanvasDiagnosticsOwnerKey,
+                activeCardID: activeCardID,
+                durationMilliseconds: (CACurrentMediaTime() - applyStartedAt) * 1000
             )
         }
         if deferToMainAsync || !Thread.isMainThread {

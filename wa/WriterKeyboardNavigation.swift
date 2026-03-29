@@ -103,15 +103,18 @@ extension ScenarioWriterView {
         let currentLevel = levels[levelIndex]
         let content = textView.string as NSString
         let cursor = min(max(0, textView.selectedRange().location), content.length)
-        let visualBoundary = focusCaretVisualBoundaryState(textView: textView, cursor: cursor)
-        let atTopBoundary = (cursor == 0) && (visualBoundary?.isTop ?? true)
-        let atBottomBoundary = (cursor == content.length) && (visualBoundary?.isBottom ?? true)
+        let atTopBoundary = cursor == 0
+        let atBottomBoundary = cursor == content.length
         let shouldDiscardEmptyNewCardOnBoundaryMove =
             editingIsNewCard &&
             editingCard.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
 
         switch key {
         case .upArrow:
+            guard atTopBoundary else {
+                noteMainVerticalCaretNavigation(for: editingID)
+                return false
+            }
             return handleMainBoundaryUpArrow(
                 editingCard: editingCard,
                 currentLevel: currentLevel,
@@ -124,6 +127,10 @@ extension ScenarioWriterView {
             )
 
         case .downArrow:
+            guard atBottomBoundary else {
+                noteMainVerticalCaretNavigation(for: editingID)
+                return false
+            }
             return handleMainBoundaryDownArrow(
                 editingCard: editingCard,
                 currentLevel: currentLevel,
@@ -449,7 +456,6 @@ extension ScenarioWriterView {
         mainProgrammaticCaretExpectedCardID = target.id
         mainProgrammaticCaretExpectedLocation = safeCaretLocation
         mainProgrammaticCaretSelectionIgnoreUntil = Date().addingTimeInterval(0.28)
-        beginMainEditingBoundaryMotionSession(targetCardID: target.id)
         changeActiveCard(to: target, shouldFocusMain: false, deferToMainAsync: false)
         selectedCardIDs = [target.id]
         editingCardID = target.id

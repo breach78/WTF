@@ -39,8 +39,7 @@ extension ScenarioWriterView {
         }
 
         let clampedAnchorY = min(max(0, anchorY), 1)
-        let targetAnchorY = frame.minY + (frame.height * clampedAnchorY)
-        return targetAnchorY - (viewportHeight * clampedAnchorY)
+        return frame.minY - (viewportHeight * clampedAnchorY)
     }
 
     func resolvedMainColumnVisibleRect(
@@ -289,11 +288,11 @@ extension ScenarioWriterView {
             viewportKey: viewportKey,
             viewportHeight: viewportHeight
         )
-        let anchorY: CGFloat = prefersTopAnchor ? 0 : 0.4
-        let visibleAnchorY = (frame.minY + (frame.height * anchorY)) - visibleRect.origin.y
-        let desiredAnchorY = visibleRect.height * anchorY
-        let tolerance: CGFloat = prefersTopAnchor ? 16 : 22
-        return abs(visibleAnchorY - desiredAnchorY) <= tolerance
+        let anchorY: CGFloat = prefersTopAnchor ? 0 : MainCanvasSurfaceFocusAlignment.defaultAnchorY
+        let visibleTopY = frame.minY - visibleRect.origin.y
+        let desiredTopY = visibleRect.height * anchorY
+        let tolerance: CGFloat = 22
+        return abs(visibleTopY - desiredTopY) <= tolerance
     }
 
     func resolvedMainColumnFocusPrefersTopAnchor(
@@ -301,14 +300,10 @@ extension ScenarioWriterView {
         targetID: UUID,
         viewportHeight: CGFloat
     ) -> Bool {
-        let targetHeight = resolvedMainColumnTargetLayout(
-            in: cards,
-            targetID: targetID,
-            viewportHeight: viewportHeight
-        ).map { $0.targetMaxY - $0.targetMinY }
-            ?? findCard(by: targetID).map { resolvedMainCardHeight(for: $0) }
-            ?? 0
-        return targetHeight > viewportHeight
+        _ = cards
+        _ = targetID
+        _ = viewportHeight
+        return false
     }
 
     func hasMeasuredMainColumnNavigationSettleMisalignment(
@@ -513,14 +508,7 @@ extension ScenarioWriterView {
     }
 
     func shouldAutoAlignMainColumn(cards: [SceneCard], activeID: UUID?) -> Bool {
-        guard let activeID else { return false }
-        if cards.contains(where: { $0.id == activeID }) {
-            return true
-        }
-        if cards.contains(where: { activeAncestorIDs.contains($0.id) }) {
-            return true
-        }
-        return resolvedMainColumnFocusTargetID(in: cards) != nil
+        resolvedMainColumnFocusTargetID(in: cards, relativeTo: activeID) != nil
     }
 
     func resolvedMainColumnLayoutSnapshot(
@@ -535,16 +523,11 @@ extension ScenarioWriterView {
         let editingLiveHeightOverride = editingCardInColumn.flatMap { card in
             resolvedMainCardLiveEditingHeightOverride(for: card)
         }
-        let editingHeightBucket = editingLiveHeightOverride.map { Int(($0 * 10).rounded()) } ?? -1
-        let layoutKey = MainColumnLayoutCacheKey(
-            recordsVersion: scenario.cardsVersion,
-            contentVersion: scenario.cardContentSaveVersion,
-            viewportHeightBucket: Int(viewportHeight.rounded()),
-            fontSizeBucket: Int((fontSize * 10).rounded()),
-            lineSpacingBucket: Int((mainCardLineSpacingValue * 10).rounded()),
+        let layoutKey = resolvedMainColumnLayoutSnapshotKey(
+            cardIDs: cardIDs,
+            viewportHeight: viewportHeight,
             editingCardID: editingCardInColumn?.id,
-            editingHeightBucket: editingHeightBucket,
-            cardIDs: cardIDs
+            editingLiveHeightOverride: editingLiveHeightOverride
         )
         let containsEditingCard = editingCardInColumn != nil
         if let cached = mainColumnLayoutSnapshotByKey[layoutKey] {
@@ -600,6 +583,26 @@ extension ScenarioWriterView {
             durationMilliseconds: (CACurrentMediaTime() - layoutResolveStartedAt) * 1000
         )
         return snapshot
+    }
+
+    private func resolvedMainColumnLayoutSnapshotKey(
+        cardIDs: [UUID],
+        viewportHeight: CGFloat,
+        editingCardID: UUID?,
+        editingLiveHeightOverride: CGFloat?
+    ) -> MainColumnLayoutCacheKey {
+        let editingHeightBucket = editingLiveHeightOverride.map { Int(($0 * 10).rounded()) } ?? -1
+        // Layout cache invalidates only on content and geometry mutations, never on focus churn.
+        return MainColumnLayoutCacheKey(
+            recordsVersion: scenario.cardsVersion,
+            contentVersion: scenario.cardContentSaveVersion,
+            viewportHeightBucket: Int(viewportHeight.rounded()),
+            fontSizeBucket: Int((fontSize * 10).rounded()),
+            lineSpacingBucket: Int((mainCardLineSpacingValue * 10).rounded()),
+            editingCardID: editingCardID,
+            editingHeightBucket: editingHeightBucket,
+            cardIDs: cardIDs
+        )
     }
 
     func resolvedMainColumnTargetLayout(
@@ -723,17 +726,28 @@ extension ScenarioWriterView {
     }
 
     func resolvedMainColumnFocusTargetID(in cards: [SceneCard]) -> UUID? {
-        if let id = activeCardID, cards.contains(where: { $0.id == id }) {
-            return id
+        resolvedMainColumnFocusTargetID(in: cards, relativeTo: activeCardID)
+    }
+
+    func resolvedMainColumnFocusTargetID(
+        in cards: [SceneCard],
+        relativeTo focusCardID: UUID?
+    ) -> UUID? {
+        guard let focusCardID,
+              let focusCard = findCard(by: focusCardID) else {
+            return nil
         }
-        if let target = cards.first(where: { activeAncestorIDs.contains($0.id) }) {
-            return target.id
+        if cards.contains(where: { $0.id == focusCardID }) {
+            return focusCardID
         }
-        if let activeID = activeCardID,
-           let activeCard = findCard(by: activeID) {
-            return resolvedMainColumnPreferredDescendantTargetID(in: cards, startingFrom: activeCard)
+        var ancestor = focusCard.parent
+        while let candidate = ancestor {
+            if cards.contains(where: { $0.id == candidate.id }) {
+                return candidate.id
+            }
+            ancestor = candidate.parent
         }
-        return nil
+        return resolvedMainColumnPreferredDescendantTargetID(in: cards, startingFrom: focusCard)
     }
 
     private func resolvedMainColumnPreferredDescendantTargetID(
@@ -803,7 +817,7 @@ extension ScenarioWriterView {
         prefersTopAnchor: Bool,
         animated: Bool
     ) {
-        let defaultAnchor = UnitPoint(x: 0.5, y: 0.4)
+        let defaultAnchor = UnitPoint(x: 0.5, y: MainCanvasSurfaceFocusAlignment.defaultAnchorY)
         let focusAnchor = prefersTopAnchor ? UnitPoint(x: 0.5, y: 0.0) : defaultAnchor
         let focusAnchorY = prefersTopAnchor ? CGFloat(0) : CGFloat(defaultAnchor.y)
 

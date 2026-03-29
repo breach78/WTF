@@ -1,6 +1,19 @@
 import AppKit
 import SwiftUI
 
+enum MainCanvasSurfaceFocusAlignment {
+    static let defaultAnchorY: CGFloat = 0.25
+
+    static func resolvedTargetOffsetY(
+        predictedTarget: MainCanvasSurfacePredictedTarget,
+        viewportHeight: CGFloat
+    ) -> CGFloat {
+        let resolvedViewportHeight = max(1, viewportHeight)
+        let anchorY = min(max(0, defaultAnchorY), 1)
+        return max(0, predictedTarget.targetMinY - (resolvedViewportHeight * anchorY))
+    }
+}
+
 struct MainCanvasSurfacePredictedTarget: Equatable {
     let targetCardID: UUID
     let targetMinY: CGFloat
@@ -13,6 +26,7 @@ struct MainCanvasSurfaceViewportDescriptor: Identifiable {
     let viewportKey: String
     let frame: CGRect
     let desiredOffsetY: CGFloat
+    let documentSnapshot: MainCanvasSurfaceDocumentSnapshot
     let predictedFocusTarget: MainCanvasSurfacePredictedTarget?
     let predictedBottomRevealTarget: MainCanvasSurfacePredictedTarget?
     let content: AnyView
@@ -30,7 +44,6 @@ struct MainCanvasSurfaceConfiguration {
     let diagnosticsOwnerKey: String
     let onLiveOffsetChange: (String, CGFloat) -> Void
     let onViewportFinalize: (String, CGFloat) -> Void
-    let onDocumentSizeChange: (String, CGSize) -> Void
 }
 
 struct MainCanvasSurfaceViewportHost: NSViewRepresentable {
@@ -56,6 +69,12 @@ struct MainCanvasSurfaceViewportHost: NSViewRepresentable {
         coordinator: ()
     ) {
         nsView.flushViewportPersistenceForTeardown()
+    }
+}
+
+private final class MainCanvasSurfaceViewportScrollView: NSScrollView {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
     }
 }
 
@@ -87,6 +106,10 @@ final class MainCanvasSurfaceViewportContainerView: NSView {
     deinit {
         detachHorizontalObserver()
         flushViewportPersistenceForTeardown()
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
@@ -213,25 +236,7 @@ final class MainCanvasSurfaceViewportContainerView: NSView {
     }
 
     private func resolvedPooledViewportKeys() -> Set<String> {
-        let visibleRect = horizontalVisibleRect()
-        let visibleViewportKeys = configuration.descriptors.reduce(into: Set<String>()) { partialResult, descriptor in
-            if descriptor.frame.intersects(visibleRect) {
-                partialResult.insert(descriptor.viewportKey)
-            }
-        }
-
-        let activeViewportKeys = configuration.descriptors.reduce(into: Set<String>()) { partialResult, descriptor in
-            guard let activeLevel = configuration.activeLevel else { return }
-            if abs(descriptor.level - activeLevel) <= 1 {
-                partialResult.insert(descriptor.viewportKey)
-            }
-        }
-
-        let pooledViewportKeys = visibleViewportKeys.union(activeViewportKeys)
-        if !pooledViewportKeys.isEmpty {
-            return pooledViewportKeys
-        }
-        return Set(configuration.descriptors.prefix(3).map(\.viewportKey))
+        Set(configuration.descriptors.map(\.viewportKey))
     }
 
     private func horizontalVisibleRect() -> CGRect {
@@ -281,7 +286,7 @@ private final class MainCanvasColumnViewportNode: NSView {
         let reachedTarget: Bool
     }
 
-    private let scrollView = NSScrollView(frame: .zero)
+    private let scrollView = MainCanvasSurfaceViewportScrollView(frame: .zero)
     private let hostingView = NSHostingView(rootView: AnyView(EmptyView()))
     private let viewportKey: String
     private var currentDescriptor: MainCanvasSurfaceViewportDescriptor
@@ -294,6 +299,8 @@ private final class MainCanvasColumnViewportNode: NSView {
     private var deferredRestoreWorkItem: DispatchWorkItem?
     private var lastReportedOffsetY: CGFloat = .nan
     private var lastReportedDocumentSize: CGSize = .zero
+    private var lastAppliedDocumentLayoutKey: MainColumnLayoutCacheKey?
+    private var lastAppliedViewportSize: CGSize = .zero
     private var isApplyingDesiredOffset = false
     private var isRestoringInitialViewport = true
     private var pendingMotion: PendingMotion?
@@ -340,10 +347,20 @@ private final class MainCanvasColumnViewportNode: NSView {
         unregisterScrollViewIfNeeded()
     }
 
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard bounds.contains(point) else { return nil }
+        let pointInScrollView = scrollView.convert(point, from: self)
+        return scrollView.hitTest(pointInScrollView) ?? scrollView
+    }
+
     override func layout() {
         super.layout()
         scrollView.frame = bounds
-        refreshDocumentLayout()
+        refreshDocumentLayoutIfNeeded()
         applyDesiredOffsetIfNeeded()
         scheduleDeferredRestoreIfNeeded()
         updateInitialViewportPresentation()
@@ -361,7 +378,7 @@ private final class MainCanvasColumnViewportNode: NSView {
         frame = descriptor.frame
         hostingView.rootView = descriptor.content
         registerScrollViewIfNeeded()
-        refreshDocumentLayout()
+        refreshDocumentLayoutIfNeeded()
         applyDesiredOffsetIfNeeded()
         consumeMotionIntentIfNeeded(descriptor: descriptor)
         refreshPendingMotionState(descriptor: descriptor)
@@ -423,17 +440,7 @@ private final class MainCanvasColumnViewportNode: NSView {
     }
 
     private func refreshDocumentLayout() {
-        let width = max(1, bounds.width)
-        let viewportHeight = max(1, bounds.height)
-
-        if abs(hostingView.frame.width - width) > 0.5 {
-            hostingView.frame.size.width = width
-        }
-
-        hostingView.layoutSubtreeIfNeeded()
-        let fittingSize = hostingView.fittingSize
-        let documentHeight = max(viewportHeight, fittingSize.height)
-        let nextDocumentSize = CGSize(width: width, height: documentHeight)
+        let nextDocumentSize = resolvedDocumentSize()
 
         if hostingView.frame.size != nextDocumentSize {
             hostingView.frame = CGRect(origin: .zero, size: nextDocumentSize)
@@ -442,10 +449,22 @@ private final class MainCanvasColumnViewportNode: NSView {
         if sizeChanged(from: lastReportedDocumentSize, to: nextDocumentSize) {
             lastReportedDocumentSize = nextDocumentSize
             markPendingMotionCorrectionRequired()
-            configuration.onDocumentSizeChange(viewportKey, nextDocumentSize)
         }
 
         clampCurrentOffsetToDocumentBounds()
+    }
+
+    private func refreshDocumentLayoutIfNeeded() {
+        let currentViewportSize = bounds.size
+        let currentLayoutKey = currentDescriptor.documentSnapshot.layoutKey
+        let needsRefresh =
+            lastReportedDocumentSize == .zero ||
+            lastAppliedDocumentLayoutKey != currentLayoutKey ||
+            sizeChanged(from: lastAppliedViewportSize, to: currentViewportSize)
+        guard needsRefresh else { return }
+        refreshDocumentLayout()
+        lastAppliedDocumentLayoutKey = currentLayoutKey
+        lastAppliedViewportSize = currentViewportSize
     }
 
     private func clampCurrentOffsetToDocumentBounds() {
@@ -537,8 +556,19 @@ private final class MainCanvasColumnViewportNode: NSView {
         scrollView.alphaValue = isRestoringInitialViewport ? 0 : 1
     }
 
+    private func resolvedDocumentSize() -> CGSize {
+        let width = max(1, bounds.width)
+        let viewportHeight = max(1, bounds.height)
+        return CGSize(
+            width: width,
+            height: currentDescriptor.documentSnapshot.resolvedDocumentHeight(
+                viewportHeight: viewportHeight
+            )
+        )
+    }
+
     private func resolvedMaximumOffsetY() -> CGFloat {
-        let documentHeight = hostingView.frame.height
+        let documentHeight = resolvedDocumentSize().height
         let viewportHeight = max(1, scrollView.contentView.bounds.height)
         return max(0, documentHeight - viewportHeight)
     }
@@ -836,7 +866,10 @@ private final class MainCanvasColumnViewportNode: NSView {
     ) -> CGFloat {
         switch kind {
         case .focus:
-            return max(0, predictedTarget.targetMinY)
+            return MainCanvasSurfaceFocusAlignment.resolvedTargetOffsetY(
+                predictedTarget: predictedTarget,
+                viewportHeight: viewportHeight
+            )
         case .bottomReveal:
             return max(0, predictedTarget.targetMaxY - viewportHeight)
         }

@@ -136,6 +136,98 @@ final class MainCanvasScrollCoordinatorMotionSessionTests: XCTestCase {
         )
     }
 
+    func testSurfaceFocusAlignmentPlacesCardTopAtOneQuarterOfViewport() {
+        let predictedTarget = MainCanvasSurfacePredictedTarget(
+            targetCardID: UUID(),
+            targetMinY: 400,
+            targetMaxY: 700,
+            layoutKey: MainColumnLayoutCacheKey(
+                recordsVersion: 1,
+                contentVersion: 1,
+                viewportHeightBucket: 900,
+                fontSizeBucket: 170,
+                lineSpacingBucket: 50,
+                editingCardID: nil,
+                editingHeightBucket: -1,
+                cardIDs: []
+            )
+        )
+
+        let offsetY = MainCanvasSurfaceFocusAlignment.resolvedTargetOffsetY(
+            predictedTarget: predictedTarget,
+            viewportHeight: 900
+        )
+
+        XCTAssertEqual(offsetY, 175, accuracy: 0.5)
+    }
+
+    func testSurfaceFocusAlignmentUsesSameQuarterLineForTallCards() {
+        let predictedTarget = MainCanvasSurfacePredictedTarget(
+            targetCardID: UUID(),
+            targetMinY: 640,
+            targetMaxY: 1740,
+            layoutKey: MainColumnLayoutCacheKey(
+                recordsVersion: 1,
+                contentVersion: 1,
+                viewportHeightBucket: 900,
+                fontSizeBucket: 170,
+                lineSpacingBucket: 50,
+                editingCardID: nil,
+                editingHeightBucket: -1,
+                cardIDs: []
+            )
+        )
+
+        let offsetY = MainCanvasSurfaceFocusAlignment.resolvedTargetOffsetY(
+            predictedTarget: predictedTarget,
+            viewportHeight: 900
+        )
+
+        XCTAssertEqual(offsetY, 415, accuracy: 0.5)
+    }
+
+    func testSurfaceDocumentSnapshotFallsBackToViewportHeightWithoutCache() {
+        let snapshot = MainCanvasSurfaceDocumentSnapshot(
+            layoutKey: nil,
+            contentBottomY: nil
+        )
+
+        XCTAssertEqual(snapshot.resolvedDocumentHeight(viewportHeight: 900), 900, accuracy: 0.5)
+    }
+
+    func testSurfaceDocumentSnapshotUsesCachedContentBottomY() {
+        let snapshot = MainCanvasSurfaceDocumentSnapshot(
+            layoutKey: nil,
+            contentBottomY: 1420
+        )
+
+        XCTAssertEqual(snapshot.resolvedDocumentHeight(viewportHeight: 900), 1420, accuracy: 0.5)
+    }
+
+    func testViewportRestoreTickAdvancesWhenRestoreIsPublished() {
+        let viewState = MainCanvasViewState()
+
+        XCTAssertEqual(viewState.viewportRestoreTick, 0)
+        viewState.publishViewportRestore()
+        viewState.publishViewportRestore()
+
+        XCTAssertEqual(viewState.viewportRestoreTick, 2)
+    }
+
+    func testCoordinatorTracksRegisteredViewportScrollViews() {
+        let scheduler = MainCanvasMotionManualScheduler()
+        let coordinator = makeCoordinator(scheduler: scheduler)
+        let scrollView = NSScrollView()
+
+        XCTAssertFalse(coordinator.hasRegisteredScrollView(for: "surface.column"))
+
+        coordinator.register(scrollView: scrollView, for: "surface.column")
+        XCTAssertTrue(coordinator.hasRegisteredScrollView(for: "surface.column"))
+
+        coordinator.unregister(viewportKey: "surface.column", matching: scrollView)
+        XCTAssertFalse(coordinator.hasRegisteredScrollView(for: "surface.column"))
+    }
+
     // Drive retry and timeout ordering with a manual scheduler so the session contract stays deterministic.
     func testKeyboardRetargetCancelsStaleVerificationAndAdvancesRevision() {
         let scheduler = MainCanvasMotionManualScheduler()

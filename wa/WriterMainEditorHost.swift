@@ -222,11 +222,15 @@ extension ScenarioWriterView {
                 lineSpacing: CGFloat(mainCardLineSpacingValue),
                 appearance: appearance,
                 isFocused: editingCardID == card.id,
+                selectionSeedLocation: resolvedMainEditorSelectionSeedLocation(for: card.id),
                 onFocusStateChange: { isFocused in
                     updateMainEditorResponderState(cardID: card.id, isFocused: isFocused)
                 },
                 onMeasuredBodyHeightChange: { measured in
                     updateMainEditorMeasuredBodyHeight(cardID: card.id, measured: measured)
+                },
+                shouldSkipLayoutMeasurement: {
+                    shouldSkipMainEditorLiveLayoutMeasurement(for: card.id)
                 },
                 onCommandBy: { selector in
                     handleMainEditorBoundaryCommand(selector)
@@ -495,6 +499,13 @@ extension ScenarioWriterView {
             return true
         }
         return false
+    }
+
+    func resolvedMainEditorSelectionSeedLocation(for cardID: UUID) -> Int? {
+        guard mainEditorSession.requestedCardID == cardID || mainEditorSession.mountedCardID == cardID else {
+            return nil
+        }
+        return mainEditorSession.caretSeedLocation
     }
 
     func prepareMainEditorSessionRequest(

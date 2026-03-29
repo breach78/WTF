@@ -34,7 +34,9 @@ struct ScenarioWriterView: View {
     @State var boardSession = WriterBoardSessionState()
 
     @StateObject var mainCanvasViewState = MainCanvasViewState()
+    @StateObject var mainCanvasInteractionViewState = MainCanvasInteractionViewState()
     @StateObject var mainCanvasScrollCoordinator = MainCanvasScrollCoordinator()
+    @StateObject var mainCanvasPerformanceMonitor = MainCanvasPerformanceMonitor()
     @StateObject var focusModeLayoutCoordinator = FocusModeLayoutCoordinator()
     @StateObject var aiFeatureState = WriterAIFeatureState()
     @StateObject var editEndAutoBackupState = WriterEditEndAutoBackupState()
@@ -88,6 +90,7 @@ struct ScenarioWriterView: View {
     @AppStorage("mainCardLineSpacingValueV2") var mainCardLineSpacingValue: Double = 5.0
     @AppStorage("mainCardVerticalGap") var mainCardVerticalGap: Double = 0.0
     @AppStorage("mainCanvasHorizontalScrollMode") var mainCanvasHorizontalScrollModeRawValue: Int = MainCanvasHorizontalScrollMode.defaultPolicy.rawValue
+    @AppStorage("mainCanvasPerformanceLoggingEnabled") var mainCanvasPerformanceLoggingEnabled: Bool = true
     @AppStorage("mainWorkspaceZoomScale") var mainWorkspaceZoomScale: Double = 1.0
     @AppStorage("geminiModelID") var geminiModelID: String = "gemini-3.1-pro-preview"
     @AppStorage("autoBackupEnabledOnQuit") var autoBackupEnabledOnQuit: Bool = true

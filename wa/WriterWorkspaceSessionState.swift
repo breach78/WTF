@@ -18,6 +18,16 @@ struct UpperCardCreationRequest: Identifiable {
     let sourceCardIDs: [UUID]
 }
 
+struct WorkspaceFocusPersistenceState: Equatable {
+    var lastEditedScenarioID: String = ""
+    var lastEditedCardID: String = ""
+    var lastFocusedScenarioID: String = ""
+    var lastFocusedCardID: String = ""
+    var lastFocusedCaretLocation: Int = -1
+    var lastFocusedWasEditing: Bool = false
+    var lastFocusedWasFocusMode: Bool = false
+}
+
 struct WriterWorkspaceSessionState {
     var isSplitPaneActive: Bool = false
     var activeCardID: UUID? = nil
@@ -104,6 +114,8 @@ struct WriterWorkspaceSessionState {
     var editingSessionHadTextMutation: Bool = false
     var didRestoreStartupFocusState: Bool = false
     var didRestoreStartupViewportState: Bool = false
+    var pendingFocusPersistenceState: WorkspaceFocusPersistenceState? = nil
+    var focusPersistenceFlushWorkItem: DispatchWorkItem? = nil
     var interactionRuntime = WriterInteractionRuntime()
 }
 
@@ -184,6 +196,8 @@ extension ScenarioWriterView {
     var focusOffsetNormalizationMinInterval: TimeInterval { 0.08 }
     var focusCaretSelectionEnsureMinInterval: TimeInterval { 0.016 }
     var mainCaretSelectionEnsureMinInterval: TimeInterval { 0.016 }
+    var mainCaretVerticalNavigationBurstWindow: TimeInterval { 0.08 }
+    var mainCaretVerticalNavigationEnsureMinInterval: TimeInterval { 0.12 }
     var mainEditDoubleTabInterval: TimeInterval { 0.45 }
     var mainNoChildRightDoublePressInterval: TimeInterval { 0.55 }
     var maxUndoCount: Int { 200 }
@@ -256,6 +270,16 @@ extension ScenarioWriterView {
     var mainEditorSession: MainEditorSessionState {
         get { workspaceSession.mainEditorSession }
         nonmutating set { workspaceSession.mainEditorSession = newValue }
+    }
+
+    var pendingFocusPersistenceState: WorkspaceFocusPersistenceState? {
+        get { workspaceSession.pendingFocusPersistenceState }
+        nonmutating set { workspaceSession.pendingFocusPersistenceState = newValue }
+    }
+
+    var focusPersistenceFlushWorkItem: DispatchWorkItem? {
+        get { workspaceSession.focusPersistenceFlushWorkItem }
+        nonmutating set { workspaceSession.focusPersistenceFlushWorkItem = newValue }
     }
 
     var mainEditorEntryFinishGuardCardID: UUID? {

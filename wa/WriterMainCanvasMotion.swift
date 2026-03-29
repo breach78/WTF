@@ -11,6 +11,12 @@ enum MainWorkspaceMotionEntryPoints {
         String
     ) -> Void
 
+    typealias PerformDirectFocusNavigation = (
+        UUID,
+        Bool,
+        String
+    ) -> Void
+
     static func beginEditingBoundaryMotionSession(
         targetCardID: UUID,
         animated: Bool = false,
@@ -63,20 +69,13 @@ enum MainWorkspaceMotionEntryPoints {
         suppressRepeatAnimation: Bool,
         trigger: String = "arrowPreview",
         setPendingPreemptiveTargetID: (UUID?) -> Void,
-        publishIntent: PublishIntent,
+        performNavigation: PerformDirectFocusNavigation,
         log: (UUID, Bool, String) -> Void
     ) {
         guard let targetID else { return }
         let shouldAnimate = focusNavigationAnimationEnabled && !suppressRepeatAnimation
         setPendingPreemptiveTargetID(targetID)
-        publishIntent(
-            .focusChange,
-            .allColumns,
-            targetID,
-            targetID,
-            shouldAnimate,
-            trigger
-        )
+        performNavigation(targetID, shouldAnimate, trigger)
         log(targetID, shouldAnimate, trigger)
     }
 
@@ -462,7 +461,7 @@ extension ScenarioWriterView {
             guard !showFocusMode else { return }
             guard !isPreviewingHistory else { return }
             guard let activeID = activeCardID, findCard(by: activeID) != nil else { return }
-            let verticalMisalignment = hasMeasuredMainColumnNavigationSettleMisalignment()
+            let verticalMisalignment = false
             let horizontalVisibleWidth = mainCanvasScrollCoordinator
                 .resolvedMainCanvasHorizontalScrollView()?
                 .documentVisibleRect
@@ -528,7 +527,7 @@ extension ScenarioWriterView {
         animated: Bool,
         trigger: String
     ) -> MainCanvasScrollCoordinator.NavigationIntent {
-        mainCanvasScrollCoordinator.publishIntent(
+        let intent = mainCanvasScrollCoordinator.publishIntent(
             kind: kind,
             scope: scope,
             targetCardID: targetCardID,
@@ -536,6 +535,16 @@ extension ScenarioWriterView {
             animated: animated,
             trigger: trigger
         )
+        switch kind {
+        case .focusChange, .settleRecovery:
+            MainCanvasNavigationDiagnostics.shared.recordNavigationIntentPublished(
+                ownerKey: mainCanvasDiagnosticsOwnerKey,
+                trigger: trigger
+            )
+        case .childListChange, .columnAppear, .bottomReveal:
+            break
+        }
+        return intent
     }
 
     func beginMainEditingBoundaryMotionSession(
@@ -682,19 +691,91 @@ extension ScenarioWriterView {
             suppressRepeatAnimation: shouldSuppressMainArrowRepeatAnimation(),
             trigger: trigger,
             setPendingPreemptiveTargetID: { pendingMainPreemptiveFocusNavigationTargetID = $0 }
-        ) { kind, scope, targetCardID, expectedActiveCardID, animated, trigger in
-            _ = publishMainColumnNavigationIntent(
-                kind: kind,
-                scope: scope,
-                targetCardID: targetCardID,
-                expectedActiveCardID: expectedActiveCardID,
-                animated: animated,
-                trigger: trigger
+        ) { targetCardID, animated, _ in
+            performDirectMainCanvasFocusNavigation(
+                to: targetCardID,
+                animated: animated
             )
         } log: { targetID, shouldAnimate, trigger in
             mainWorkspacePhase0Log(
                 "preemptive-focus-intent",
                 "target=\(mainWorkspacePhase0CardID(targetID)) animated=\(shouldAnimate) trigger=\(trigger)"
+            )
+        }
+    }
+
+    func performDirectMainCanvasFocusNavigation(
+        to targetCardID: UUID,
+        animated: Bool,
+        recordFocusIntent: Bool = false,
+        trigger: String = "directFocus",
+        sourceCardID: UUID? = nil
+    ) {
+        if recordFocusIntent {
+            MainCanvasNavigationDiagnostics.shared.beginFocusIntent(
+                ownerKey: mainCanvasDiagnosticsOwnerKey,
+                trigger: trigger,
+                isRepeat: false,
+                sourceCardID: sourceCardID,
+                intendedCardID: targetCardID
+            )
+        }
+        cancelAllPendingMainColumnFocusWork()
+        pendingMainPreemptiveFocusNavigationTargetID = targetCardID
+        preemptivelyAlignMainCanvasFocus(
+            to: targetCardID,
+            animated: animated
+        )
+        syncMainCanvasInteractionState(freezeAffordances: true)
+    }
+
+    func preemptivelyAlignMainCanvasFocus(
+        to targetCardID: UUID,
+        animated: Bool
+    ) {
+        preemptivelyAlignMainColumnsVertically(
+            to: targetCardID,
+            animated: animated
+        )
+        preemptivelyAlignMainCanvasHorizontally(
+            to: targetCardID,
+            animated: animated
+        )
+    }
+
+    func preemptivelyAlignMainColumnsVertically(
+        to targetCardID: UUID,
+        animated: Bool
+    ) {
+        guard !showFocusMode else { return }
+        guard acceptsKeyboardInput else { return }
+        guard !isPreviewingHistory else { return }
+
+        let levelsData = resolvedDisplayedMainLevelsWithParents()
+        for (level, data) in levelsData.enumerated() {
+            guard level <= 1 || !data.cards.isEmpty else { continue }
+            guard shouldAutoAlignMainColumn(cards: data.cards, activeID: targetCardID) else {
+                continue
+            }
+            guard let focusTargetID = resolvedMainColumnFocusTargetID(
+                in: data.cards,
+                relativeTo: targetCardID
+            ) else {
+                continue
+            }
+            let viewportKey = mainColumnViewportStorageKey(level: level)
+            guard let scrollView = mainCanvasScrollCoordinator.scrollView(for: viewportKey) else {
+                continue
+            }
+            let viewportHeight = max(1, scrollView.documentVisibleRect.height)
+            let anchorY = MainCanvasSurfaceFocusAlignment.defaultAnchorY
+            _ = performMainColumnNativeFocusScroll(
+                viewportKey: viewportKey,
+                cards: data.cards,
+                targetID: focusTargetID,
+                viewportHeight: viewportHeight,
+                anchorY: anchorY,
+                animated: animated
             )
         }
     }

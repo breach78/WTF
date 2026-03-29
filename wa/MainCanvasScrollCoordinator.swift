@@ -502,6 +502,10 @@ final class MainCanvasScrollCoordinator: ObservableObject {
         return nil
     }
 
+    func hasRegisteredScrollView(for viewportKey: String) -> Bool {
+        scrollView(for: viewportKey) != nil
+    }
+
     func updateObservedFrames(_ frames: [UUID: CGRect], for viewportKey: String) {
         geometryModelByViewportKey[viewportKey] = MainColumnGeometryModel(observedFramesByCardID: frames)
         guard !frames.isEmpty,

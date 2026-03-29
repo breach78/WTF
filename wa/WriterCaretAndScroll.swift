@@ -45,14 +45,24 @@ extension ScenarioWriterView {
         updateMainSelectionActiveEdge(using: context)
         guard !isDuplicateMainSelection(context) else { return }
         persistMainSelection(context)
+        guard !context.textView.hasMarkedText() else { return }
+        guard context.selected.length > 0 else {
+            guard shouldEnsureCollapsedMainCaretVisible(after: context) else { return }
+            requestCoalescedMainCaretEnsure(
+                minInterval: resolvedMainCaretEnsureMinInterval(after: context),
+                delay: 0.0
+            )
+            return
+        }
 
         if mainLineSpacingAppliedResponderID != context.responderID || mainLineSpacingAppliedCardID != context.editingID {
             applyMainEditorLineSpacingIfNeeded()
         }
         normalizeMainEditorTextViewOffsetIfNeeded(context.textView, reason: "selection-change")
-
-        guard !context.textView.hasMarkedText() else { return }
-        requestCoalescedMainCaretEnsure(minInterval: mainCaretSelectionEnsureMinInterval, delay: 0.0)
+        requestCoalescedMainCaretEnsure(
+            minInterval: resolvedMainCaretEnsureMinInterval(after: context),
+            delay: 0.0
+        )
     }
 
     private func shouldIgnoreMainProgrammaticSelection(_ context: MainSelectionChangeContext) -> Bool {
@@ -211,6 +221,8 @@ extension ScenarioWriterView {
         mainSelectionLastResponderID = nil
         mainSelectionActiveEdge = .end
         mainCaretEnsureLastScheduledAt = .distantPast
+        mainRecentVerticalCaretNavigationCardID = nil
+        mainRecentVerticalCaretNavigationUntil = .distantPast
         mainProgrammaticCaretSuppressEnsureCardID = nil
         mainProgrammaticCaretExpectedCardID = nil
         mainProgrammaticCaretExpectedLocation = -1
@@ -501,6 +513,34 @@ extension ScenarioWriterView {
         requestMainCaretEnsure(delay: resolvedDelay)
     }
 
+    func noteMainVerticalCaretNavigation(for cardID: UUID) {
+        mainRecentVerticalCaretNavigationCardID = cardID
+        mainRecentVerticalCaretNavigationUntil = Date().addingTimeInterval(mainCaretVerticalNavigationBurstWindow)
+    }
+
+    func shouldSkipMainEditorLiveLayoutMeasurement(for cardID: UUID) -> Bool {
+        guard editingCardID == cardID else { return false }
+        guard mainRecentVerticalCaretNavigationCardID == cardID else { return false }
+        return Date() < mainRecentVerticalCaretNavigationUntil
+    }
+
+    private func resolvedMainCaretEnsureMinInterval(after context: MainSelectionChangeContext) -> TimeInterval {
+        guard context.selected.length == 0 else { return mainCaretSelectionEnsureMinInterval }
+        guard context.editingID == mainRecentVerticalCaretNavigationCardID else {
+            return mainCaretSelectionEnsureMinInterval
+        }
+        guard Date() < mainRecentVerticalCaretNavigationUntil else {
+            return mainCaretSelectionEnsureMinInterval
+        }
+        return mainCaretVerticalNavigationEnsureMinInterval
+    }
+
+    private func shouldEnsureCollapsedMainCaretVisible(after context: MainSelectionChangeContext) -> Bool {
+        guard context.selected.length == 0 else { return true }
+        guard context.editingID == mainRecentVerticalCaretNavigationCardID else { return false }
+        return Date() < mainRecentVerticalCaretNavigationUntil
+    }
+
     func ensureMainCaretVisible() {
         guard let editingID = editingCardID else { return }
         guard !isMainEditingTransitionPending(targetCardID: editingID) else { return }
@@ -632,8 +672,8 @@ extension ScenarioWriterView {
         let minY = -effectiveTopInset
         let documentHeight = outerScrollView.documentView?.bounds.height ?? 0
         let maxY = max(minY, documentHeight - visible.height + insets.bottom)
-        let topPadding: CGFloat = 120
-        let bottomPadding: CGFloat = 120
+        let topPadding: CGFloat = 150
+        let bottomPadding: CGFloat = 150
         let minVisibleY = visible.minY + topPadding
         let maxVisibleY = visible.maxY - bottomPadding
 

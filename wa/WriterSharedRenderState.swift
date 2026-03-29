@@ -367,6 +367,15 @@ struct MainColumnLayoutSnapshot {
     let contentBottomY: CGFloat
 }
 
+struct MainCanvasSurfaceDocumentSnapshot: Equatable {
+    let layoutKey: MainColumnLayoutCacheKey?
+    let contentBottomY: CGFloat?
+
+    func resolvedDocumentHeight(viewportHeight: CGFloat) -> CGFloat {
+        max(max(1, viewportHeight), contentBottomY ?? 0)
+    }
+}
+
 @MainActor
 final class AppWindowState: ObservableObject {
     @Published var focusModeWindowBackgroundActive: Bool = false
@@ -450,6 +459,32 @@ struct MainCardRenderSettings: Equatable {
     let darkCardRelatedColorHex: String
 }
 
+struct MainCanvasInteractionSnapshot: Equatable {
+    var activeCardID: UUID? = nil
+    var editingCardID: UUID? = nil
+    var selectedCardIDs: Set<UUID> = []
+    var activeAncestorIDs: Set<UUID> = []
+    var activeDescendantIDs: Set<UUID> = []
+    var activeSiblingIDs: Set<UUID> = []
+    var affordancesFrozen: Bool = false
+
+    func isSelected(_ cardID: UUID) -> Bool {
+        selectedCardIDs.contains(cardID)
+    }
+
+    func isMultiSelected(_ cardID: UUID) -> Bool {
+        selectedCardIDs.count > 1 && selectedCardIDs.contains(cardID)
+    }
+
+    func isAncestor(_ cardID: UUID) -> Bool {
+        activeAncestorIDs.contains(cardID) || activeSiblingIDs.contains(cardID)
+    }
+
+    func isDescendant(_ cardID: UUID) -> Bool {
+        activeDescendantIDs.contains(cardID)
+    }
+}
+
 struct ReferenceCardRenderSettings: Equatable {
     let fontSize: CGFloat
     let appearance: String
@@ -505,6 +540,8 @@ final class WriterInteractionRuntime {
     var mainSelectionLastResponderID: ObjectIdentifier? = nil
     var mainSelectionActiveEdge: MainSelectionActiveEdge = .end
     var mainCaretEnsureLastScheduledAt: Date = .distantPast
+    var mainRecentVerticalCaretNavigationCardID: UUID? = nil
+    var mainRecentVerticalCaretNavigationUntil: Date = .distantPast
     var mainProgrammaticCaretSuppressEnsureCardID: UUID? = nil
     var mainProgrammaticCaretExpectedCardID: UUID? = nil
     var mainProgrammaticCaretExpectedLocation: Int = -1
@@ -638,7 +675,7 @@ final class MainCanvasViewState: ObservableObject {
     @Published var focusNavigationTick: Int = 0
     @Published var navigationSettleTick: Int = 0
     @Published var maxLevelCount: Int = 0
-    @Published var surfaceDocumentSizeByViewportKey: [String: CGSize] = [:]
+    @Published var viewportRestoreTick: Int = 0
 
     private var restoreRequestSequence: Int = 0
 
@@ -656,6 +693,41 @@ final class MainCanvasViewState: ObservableObject {
             forceSemantic: forceSemantic,
             reason: reason
         )
+    }
+
+    func publishViewportRestore() {
+        viewportRestoreTick &+= 1
+    }
+}
+
+@MainActor
+final class MainCanvasInteractionViewState: ObservableObject {
+    @Published private(set) var snapshot = MainCanvasInteractionSnapshot()
+
+    func sync(
+        activeCardID: UUID?,
+        editingCardID: UUID?,
+        selectedCardIDs: Set<UUID>,
+        activeAncestorIDs: Set<UUID>,
+        activeDescendantIDs: Set<UUID>,
+        activeSiblingIDs: Set<UUID>
+    ) {
+        var updated = snapshot
+        updated.activeCardID = activeCardID
+        updated.editingCardID = editingCardID
+        updated.selectedCardIDs = selectedCardIDs
+        updated.activeAncestorIDs = activeAncestorIDs
+        updated.activeDescendantIDs = activeDescendantIDs
+        updated.activeSiblingIDs = activeSiblingIDs
+        guard updated != snapshot else { return }
+        snapshot = updated
+    }
+
+    func setAffordancesFrozen(_ isFrozen: Bool) {
+        guard snapshot.affordancesFrozen != isFrozen else { return }
+        var updated = snapshot
+        updated.affordancesFrozen = isFrozen
+        snapshot = updated
     }
 }
 

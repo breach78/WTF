@@ -312,6 +312,14 @@ extension ScenarioWriterView {
         pendingMainClickFocusTargetID = isNewActiveTarget ? card.id : nil
         pendingMainClickHorizontalFocusTargetID = isNewActiveTarget ? card.id : nil
         finishEditing(reason: .transition)
+        guard isNewActiveTarget else { return }
+        performDirectMainCanvasFocusNavigation(
+            to: card.id,
+            animated: focusNavigationAnimationEnabled,
+            recordFocusIntent: true,
+            trigger: "clickFocus",
+            sourceCardID: activeCardID
+        )
     }
 
     private func finalizeMainWorkspaceClickTarget(_ card: SceneCard) {

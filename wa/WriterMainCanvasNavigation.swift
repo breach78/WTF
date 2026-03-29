@@ -48,10 +48,11 @@ extension ScenarioWriterView {
             targetID: idToScroll,
             viewportHeight: viewportHeight
         )
-        let targetHeight = targetLayout.map { $0.targetMaxY - $0.targetMinY }
-            ?? findCard(by: idToScroll).map { resolvedMainCardHeight(for: $0) }
-            ?? 0
-        let prefersTopAnchor = targetHeight > viewportHeight
+        let prefersTopAnchor = resolvedMainColumnFocusPrefersTopAnchor(
+            cards: cards,
+            targetID: idToScroll,
+            viewportHeight: viewportHeight
+        )
         let request = MainColumnFocusRequest(
             targetID: idToScroll,
             prefersTopAnchor: prefersTopAnchor,
@@ -149,7 +150,7 @@ extension ScenarioWriterView {
 
         bounceDebugLog(
             "scrollToFocus reason=\(reason) key=\(requestKey) viewportKey=\(viewportKey) " +
-            "target=\(debugCardToken(findCard(by: idToScroll))) height=\(debugCGFloat(targetHeight)) " +
+            "target=\(debugCardToken(findCard(by: idToScroll))) " +
             "viewport=\(debugCGFloat(viewportHeight)) offset=\(debugCGFloat(currentOffsetY)) " +
             "top=\(prefersTopAnchor) keepVisible=\(keepVisibleOnly) force=\(forceAlignment) edge=\(String(describing: editingRevealEdge)) animated=\(animated) " +
             "\(debugMainColumnEstimatedTargetSummary(targetLayout)) " +
@@ -442,10 +443,7 @@ extension ScenarioWriterView {
             resolvedMainColumnFocusTargetID(in: cards) != nil
         guard containsActiveCard || containsActiveAncestor || containsPreferredDescendantTarget else { return }
 
-        let activeCardNeedsTopReveal = containsActiveCard && {
-            guard let newActiveID, let targetCard = findCard(by: newActiveID) else { return false }
-            return resolvedMainCardHeight(for: targetCard) > viewportHeight
-        }()
+        let activeCardNeedsTopReveal = false
         let editDrivenKeepVisible = containsActiveCard && pendingMainEditingViewportKeepVisibleCardID == newActiveID
         let editingRevealEdge = editDrivenKeepVisible ? pendingMainEditingViewportRevealEdge : nil
         if editDrivenKeepVisible {

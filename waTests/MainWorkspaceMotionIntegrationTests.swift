@@ -3,10 +3,12 @@ import XCTest
 
 @MainActor
 final class MainWorkspaceMotionIntegrationTests: XCTestCase {
-    func testPreemptiveFocusNavigationStartsRootSession() {
+    func testPreemptiveFocusNavigationPerformsDirectNavigation() {
         let targetID = UUID()
-        let coordinator = MainCanvasScrollCoordinator()
         var pendingTargetID: UUID?
+        var performedTargetID: UUID?
+        var performedAnimated = true
+        var performedTrigger: String?
 
         MainWorkspaceMotionEntryPoints.publishPreemptiveFocusNavigationIntent(
             targetID: targetID,
@@ -14,26 +16,16 @@ final class MainWorkspaceMotionIntegrationTests: XCTestCase {
             suppressRepeatAnimation: false,
             trigger: "arrowPreview",
             setPendingPreemptiveTargetID: { pendingTargetID = $0 }
-        ) { kind, scope, targetCardID, expectedActiveCardID, animated, trigger in
-            _ = coordinator.publishIntent(
-                kind: kind,
-                scope: scope,
-                targetCardID: targetCardID,
-                expectedActiveCardID: expectedActiveCardID,
-                animated: animated,
-                trigger: trigger
-            )
+        ) { targetCardID, animated, trigger in
+            performedTargetID = targetCardID
+            performedAnimated = animated
+            performedTrigger = trigger
         } log: { _, _, _ in }
 
         XCTAssertEqual(pendingTargetID, targetID)
-        XCTAssertEqual(
-            coordinator.activeMotionSessionSnapshot()?.goal,
-            .alignToAnchor(cardID: targetID)
-        )
-        XCTAssertEqual(
-            coordinator.consumeLatestIntent(for: "waTests.preemptive")?.trigger,
-            "arrowPreview"
-        )
+        XCTAssertEqual(performedTargetID, targetID)
+        XCTAssertFalse(performedAnimated)
+        XCTAssertEqual(performedTrigger, "arrowPreview")
     }
 
     func testEditingBoundaryHandoffStartsFocusSession() {

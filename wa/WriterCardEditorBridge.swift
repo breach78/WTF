@@ -443,6 +443,7 @@ struct MainWorkspaceEditableTextRenderer: NSViewRepresentable {
         var pendingFocusRetry: DispatchWorkItem?
         var sessionEnded = false
         var focusSettled = false
+        var lastRenderedCardID: UUID?
         private var lastLoggedLayoutBodyBucket: Int?
         private var lastLoggedLayoutFrameBucket: String?
         private var lastReportedMeasuredBodyHeight: CGFloat?
@@ -527,6 +528,9 @@ struct MainWorkspaceEditableTextRenderer: NSViewRepresentable {
         }
 
         func reportLayout(from textView: NSTextView, reason: String) {
+            if reason == "layout" && parent.shouldSkipLayoutMeasurement() {
+                return
+            }
             let measured = sharedLiveTextViewBodyHeight(textView)
             let previousReportedHeight = lastReportedMeasuredBodyHeight
             let shouldReportMeasuredHeight: Bool
@@ -573,6 +577,12 @@ struct MainWorkspaceEditableTextRenderer: NSViewRepresentable {
 
         func handleFocusStateChange(_ isFocused: Bool) {
             parent.onFocusStateChange(isFocused)
+        }
+
+        func beginUpdate(cardID: UUID) -> Bool {
+            let cardDidChange = lastRenderedCardID != cardID
+            lastRenderedCardID = cardID
+            return cardDidChange
         }
 
         func requestFocus(for textView: NSTextView, remainingRetries: Int = 4) {
@@ -622,8 +632,10 @@ struct MainWorkspaceEditableTextRenderer: NSViewRepresentable {
     let lineSpacing: CGFloat
     let appearance: String
     let isFocused: Bool
+    let selectionSeedLocation: Int?
     let onFocusStateChange: (Bool) -> Void
     let onMeasuredBodyHeightChange: (CGFloat?) -> Void
+    let shouldSkipLayoutMeasurement: () -> Bool
     let onCommandBy: (Selector) -> Bool
 
     func makeCoordinator() -> Coordinator {
@@ -706,6 +718,7 @@ struct MainWorkspaceEditableTextRenderer: NSViewRepresentable {
     }
 
     private func updateTextView(_ textView: NSTextView, coordinator: Coordinator) {
+        let cardDidChange = coordinator.beginUpdate(cardID: cardID)
         let signature = Signature(
             textWidthBucket: Int((textWidth * 10).rounded()),
             bodyHeightBucket: Int((bodyHeight * 10).rounded()),
@@ -751,6 +764,7 @@ struct MainWorkspaceEditableTextRenderer: NSViewRepresentable {
         let font = resolveFocusModeTextFont(fontSize)
         let color = resolveFocusModeTextColor(appearance)
         let paragraph = makeFocusModeRenderParagraphStyle(lineSpacing)
+        let seedLocation = selectionSeedLocation.map { min(max(0, $0), (text as NSString).length) }
 
         if textView.string != text {
             let selected = textView.selectedRange()
@@ -768,15 +782,34 @@ struct MainWorkspaceEditableTextRenderer: NSViewRepresentable {
                 )
             }
             let length = (text as NSString).length
-            let clampedLocation = min(selected.location, length)
-            let clampedLength = min(selected.length, max(0, length - clampedLocation))
-            textView.setSelectedRange(NSRange(location: clampedLocation, length: clampedLength))
+            if cardDidChange, let seedLocation {
+                textView.setSelectedRange(NSRange(location: seedLocation, length: 0))
+                coordinator.log(
+                    "appkit-inline-sync-text",
+                    textView,
+                    "newLen=\(length) seededSel=\(seedLocation):0"
+                )
+            } else {
+                let clampedLocation = min(selected.location, length)
+                let clampedLength = min(selected.length, max(0, length - clampedLocation))
+                textView.setSelectedRange(NSRange(location: clampedLocation, length: clampedLength))
+                coordinator.log(
+                    "appkit-inline-sync-text",
+                    textView,
+                    "newLen=\(length) preservedSel=\(clampedLocation):\(clampedLength)"
+                )
+            }
             coordinator.suppressBindingPropagation = false
-            coordinator.log(
-                "appkit-inline-sync-text",
-                textView,
-                "newLen=\(length) preservedSel=\(clampedLocation):\(clampedLength)"
-            )
+        }
+
+        if cardDidChange, let seedLocation {
+            let length = (textView.string as NSString).length
+            let safeLocation = min(seedLocation, length)
+            let selected = textView.selectedRange()
+            if selected.location != safeLocation || selected.length != 0 {
+                textView.setSelectedRange(NSRange(location: safeLocation, length: 0))
+                coordinator.log("appkit-inline-selection-seed", textView, "location=\(safeLocation)")
+            }
         }
 
         if coordinator.lastSignature != signature {

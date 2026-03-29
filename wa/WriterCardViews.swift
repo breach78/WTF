@@ -298,9 +298,7 @@ struct CardItem: View {
     var onMainEditorUnmount: ((UUID) -> Void)? = nil
     var onMainEditorFocusStateChange: ((UUID, Bool) -> Void)? = nil
     var handleEditorCommandBySelector: ((Selector) -> Bool)? = nil
-    @State private var mainEditingMeasuredBodyHeight: CGFloat = 0
-    @State private var mainEditingMeasureWorkItem: DispatchWorkItem? = nil
-    @State private var mainEditingMeasureLastAt: Date = .distantPast
+    var isInteractionAffordanceFrozen: Bool = false
     @State private var isTopInsertZoneHovered: Bool = false
     @State private var isBottomInsertZoneHovered: Bool = false
     @State private var isTrailingInsertZoneHovered: Bool = false
@@ -308,7 +306,7 @@ struct CardItem: View {
     @State private var isBottomInsertZoneDropTargeted: Bool = false
     @State private var isTrailingInsertZoneDropTargeted: Bool = false
     @State private var isBodyDropTargeted: Bool = false
-    @FocusState private var editorFocus: Bool
+    @State private var lastSpatialTapUptime: TimeInterval = -.greatestFiniteMagnitude
     private var fontSize: CGFloat { renderSettings.fontSize }
     private var appearance: String { renderSettings.appearance }
     private var cardBaseColorHex: String { renderSettings.cardBaseColorHex }
@@ -318,14 +316,6 @@ struct CardItem: View {
     private var darkCardActiveColorHex: String { renderSettings.darkCardActiveColorHex }
     private var darkCardRelatedColorHex: String { renderSettings.darkCardRelatedColorHex }
     private var mainCardLineSpacing: CGFloat { renderSettings.lineSpacing }
-    private let mainCardContentPadding: CGFloat = MainEditorLayoutMetrics.mainCardContentPadding
-    private let mainEditorVerticalPadding: CGFloat = 24
-    private let mainEditorLineFragmentPadding: CGFloat = MainEditorLayoutMetrics.mainEditorLineFragmentPadding
-    private let mainEditingMeasureMinInterval: TimeInterval = 0.033
-    private let mainEditingMeasureUpdateThreshold: CGFloat = MainEditorLayoutMetrics.mainEditorHeightUpdateThreshold
-    private var mainEditorHorizontalPadding: CGFloat {
-        MainEditorLayoutMetrics.mainEditorHorizontalPadding
-    }
 
     private var usesDarkPalette: Bool {
         if appearance == "dark" { return true }
@@ -349,35 +339,9 @@ struct CardItem: View {
             || onAISummarizeCurrent != nil
             || onSummarizeChildren != nil
     }
-    private var resolvedCardRGB: (r: Double, g: Double, b: Double) {
-        if forceNamedSnapshotNoteStyle {
-            return resolvedNamedSnapshotNoteRGB()
-        }
-        let base = resolvedBaseRGB()
-        if isMultiSelected {
-            let overlay = usesDarkPalette ? (r: 0.42, g: 0.56, b: 0.78) : (r: 0.70, g: 0.83, b: 0.98)
-            let amount = usesDarkPalette ? 0.58 : 0.62
-            return mix(base: base, overlay: overlay, amount: amount)
-        }
-        if isCandidateVisualCard {
-            return base
-        }
-        let active = resolvedActiveRGB()
-        if isActive {
-            return active
-        }
-        if isDescendant {
-            return resolvedDescendantRGB()
-        }
-        if isAncestor {
-            return resolvedRelatedRGB()
-        }
-        return base
-    }
-
     private var childRightEdgeColor: Color {
         let amount = usesDarkPalette ? 0.34 : 0.24
-        let rgb = mix(base: resolvedCardRGB, overlay: (0, 0, 0), amount: amount)
+        let rgb = mix(base: resolvedBaseRGB(), overlay: (0, 0, 0), amount: amount)
         return Color(red: rgb.r, green: rgb.g, blue: rgb.b)
     }
 
@@ -397,18 +361,30 @@ struct CardItem: View {
         (shouldShowInlineInsertControls && onAddChildCard != nil) ? trailingInsertZoneWidth : 0
     }
 
-    private var baseBackgroundColor: Color {
+    private var contentBackgroundColor: Color {
         if isArchived {
             return appearance == "light" ? Color.gray.opacity(0.25) : Color.gray.opacity(0.35)
         }
-        if isMultiSelected {
-            let base = resolvedBaseRGB()
-            let overlay = usesDarkPalette ? (r: 0.42, g: 0.56, b: 0.78) : (r: 0.70, g: 0.83, b: 0.98)
-            let amount = usesDarkPalette ? 0.58 : 0.62
-            let rgb = mix(base: base, overlay: overlay, amount: amount)
-            return Color(red: rgb.r, green: rgb.g, blue: rgb.b)
-        }
         let rgb = resolvedBaseRGB()
+        return Color(red: rgb.r, green: rgb.g, blue: rgb.b)
+    }
+
+    private var contentBackgroundFingerprint: Int {
+        var hasher = Hasher()
+        hasher.combine(isArchived)
+        hasher.combine(appearance)
+        hasher.combine(forceNamedSnapshotNoteStyle)
+        hasher.combine(forceCustomColorVisibility)
+        hasher.combine(card.isAICandidate)
+        hasher.combine(card.colorHex)
+        return hasher.finalize()
+    }
+
+    private var multiSelectionBackgroundColor: Color {
+        let base = resolvedBaseRGB()
+        let overlay = usesDarkPalette ? (r: 0.42, g: 0.56, b: 0.78) : (r: 0.70, g: 0.83, b: 0.98)
+        let amount = usesDarkPalette ? 0.58 : 0.62
+        let rgb = mix(base: base, overlay: overlay, amount: amount)
         return Color(red: rgb.r, green: rgb.g, blue: rgb.b)
     }
 
@@ -428,7 +404,7 @@ struct CardItem: View {
     }
 
     private var usesFocusFadeTint: Bool {
-        !isArchived && !isMultiSelected && !isCandidateVisualCard
+        !isArchived && !isCandidateVisualCard
     }
 
     private var relatedTintOpacity: Double {
@@ -456,6 +432,7 @@ struct CardItem: View {
     private let horizontalInsertZoneHeight: CGFloat = 27
     private let horizontalInsertZoneWidth: CGFloat = 60
     private let trailingInsertZoneWidth: CGFloat = 30
+    private let plainTapFallbackSuppressionWindow: TimeInterval = 0.25
 
     private func insertZoneHighlightFill(for edge: InlineInsertZoneEdge) -> AnyShapeStyle {
         let strong = usesDarkPalette ? Color.white.opacity(0.32) : Color.black.opacity(0.24)
@@ -489,255 +466,8 @@ struct CardItem: View {
         }
     }
 
-    private var mainEditingTextMeasureWidth: CGFloat {
-        max(1, preferredTextMeasureWidth)
-    }
-
-    private var alignedMainCardDisplayTextWidth: CGFloat? {
-        guard mainEditorSlotCoordinateSpaceName != nil else { return nil }
-        return max(1, preferredTextMeasureWidth - (mainEditorLineFragmentPadding * 2))
-    }
-
     private var mainEditorBodyRenderedExternally: Bool {
         mainEditorManagedExternally || usesExternalMainEditor
-    }
-
-    private var shouldShowMainEditingTransitionShellText: Bool {
-        isEditing && mainEditorManagedExternally && !usesExternalMainEditor
-    }
-
-    @ViewBuilder
-    private var mainCardDisplayText: some View {
-        Text(card.content.isEmpty ? "내용 없음" : card.content)
-            .font(.custom("SansMonoCJKFinalDraft", size: fontSize))
-            .lineSpacing(mainCardLineSpacing)
-            .foregroundStyle(
-                card.content.isEmpty
-                    ? (appearance == "light" ? .black.opacity(0.4) : .white.opacity(0.4))
-                    : (appearance == "light" ? .black : .white)
-            )
-            .frame(width: alignedMainCardDisplayTextWidth, alignment: .leading)
-            .padding(mainCardContentPadding)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .fixedSize(horizontal: false, vertical: true)
-    }
-
-    private var resolvedMainEditingBodyHeight: CGFloat {
-        if mainEditorBodyRenderedExternally {
-            if let externalEditorLiveBodyHeight, externalEditorLiveBodyHeight > 1 {
-                return externalEditorLiveBodyHeight
-            }
-            return measureMainEditorBodyHeight(text: card.content, width: mainEditingTextMeasureWidth)
-        }
-        if mainEditingMeasuredBodyHeight > 1 {
-            return mainEditingMeasuredBodyHeight
-        }
-        return measureMainEditorBodyHeight(text: card.content, width: mainEditingTextMeasureWidth)
-    }
-
-    private var mainEditorTextBinding: Binding<String> {
-        Binding(
-            get: { card.content },
-            set: { newValue in
-                let oldValue = card.content
-                guard oldValue != newValue else { return }
-                card.content = newValue
-                onContentChange?(oldValue, newValue)
-                scheduleMainEditingMeasuredBodyHeightRefresh()
-            }
-        )
-    }
-
-    private func liveMainResponderBodyHeight() -> CGFloat? {
-        guard isEditing else { return nil }
-        guard let textView = NSApp.keyWindow?.firstResponder as? NSTextView else { return nil }
-        guard textView.string == card.content else { return nil }
-        return sharedLiveTextViewBodyHeight(textView)
-    }
-
-    private func measureMainEditorBodyHeight(text: String, width: CGFloat) -> CGFloat {
-        sharedMeasuredTextBodyHeight(
-            text: text,
-            fontSize: CGFloat(fontSize),
-            lineSpacing: mainCardLineSpacing,
-            width: width,
-            lineFragmentPadding: mainEditorLineFragmentPadding,
-            safetyInset: 0
-        )
-    }
-
-    private func refreshMainEditingMeasuredBodyHeight() {
-        guard !mainEditorBodyRenderedExternally else { return }
-        let liveBodyHeight = liveMainResponderBodyHeight()
-        let measured = liveBodyHeight
-            ?? measureMainEditorBodyHeight(text: card.content, width: mainEditingTextMeasureWidth)
-        mainEditingMeasureLastAt = Date()
-        let previous = mainEditingMeasuredBodyHeight
-        if abs(previous - measured) > mainEditingMeasureUpdateThreshold {
-            mainEditingMeasuredBodyHeight = measured
-            mainWorkspacePhase0Log(
-                "inline-editor-row-height",
-                "card=\(mainWorkspacePhase0CardID(card.id)) source=\(liveBodyHeight != nil ? "liveResponder" : "fallbackMeasure") " +
-                "body=\(measured) row=\(measured + (mainEditorVerticalPadding * 2)) previous=\(previous) " +
-                "isEditing=\(isEditing) responder=\(mainWorkspacePhase0ResponderSummary(expectedText: card.content))"
-            )
-        }
-    }
-
-    private func scheduleMainEditingMeasuredBodyHeightRefresh(immediate: Bool = false) {
-        guard !mainEditorBodyRenderedExternally else {
-            mainEditingMeasureWorkItem?.cancel()
-            mainEditingMeasureWorkItem = nil
-            return
-        }
-
-        if immediate {
-            mainEditingMeasureWorkItem?.cancel()
-            mainEditingMeasureWorkItem = nil
-            refreshMainEditingMeasuredBodyHeight()
-            return
-        }
-
-        let now = Date()
-        let elapsed = now.timeIntervalSince(mainEditingMeasureLastAt)
-        let delay = max(0, mainEditingMeasureMinInterval - elapsed)
-        guard delay > 0.001 else {
-            refreshMainEditingMeasuredBodyHeight()
-            return
-        }
-
-        mainEditingMeasureWorkItem?.cancel()
-        let work = DispatchWorkItem {
-            mainEditingMeasureWorkItem = nil
-            refreshMainEditingMeasuredBodyHeight()
-        }
-        mainEditingMeasureWorkItem = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
-    }
-
-    private var shouldReportMainEditorSlotFrame: Bool {
-        mainEditorSlotCoordinateSpaceName != nil
-    }
-
-    private var externalMainEditorPlaceholder: some View {
-        Color.clear
-            .frame(
-                width: MainCanvasLayoutMetrics.textWidth,
-                height: resolvedMainEditingBodyHeight,
-                alignment: .topLeading
-            )
-            .padding(.horizontal, mainEditorHorizontalPadding)
-            .padding(.vertical, mainEditorVerticalPadding)
-    }
-
-    @ViewBuilder
-    private var cardEditorSlotFrameReporter: some View {
-        if shouldReportMainEditorSlotFrame,
-           let coordinateSpaceName = mainEditorSlotCoordinateSpaceName {
-            GeometryReader { geometry in
-                Color.clear.preference(
-                    key: MainColumnEditorSlotPreferenceKey.self,
-                    value: [
-                        card.id: geometry.frame(in: .named(coordinateSpaceName))
-                    ]
-                )
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var cardEditorSlotContent: some View {
-        ZStack(alignment: .topLeading) {
-            if (!isEditing && !mainEditorBodyRenderedExternally) || shouldShowMainEditingTransitionShellText {
-                mainCardDisplayText
-            }
-
-            if mainEditorBodyRenderedExternally || (isEditing && disablesInlineMainEditorFallback) {
-                externalMainEditorPlaceholder
-                    .onAppear {
-                        mainWorkspacePhase0Log(
-                            "inline-editor-placeholder-appear",
-                            "card=\(mainWorkspacePhase0CardID(card.id)) active=\(isActive) selected=\(isSelected) " +
-                            "managedExternally=\(mainEditorManagedExternally) usesExternal=\(usesExternalMainEditor) " +
-                            "fallbackDisabled=\(disablesInlineMainEditorFallback) " +
-                            "body=\(resolvedMainEditingBodyHeight)"
-                        )
-                    }
-                    .onDisappear {
-                        mainWorkspacePhase0Log(
-                            "inline-editor-placeholder-disappear",
-                            "card=\(mainWorkspacePhase0CardID(card.id)) managedExternally=\(mainEditorManagedExternally) " +
-                            "usesExternal=\(usesExternalMainEditor) fallbackDisabled=\(disablesInlineMainEditorFallback) " +
-                            "body=\(resolvedMainEditingBodyHeight)"
-                        )
-                    }
-            } else if isEditing {
-                TextEditor(text: mainEditorTextBinding)
-                    .font(.custom("SansMonoCJKFinalDraft", size: fontSize))
-                    .lineSpacing(mainCardLineSpacing)
-                    .scrollContentBackground(.hidden)
-                    .scrollDisabled(true)
-                    .scrollIndicators(.never)
-                    .frame(
-                        width: MainCanvasLayoutMetrics.textWidth,
-                        height: resolvedMainEditingBodyHeight,
-                        alignment: .topLeading
-                    )
-                    .padding(.horizontal, mainEditorHorizontalPadding)
-                    .padding(.vertical, mainEditorVerticalPadding)
-                    .foregroundStyle(appearance == "light" ? .black : .white)
-                    .focused($editorFocus)
-                    .onAppear {
-                        onMainEditorMount?(card.id)
-                        mainWorkspacePhase0Log(
-                            "inline-editor-appear",
-                            "card=\(mainWorkspacePhase0CardID(card.id)) active=\(isActive) selected=\(isSelected) " +
-                            "measuredBody=\(mainEditingMeasuredBodyHeight) responder=\(mainWorkspacePhase0ResponderSummary(expectedText: card.content))"
-                        )
-                        scheduleMainEditingMeasuredBodyHeightRefresh(immediate: true)
-                        DispatchQueue.main.async {
-                            let alreadyFocusedHere: Bool = {
-                                guard let textView = NSApp.keyWindow?.firstResponder as? NSTextView else { return false }
-                                return textView.string == card.content
-                            }()
-                            if !alreadyFocusedHere {
-                                editorFocus = true
-                            }
-                            mainWorkspacePhase0Log(
-                                "inline-editor-focus-request",
-                                "card=\(mainWorkspacePhase0CardID(card.id)) alreadyFocused=\(alreadyFocusedHere) " +
-                                "editorFocus=\(editorFocus) responder=\(mainWorkspacePhase0ResponderSummary(expectedText: card.content))"
-                            )
-                            scheduleMainEditingMeasuredBodyHeightRefresh(immediate: true)
-                        }
-                    }
-                    .onDisappear {
-                        onMainEditorUnmount?(card.id)
-                        mainWorkspacePhase0Log(
-                            "inline-editor-disappear",
-                            "card=\(mainWorkspacePhase0CardID(card.id)) measuredBody=\(mainEditingMeasuredBodyHeight) " +
-                            "responder=\(mainWorkspacePhase0ResponderSummary(expectedText: card.content))"
-                        )
-                        mainEditingMeasureWorkItem?.cancel()
-                        mainEditingMeasureWorkItem = nil
-                    }
-                    .onChange(of: editorFocus) { _, newValue in
-                        onMainEditorFocusStateChange?(card.id, newValue)
-                        mainWorkspacePhase0Log(
-                            "inline-editor-focus-state",
-                            "card=\(mainWorkspacePhase0CardID(card.id)) focused=\(newValue) " +
-                            "responder=\(mainWorkspacePhase0ResponderSummary(expectedText: card.content))"
-                        )
-                    }
-                    .onChange(of: fontSize) { _, _ in
-                        scheduleMainEditingMeasuredBodyHeightRefresh(immediate: true)
-                    }
-                    .onChange(of: mainCardLineSpacing) { _, _ in
-                        scheduleMainEditingMeasuredBodyHeightRefresh(immediate: true)
-                    }
-            }
-        }
-        .background(cardEditorSlotFrameReporter)
     }
 
     @ViewBuilder
@@ -850,11 +580,13 @@ struct CardItem: View {
     }
 
     @ViewBuilder
-    private var cardShellContent: some View {
+    private var cardInteractionBackdrop: some View {
         ZStack(alignment: .topLeading) {
-            baseBackgroundColor
+            contentBackgroundColor
 
-            if usesFocusFadeTint {
+            if isMultiSelected {
+                multiSelectionBackgroundColor
+            } else if usesFocusFadeTint {
                 relatedBackgroundColor
                     .opacity(relatedTintOpacity)
 
@@ -864,9 +596,8 @@ struct CardItem: View {
                 activeBackgroundColor
                     .opacity(activeTintOpacity)
             }
-
-            cardEditorSlotContent
         }
+        .allowsHitTesting(false)
     }
 
     private func cardChromeApplied<Content: View>(to content: Content) -> some View {
@@ -994,28 +725,41 @@ struct CardItem: View {
                     .allowsHitTesting(false)
             }
         }
-        .onChange(of: isEditing) { _, newValue in
-            mainWorkspacePhase0Log(
-                "card-editing-flag-change",
-                "card=\(mainWorkspacePhase0CardID(card.id)) isEditing=\(newValue) active=\(isActive) " +
-                "measuredBody=\(mainEditingMeasuredBodyHeight) responder=\(mainWorkspacePhase0ResponderSummary(expectedText: card.content))"
-            )
-            if newValue && !mainEditorBodyRenderedExternally {
-                scheduleMainEditingMeasuredBodyHeightRefresh(immediate: true)
-            } else {
-                mainEditingMeasureWorkItem?.cancel()
-                mainEditingMeasureWorkItem = nil
-            }
-        }
-        .onDisappear {
-            mainEditingMeasureWorkItem?.cancel()
-            mainEditingMeasureWorkItem = nil
+        .onChange(of: isInteractionAffordanceFrozen) { _, frozen in
+            guard frozen else { return }
+            isTopInsertZoneHovered = false
+            isBottomInsertZoneHovered = false
+            isTrailingInsertZoneHovered = false
         }
     }
 
     @ViewBuilder
     private var cardSurface: some View {
-        cardChromeApplied(to: cardShellContent)
+        cardChromeApplied(
+            to: ZStack(alignment: .topLeading) {
+                cardInteractionBackdrop
+                CardItemContentLayer(
+                    card: card,
+                    backgroundColor: .clear,
+                    backgroundFingerprint: contentBackgroundFingerprint,
+                    fontSize: fontSize,
+                    lineSpacing: mainCardLineSpacing,
+                    preferredTextMeasureWidth: preferredTextMeasureWidth,
+                    appearance: appearance,
+                    isEditing: isEditing,
+                    mainEditorSlotCoordinateSpaceName: mainEditorSlotCoordinateSpaceName,
+                    mainEditorManagedExternally: mainEditorManagedExternally,
+                    usesExternalMainEditor: usesExternalMainEditor,
+                    disablesInlineMainEditorFallback: disablesInlineMainEditorFallback,
+                    externalEditorLiveBodyHeight: externalEditorLiveBodyHeight,
+                    onContentChange: onContentChange,
+                    onMainEditorMount: onMainEditorMount,
+                    onMainEditorUnmount: onMainEditorUnmount,
+                    onMainEditorFocusStateChange: onMainEditorFocusStateChange
+                )
+                .equatable()
+            }
+        )
     }
 
     var body: some View {
@@ -1024,33 +768,48 @@ struct CardItem: View {
                 cardSurface
             } else {
                 cardSurface
-                    .gesture(
+                    .contentShape(Rectangle())
+                    .simultaneousGesture(
                         SpatialTapGesture()
                             .onEnded { value in
-                                let flags = NSEvent.modifierFlags.intersection(.deviceIndependentFlagsMask)
-                                let isPlainClick =
-                                    !flags.contains(.command) &&
-                                    !flags.contains(.shift) &&
-                                    !flags.contains(.option) &&
-                                    !flags.contains(.control)
-                                let shouldRouteClickToCaret =
-                                    isPlainClick &&
-                                    isActive &&
-                                    isSelected &&
-                                    !isMultiSelected &&
-                                    onSelectAtLocation != nil
-                                if shouldRouteClickToCaret, let onSelectAtLocation {
-                                    onSelectAtLocation(value.location)
-                                } else {
-                                    onSelect()
-                                }
+                                lastSpatialTapUptime = ProcessInfo.processInfo.systemUptime
+                                handleCardTap(at: value.location)
                             }
                     )
+                    .onTapGesture {
+                        guard shouldHandlePlainTapFallback else { return }
+                        handleCardTap()
+                    }
                     .simultaneousGesture(TapGesture(count: 2).onEnded { onDoubleClick() })
             }
         }
         .contextMenu {
             cardContextMenuContent
+        }
+    }
+
+    private var shouldHandlePlainTapFallback: Bool {
+        ProcessInfo.processInfo.systemUptime - lastSpatialTapUptime > plainTapFallbackSuppressionWindow
+    }
+
+    private func handleCardTap(at clickLocation: CGPoint? = nil) {
+        let flags = NSEvent.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        let isPlainClick =
+            !flags.contains(.command) &&
+            !flags.contains(.shift) &&
+            !flags.contains(.option) &&
+            !flags.contains(.control)
+        let shouldRouteClickToCaret =
+            isPlainClick &&
+            isActive &&
+            isSelected &&
+            !isMultiSelected &&
+            clickLocation != nil &&
+            onSelectAtLocation != nil
+        if shouldRouteClickToCaret, let clickLocation, let onSelectAtLocation {
+            onSelectAtLocation(clickLocation)
+        } else {
+            onSelect()
         }
     }
 
@@ -1147,6 +906,12 @@ struct CardItem: View {
         }
         .contentShape(Rectangle())
         .onHover { hovering in
+            guard !isInteractionAffordanceFrozen else {
+                if isHovered.wrappedValue {
+                    isHovered.wrappedValue = false
+                }
+                return
+            }
             withAnimation(.easeInOut(duration: 0.12)) {
                 isHovered.wrappedValue = hovering
             }

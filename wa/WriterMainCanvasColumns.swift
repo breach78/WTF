@@ -470,15 +470,10 @@ extension ScenarioWriterView {
         let mainEditorManagedExternally =
             isMainWorkspaceEditorSurfaceActive &&
             (mainEditorSession.requestedCardID == card.id || mainEditorSession.mountedCardID == card.id)
-        CardItem(
+        MainCanvasCardItem(
             card: card,
+            interactionViewState: mainCanvasInteractionViewState,
             renderSettings: mainCardRenderSettings,
-            isActive: activeCardID == card.id,
-            isSelected: selectedCardIDs.contains(card.id),
-            isMultiSelected: selectedCardIDs.count > 1 && selectedCardIDs.contains(card.id),
-            isArchived: card.isArchived,
-            isAncestor: activeAncestorIDs.contains(card.id) || activeSiblingIDs.contains(card.id),
-            isDescendant: activeDescendantIDs.contains(card.id),
             isEditing: !showFocusMode && acceptsKeyboardInput && shouldTreatCardAsActivelyEditing(card.id),
             preferredTextMeasureWidth: MainCanvasLayoutMetrics.textWidth,
             forceNamedSnapshotNoteStyle: false,

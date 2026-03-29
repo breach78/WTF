@@ -45,6 +45,7 @@ final class MainCanvasNavigationDiagnostics {
         var repeatFocusIntentCount: Int = 0
         var relationSyncStats = DurationStats()
         var layoutResolveStats = DurationStats()
+        var phaseStatsByName: [String: DurationStats] = [:]
         var layoutCacheMissCount: Int = 0
         var verticalNativeScrollCount: Int = 0
         var verticalFallbackScrollCount: Int = 0
@@ -76,8 +77,20 @@ final class MainCanvasNavigationDiagnostics {
         var firstMotionRecorded: Bool
     }
 
+    private struct PendingFocusPipelineMarkers {
+        var requestedCardID: UUID? = nil
+        var committedCardID: UUID? = nil
+        var activeCardCommittedAt: CFTimeInterval? = nil
+        var focusTickCardID: UUID? = nil
+        var focusTickPublishedAt: CFTimeInterval? = nil
+        var navigationIntentTrigger: String? = nil
+        var navigationIntentPublishedAt: CFTimeInterval? = nil
+    }
+
     private let log = OSLog(subsystem: "com.riwoong.wa", category: "MainCanvasNavigation")
+    private let slowPhaseThresholdMilliseconds = 12.0
     private var pendingFocusIntentByOwnerKey: [String: PendingFocusIntent] = [:]
+    private var pendingFocusPipelineMarkersByOwnerKey: [String: PendingFocusPipelineMarkers] = [:]
     private var pendingScrollSignpostIDsByToken: [String: OSSignpostID] = [:]
     private var countersByOwnerKey: [String: OwnerCounters] = [:]
     private var lastSummaryByOwnerKey: [String: String] = [:]
@@ -95,6 +108,9 @@ final class MainCanvasNavigationDiagnostics {
         let environment = ProcessInfo.processInfo.environment
         return environment["WA_UI_TEST_MODE"] == "motion-kernel"
             || environment["WA_MAIN_CANVAS_DIAGNOSTICS"] == "1"
+            || UserDefaults.standard.bool(
+                forKey: MainCanvasPerformanceMonitor.loggingEnabledDefaultsKey
+            )
 #else
         return false
 #endif
@@ -103,6 +119,7 @@ final class MainCanvasNavigationDiagnostics {
     func reset(ownerKey: String, scenarioID: UUID, splitPaneID: Int) {
         guard isEnabled else { return }
         pendingFocusIntentByOwnerKey.removeValue(forKey: ownerKey)
+        pendingFocusPipelineMarkersByOwnerKey.removeValue(forKey: ownerKey)
         countersByOwnerKey[ownerKey] = OwnerCounters()
         lastSummaryByOwnerKey.removeValue(forKey: ownerKey)
         os_signpost(
@@ -183,6 +200,128 @@ final class MainCanvasNavigationDiagnostics {
             intendedCardID: intendedCardID,
             firstMotionRecorded: false
         )
+    }
+
+    func beginActiveCardMutation(ownerKey: String, requestedCardID: UUID?) {
+        guard isEnabled else { return }
+        pendingFocusPipelineMarkersByOwnerKey[ownerKey] = PendingFocusPipelineMarkers(
+            requestedCardID: requestedCardID
+        )
+    }
+
+    func recordPhase(
+        ownerKey: String,
+        phase: String,
+        durationMilliseconds: Double,
+        activeCardID: UUID? = nil,
+        metadata: [String: String] = [:]
+    ) {
+        guard isEnabled else { return }
+        var counters = countersByOwnerKey[ownerKey] ?? OwnerCounters()
+        var stats = counters.phaseStatsByName[phase] ?? DurationStats()
+        stats.record(durationMilliseconds)
+        counters.phaseStatsByName[phase] = stats
+        countersByOwnerKey[ownerKey] = counters
+
+        guard durationMilliseconds >= slowPhaseThresholdMilliseconds else { return }
+        var payload = metadata
+        payload["owner"] = ownerKey
+        payload["phase"] = phase
+        payload["duration_ms"] = String(format: "%.2f", durationMilliseconds)
+        payload["active"] = activeCardID?.uuidString ?? "nil"
+        MainCanvasPerformanceMonitor.appendEvent(
+            event: "focus_phase_slow",
+            payload: payload
+        )
+    }
+
+    func recordActiveCardMutationApplied(
+        ownerKey: String,
+        activeCardID: UUID?,
+        durationMilliseconds: Double
+    ) {
+        guard isEnabled else { return }
+        recordPhase(
+            ownerKey: ownerKey,
+            phase: "changeActiveCard.apply",
+            durationMilliseconds: durationMilliseconds,
+            activeCardID: activeCardID
+        )
+        var markers = pendingFocusPipelineMarkersByOwnerKey[ownerKey] ?? PendingFocusPipelineMarkers()
+        markers.committedCardID = activeCardID
+        markers.activeCardCommittedAt = CACurrentMediaTime()
+        pendingFocusPipelineMarkersByOwnerKey[ownerKey] = markers
+    }
+
+    func recordActiveCardOnChangeStarted(ownerKey: String, activeCardID: UUID?) {
+        guard isEnabled else { return }
+        guard var markers = pendingFocusPipelineMarkersByOwnerKey[ownerKey],
+              markers.committedCardID == nil || markers.committedCardID == activeCardID,
+              let committedAt = markers.activeCardCommittedAt else {
+            return
+        }
+        recordPhase(
+            ownerKey: ownerKey,
+            phase: "activeCard.onChangeLag",
+            durationMilliseconds: elapsedMilliseconds(since: committedAt),
+            activeCardID: activeCardID,
+            metadata: [
+                "requested": markers.requestedCardID?.uuidString ?? "nil"
+            ]
+        )
+        markers.activeCardCommittedAt = nil
+        pendingFocusPipelineMarkersByOwnerKey[ownerKey] = markers
+    }
+
+    func recordFocusTickPublished(ownerKey: String, activeCardID: UUID?) {
+        guard isEnabled else { return }
+        var markers = pendingFocusPipelineMarkersByOwnerKey[ownerKey] ?? PendingFocusPipelineMarkers()
+        markers.focusTickCardID = activeCardID
+        markers.focusTickPublishedAt = CACurrentMediaTime()
+        pendingFocusPipelineMarkersByOwnerKey[ownerKey] = markers
+    }
+
+    func recordFocusTickDelivered(ownerKey: String, activeCardID: UUID?) {
+        guard isEnabled else { return }
+        guard var markers = pendingFocusPipelineMarkersByOwnerKey[ownerKey],
+              markers.focusTickCardID == nil || markers.focusTickCardID == activeCardID,
+              let publishedAt = markers.focusTickPublishedAt else {
+            return
+        }
+        recordPhase(
+            ownerKey: ownerKey,
+            phase: "focusTick.dispatchLag",
+            durationMilliseconds: elapsedMilliseconds(since: publishedAt),
+            activeCardID: activeCardID
+        )
+        markers.focusTickPublishedAt = nil
+        pendingFocusPipelineMarkersByOwnerKey[ownerKey] = markers
+    }
+
+    func recordNavigationIntentPublished(ownerKey: String, trigger: String) {
+        guard isEnabled else { return }
+        var markers = pendingFocusPipelineMarkersByOwnerKey[ownerKey] ?? PendingFocusPipelineMarkers()
+        markers.navigationIntentTrigger = trigger
+        markers.navigationIntentPublishedAt = CACurrentMediaTime()
+        pendingFocusPipelineMarkersByOwnerKey[ownerKey] = markers
+    }
+
+    func recordNavigationIntentDelivered(ownerKey: String) {
+        guard isEnabled else { return }
+        guard var markers = pendingFocusPipelineMarkersByOwnerKey[ownerKey],
+              let publishedAt = markers.navigationIntentPublishedAt else {
+            return
+        }
+        recordPhase(
+            ownerKey: ownerKey,
+            phase: "navigationIntent.dispatchLag",
+            durationMilliseconds: elapsedMilliseconds(since: publishedAt),
+            metadata: [
+                "trigger": markers.navigationIntentTrigger ?? "unknown"
+            ]
+        )
+        markers.navigationIntentPublishedAt = nil
+        pendingFocusPipelineMarkersByOwnerKey[ownerKey] = markers
     }
 
     func recordRelationSync(
@@ -468,6 +607,18 @@ final class MainCanvasNavigationDiagnostics {
                 return "\(trigger)=\(String(format: "%.2f", stats.averageMilliseconds))ms/\(stats.count)"
             }
             .joined(separator: ",")
+        let phaseSummary = counters.phaseStatsByName
+            .sorted { lhs, rhs in
+                if lhs.value.maxMilliseconds != rhs.value.maxMilliseconds {
+                    return lhs.value.maxMilliseconds > rhs.value.maxMilliseconds
+                }
+                return lhs.key < rhs.key
+            }
+            .prefix(6)
+            .map { phase, stats in
+                "\(phase)=\(String(format: "%.2f", stats.averageMilliseconds))/\(String(format: "%.2f", stats.maxMilliseconds))/\(stats.count)"
+            }
+            .joined(separator: ",")
 
         return
             "summary owner=\(ownerKey) reason=\(reason) " +
@@ -488,6 +639,7 @@ final class MainCanvasNavigationDiagnostics {
             "second_correction=\(counters.secondCorrectionCount) " +
             "first_motion_ms=\(String(format: "%.2f", counters.focusToFirstMotionStats.averageMilliseconds)) " +
             "first_motion_by_trigger=[\(triggerSummary)] " +
+            "phase_summary=[\(phaseSummary)] " +
             "horizontal-mode=\(horizontalModeLabel(horizontalMode))"
     }
 
