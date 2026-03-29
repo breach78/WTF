@@ -1210,10 +1210,11 @@ extension ScenarioWriterView {
     }
 
     func preferredMainNavigationChild(for card: SceneCard, matching category: String?) -> SceneCard? {
-        if let matched = preferredChild(for: card, matching: category) {
-            return matched
-        }
-        return preferredChild(for: card)
+        MainWorkspaceNavigationModel.preferredNavigationChild(
+            for: card,
+            matching: category,
+            activeHistory: mainWorkspaceActiveHistory
+        )
     }
 
     func resolvedMainUnfilteredLevel(at levelIndex: Int) -> [SceneCard]? {
@@ -1233,17 +1234,14 @@ extension ScenarioWriterView {
         levelIndex: Int,
         step: Int
     ) -> SceneCard? {
-        guard levelIndex >= 2 else { return nil }
-        guard let level = resolvedMainBoundaryNavigableLevel(at: levelIndex),
-              let index = level.firstIndex(where: { $0.id == card.id }) else {
-            return nil
-        }
-
-        let targetIndex = index + step
-        guard level.indices.contains(targetIndex) else { return nil }
-        let target = level[targetIndex]
-        guard target.category != card.category else { return nil }
-        return target
+        let levels = resolvedLevelsWithParents().map(\.cards)
+        let boundaryNavigableLevels = resolvedMainWorkspaceBoundaryNavigableLevels(for: levels)
+        return MainWorkspaceNavigationModel.crossCategoryBoundaryTarget(
+            for: card,
+            levelIndex: levelIndex,
+            step: step,
+            boundaryNavigableLevels: boundaryNavigableLevels
+        )
     }
 
     func resolvedMainSelectionLevel(
@@ -1306,64 +1304,13 @@ extension ScenarioWriterView {
         around index: Int,
         matching category: String?
     ) -> SceneCard? {
-        guard level.indices.contains(index) else { return nil }
-        guard level.count > 1 else { return nil }
-
-        let rankedLevel = level.enumerated().filter { _, item in
-            category == nil || item.category == category
-        }
-        guard let activeRank = rankedLevel.firstIndex(where: { entry in
-            entry.offset == index
-        }) else {
-            return nil
-        }
-
-        let rankedNextLevel = nextLevel.filter { card in
-            category == nil || card.category == category
-        }
-        var candidates: [(siblingRank: Int, child: SceneCard, nextRank: Int)] = []
-        for (rank, entry) in rankedLevel.enumerated() {
-            if entry.offset == index {
-                continue
-            }
-
-            guard let preferred = preferredMainNavigationChild(for: entry.element, matching: category),
-                  let nextRank = rankedNextLevel.firstIndex(where: { $0.id == preferred.id }) else {
-                continue
-            }
-            candidates.append((rank, preferred, nextRank))
-        }
-
-        guard !candidates.isEmpty else { return nil }
-        let nearestParentDistance = candidates
-            .map { abs($0.siblingRank - activeRank) }
-            .min()
-            ?? Int.max
-
-        let nearestParents = candidates.filter {
-            abs($0.siblingRank - activeRank) == nearestParentDistance
-        }
-        guard !nearestParents.isEmpty else { return nil }
-
-        let chosenParent = nearestParents.min { lhs, rhs in
-            let lhsBias = lhs.siblingRank > activeRank ? 0 : 1
-            let rhsBias = rhs.siblingRank > activeRank ? 0 : 1
-            if lhsBias != rhsBias {
-                return lhsBias < rhsBias
-            }
-
-            if lhs.siblingRank != rhs.siblingRank {
-                return lhs.siblingRank < rhs.siblingRank
-            }
-
-            if lhs.nextRank != rhs.nextRank {
-                return lhs.nextRank < rhs.nextRank
-            }
-
-            return lhs.child.orderIndex < rhs.child.orderIndex
-        }
-
-        return chosenParent?.child
+        MainWorkspaceNavigationModel.nearestLevelChildTarget(
+            in: level,
+            nextLevel: nextLevel,
+            around: index,
+            matching: category,
+            activeHistory: mainWorkspaceActiveHistory
+        )
     }
 
     func nearestLevelChildTarget(in level: [SceneCard], around index: Int) -> SceneCard? {
@@ -1395,36 +1342,86 @@ extension ScenarioWriterView {
         currentIndex: Int,
         allowDoublePressFallback: Bool
     ) -> MainRightResolution {
-        if let child = preferredMainNavigationChild(for: card, matching: card.category) {
+        let target = MainWorkspaceNavigationModel.resolve(
+            MainWorkspaceNavigationModel.Input(
+                direction: .right,
+                activeCardID: card.id,
+                rootCards: scenario.rootCards,
+                levels: [currentLevel, nextLevel],
+                boundaryNavigableLevels: [currentLevel, nextLevel],
+                activeHistory: mainWorkspaceActiveHistory,
+                allowChildlessRightFallback: allowDoublePressFallback,
+                isChildlessRightFallbackArmed: isMainNoChildRightArmed(for: card.id)
+            )
+        )
+
+        switch target {
+        case .decision(let decision):
             clearMainNoChildRightArm()
-            return .target(child)
-        }
-        guard allowDoublePressFallback else {
+            return .target(decision.targetCard)
+        case .armed:
+            armMainNoChildRight(for: card.id)
+            return .armed
+        case .unavailable:
             clearMainNoChildRightArm()
             return .unavailable
         }
-        if isMainNoChildRightArmed(for: card.id) {
-            clearMainNoChildRightArm()
-            if let target = nearestLevelChildTarget(
-                in: currentLevel,
-                nextLevel: nextLevel,
-                around: currentIndex,
-                matching: card.category
-            ) {
-                return .target(target)
-            }
-            if let target = nearestLevelChildTarget(
-                in: currentLevel,
-                nextLevel: nextLevel,
-                around: currentIndex,
-                matching: nil
-            ) {
-                return .target(target)
-            }
-            return .unavailable
+    }
+
+    func resolvedMainWorkspaceBoundaryNavigableLevels(for levels: [[SceneCard]]) -> [[SceneCard]] {
+        levels.enumerated().map { index, cards in
+            resolvedMainBoundaryNavigableLevel(at: index) ?? cards
         }
-        armMainNoChildRight(for: card.id)
-        return .armed
+    }
+
+    func resolveMainWorkspaceNavigationResult(
+        direction: MainArrowDirection,
+        allowChildlessRightFallback: Bool
+    ) -> MainWorkspaceNavigationModel.Result {
+        let levels = resolvedLevelsWithParents().map(\.cards)
+        let boundaryNavigableLevels = resolvedMainWorkspaceBoundaryNavigableLevels(for: levels)
+        return MainWorkspaceNavigationModel.resolve(
+            MainWorkspaceNavigationModel.Input(
+                direction: direction,
+                activeCardID: activeCardID,
+                rootCards: scenario.rootCards,
+                levels: levels,
+                boundaryNavigableLevels: boundaryNavigableLevels,
+                activeHistory: mainWorkspaceActiveHistory,
+                allowChildlessRightFallback: allowChildlessRightFallback,
+                isChildlessRightFallbackArmed: activeCardID.map { isMainNoChildRightArmed(for: $0) } ?? false
+            )
+        )
+    }
+
+    func applyMainWorkspaceRightFallbackState(
+        direction: MainArrowDirection,
+        result: MainWorkspaceNavigationModel.Result,
+        activeCardID: UUID?
+    ) {
+        guard direction == .right else { return }
+
+        switch result {
+        case .armed:
+            guard let activeCardID else { return }
+            armMainNoChildRight(for: activeCardID)
+        case .decision, .unavailable:
+            clearMainNoChildRightArm()
+        }
+    }
+
+    func finalizeMainArrowNavigationSelection(
+        targetID: UUID,
+        sourceCardID: UUID?,
+        isShiftPressed: Bool,
+        seedRangeAnchorWhenNoActive: Bool
+    ) {
+        selectedCardIDs = [targetID]
+        if sourceCardID == nil && isShiftPressed && seedRangeAnchorWhenNoActive {
+            keyboardRangeSelectionAnchorCardID = targetID
+        } else {
+            clearKeyboardRangeSelectionAnchor()
+        }
     }
 
     @discardableResult
@@ -1435,199 +1432,172 @@ extension ScenarioWriterView {
         consumeRightArrowWhenUnavailable: Bool,
         seedRangeAnchorWhenNoActive: Bool
     ) -> Bool {
-        guard let id = activeCardID else {
-            if let first = scenario.rootCards.first {
-                clearMainBoundaryFeedbackGate()
-                publishPreemptiveMainColumnFocusNavigationIntent(
-                    for: first.id,
-                    trigger: "arrowPreview.initial"
-                )
-                changeActiveCard(to: first, deferToMainAsync: false)
-                selectedCardIDs = [first.id]
-                if seedRangeAnchorWhenNoActive && isShiftPressed {
-                    keyboardRangeSelectionAnchorCardID = first.id
-                } else {
-                    clearKeyboardRangeSelectionAnchor()
-                }
-                return true
-            }
-            return false
-        }
+        let result = resolveMainWorkspaceNavigationResult(
+            direction: direction,
+            allowChildlessRightFallback: direction == .right && !isRepeat
+        )
+        applyMainWorkspaceRightFallbackState(
+            direction: direction,
+            result: result,
+            activeCardID: activeCardID
+        )
 
-        let levels = resolvedLevelsWithParents().map(\.cards)
-        guard let location = displayedMainCardLocationByID(id, in: levels) else { return false }
-        let levelIndex = location.level
-        let cardIndex = location.index
-        guard levels.indices.contains(levelIndex),
-              levels[levelIndex].indices.contains(cardIndex) else {
-            return false
-        }
-
-        let currentLevel = levels[levelIndex]
-        let nextLevel = (levelIndex + 1 < levels.count) ? levels[levelIndex + 1] : []
-        let card = currentLevel[cardIndex]
-        if !isShiftPressed && selectedCardIDs.count > 1 {
-            selectedCardIDs = [card.id]
-        }
-
-        switch direction {
-        case .up:
-            clearMainNoChildRightArm()
-            let isRapidBurst = registerMainVerticalArrowPress(for: 126)
-            let target: SceneCard
-            if cardIndex > 0 {
-                target = currentLevel[cardIndex - 1]
-            } else if let boundaryTarget = mainCrossCategoryBoundaryTarget(
-                for: card,
-                levelIndex: levelIndex,
-                step: -1
-            ) {
-                target = boundaryTarget
-            } else {
-                return false
-            }
-            if shouldSuppressCrossCategoryVerticalTransition(
-                from: card,
-                to: target,
-                levelIndex: levelIndex,
-                keyCode: 126,
-                isRepeat: isRepeat,
-                isRapidBurst: isRapidBurst
-            ) {
-                return true
-            }
-            clearMainBoundaryFeedbackGate()
-            publishPreemptiveMainColumnFocusNavigationIntent(
-                for: target.id,
-                trigger: "arrowPreview.up"
+        switch result {
+        case .armed:
+            mainWorkspacePhase0Log(
+                "navigation-model-decision",
+                "direction=\(String(describing: direction)) source=\(mainWorkspacePhase0CardID(activeCardID)) result=armed"
             )
-            changeActiveCard(to: target, deferToMainAsync: false)
-            if isShiftPressed {
-                updateKeyboardRangeSelection(
-                    from: card,
-                    to: target,
-                    in: resolvedMainSelectionLevel(
-                        for: card,
-                        target: target,
-                        levelIndex: levelIndex,
-                        fallback: currentLevel
-                    )
-                )
-            } else {
-                selectedCardIDs = [target.id]
-                clearKeyboardRangeSelectionAnchor()
-            }
-            return true
+            return consumeRightArrowWhenUnavailable
 
-        case .down:
-            clearMainNoChildRightArm()
-            let isRapidBurst = registerMainVerticalArrowPress(for: 125)
-            if cardIndex < currentLevel.count - 1 {
-                let target = currentLevel[cardIndex + 1]
-                if shouldSuppressCrossCategoryVerticalTransition(
-                    from: card,
-                    to: target,
-                    levelIndex: levelIndex,
-                    keyCode: 125,
-                    isRepeat: isRepeat,
-                    isRapidBurst: isRapidBurst
-                ) {
+        case .unavailable:
+            mainWorkspacePhase0Log(
+                "navigation-model-decision",
+                "direction=\(String(describing: direction)) source=\(mainWorkspacePhase0CardID(activeCardID)) result=unavailable"
+            )
+            return false
+
+        case .decision(let decision):
+            let target = decision.targetCard
+            mainWorkspacePhase0Log(
+                "navigation-model-decision",
+                "direction=\(String(describing: direction)) source=\(mainWorkspacePhase0CardID(decision.sourceCardID)) " +
+                "target=\(mainWorkspacePhase0CardID(target.id)) historyCount=\(decision.updatedActiveHistory.count)"
+            )
+
+            if !isShiftPressed && selectedCardIDs.count > 1, let sourceCardID = decision.sourceCardID {
+                selectedCardIDs = [sourceCardID]
+            }
+
+            let levels = resolvedLevelsWithParents().map(\.cards)
+            let sourceCard: SceneCard? = decision.sourceCardID.flatMap(findCard(by:))
+            let location = decision.sourceCardID.flatMap { displayedMainCardLocationByID($0, in: levels) }
+            let currentLevel = location.map { levels[$0.level] }
+            let levelIndex = location?.level
+
+            switch direction {
+            case .up:
+                clearMainNoChildRightArm()
+                if let sourceCard,
+                   let levelIndex,
+                   let currentLevel {
+                    let isRapidBurst = registerMainVerticalArrowPress(for: 126)
+                    if shouldSuppressCrossCategoryVerticalTransition(
+                        from: sourceCard,
+                        to: target,
+                        levelIndex: levelIndex,
+                        keyCode: 126,
+                        isRepeat: isRepeat,
+                        isRapidBurst: isRapidBurst
+                    ) {
+                        return true
+                    }
+                    clearMainBoundaryFeedbackGate()
+                    changeActiveCard(to: target, deferToMainAsync: false)
+                    if isShiftPressed {
+                        updateKeyboardRangeSelection(
+                            from: sourceCard,
+                            to: target,
+                            in: resolvedMainSelectionLevel(
+                                for: sourceCard,
+                                target: target,
+                                levelIndex: levelIndex,
+                                fallback: currentLevel
+                            )
+                        )
+                    } else {
+                        finalizeMainArrowNavigationSelection(
+                            targetID: target.id,
+                            sourceCardID: decision.sourceCardID,
+                            isShiftPressed: isShiftPressed,
+                            seedRangeAnchorWhenNoActive: seedRangeAnchorWhenNoActive
+                        )
+                    }
                     return true
                 }
-                clearMainBoundaryFeedbackGate()
-                publishPreemptiveMainColumnFocusNavigationIntent(
-                    for: target.id,
-                    trigger: "arrowPreview.down"
-                )
-                changeActiveCard(to: target, deferToMainAsync: false)
-                if isShiftPressed {
-                    updateKeyboardRangeSelection(from: card, to: target, in: currentLevel)
-                } else {
-                    selectedCardIDs = [target.id]
-                    clearKeyboardRangeSelectionAnchor()
-                }
-                return true
-            }
-            if requestMainBottomRevealIfNeeded(currentLevel: currentLevel, currentIndex: cardIndex, card: card) {
-                clearMainBoundaryFeedbackGate()
-                return true
-            }
-            guard let target = mainCrossCategoryBoundaryTarget(
-                for: card,
-                levelIndex: levelIndex,
-                step: 1
-            ) else {
-                return false
-            }
-            if shouldSuppressCrossCategoryVerticalTransition(
-                from: card,
-                to: target,
-                levelIndex: levelIndex,
-                keyCode: 125,
-                isRepeat: isRepeat,
-                isRapidBurst: isRapidBurst
-            ) {
-                return true
-            }
-            clearMainBoundaryFeedbackGate()
-            publishPreemptiveMainColumnFocusNavigationIntent(
-                for: target.id,
-                trigger: "arrowPreview.downBoundary"
-            )
-            changeActiveCard(to: target, deferToMainAsync: false)
-            if isShiftPressed {
-                updateKeyboardRangeSelection(
-                    from: card,
-                    to: target,
-                    in: resolvedMainSelectionLevel(
-                        for: card,
-                        target: target,
+
+            case .down:
+                if let sourceCard,
+                   let levelIndex,
+                   let currentLevel {
+                    clearMainNoChildRightArm()
+                    let isRapidBurst = registerMainVerticalArrowPress(for: 125)
+                    let sourceIndex = location?.index ?? 0
+                    if sourceIndex == currentLevel.count - 1,
+                       requestMainBottomRevealIfNeeded(
+                           currentLevel: currentLevel,
+                           currentIndex: sourceIndex,
+                           card: sourceCard
+                       ) {
+                        clearMainBoundaryFeedbackGate()
+                        return true
+                    }
+                    if shouldSuppressCrossCategoryVerticalTransition(
+                        from: sourceCard,
+                        to: target,
                         levelIndex: levelIndex,
-                        fallback: currentLevel
-                    )
-                )
-            } else {
-                selectedCardIDs = [target.id]
-                clearKeyboardRangeSelectionAnchor()
-            }
-            return true
+                        keyCode: 125,
+                        isRepeat: isRepeat,
+                        isRapidBurst: isRapidBurst
+                    ) {
+                        return true
+                    }
+                    clearMainBoundaryFeedbackGate()
+                    changeActiveCard(to: target, deferToMainAsync: false)
+                    if isShiftPressed {
+                        updateKeyboardRangeSelection(
+                            from: sourceCard,
+                            to: target,
+                            in: resolvedMainSelectionLevel(
+                                for: sourceCard,
+                                target: target,
+                                levelIndex: levelIndex,
+                                fallback: currentLevel
+                            )
+                        )
+                    } else {
+                        finalizeMainArrowNavigationSelection(
+                            targetID: target.id,
+                            sourceCardID: decision.sourceCardID,
+                            isShiftPressed: isShiftPressed,
+                            seedRangeAnchorWhenNoActive: seedRangeAnchorWhenNoActive
+                        )
+                    }
+                    return true
+                }
 
-        case .right:
-            let allowDoublePressFallback = !isRepeat
-            let result = resolvedMainRightTarget(
-                for: card,
-                currentLevel: currentLevel,
-                nextLevel: nextLevel,
-                currentIndex: cardIndex,
-                allowDoublePressFallback: allowDoublePressFallback
-            )
-            if case .target(let target) = result {
+            case .right:
                 clearMainBoundaryFeedbackGate()
-                publishPreemptiveMainColumnFocusNavigationIntent(
-                    for: target.id,
-                    trigger: "arrowPreview.right"
-                )
                 changeActiveCard(to: target, deferToMainAsync: false)
-                selectedCardIDs = [target.id]
-                clearKeyboardRangeSelectionAnchor()
+                finalizeMainArrowNavigationSelection(
+                    targetID: target.id,
+                    sourceCardID: decision.sourceCardID,
+                    isShiftPressed: isShiftPressed,
+                    seedRangeAnchorWhenNoActive: seedRangeAnchorWhenNoActive
+                )
                 return true
-            }
-            if consumeRightArrowWhenUnavailable {
-                return true
-            }
-            return false
 
-        case .left:
-            clearMainNoChildRightArm()
-            guard let parent = card.parent else { return false }
+            case .left:
+                clearMainNoChildRightArm()
+                clearMainBoundaryFeedbackGate()
+                changeActiveCard(to: target, deferToMainAsync: false)
+                finalizeMainArrowNavigationSelection(
+                    targetID: target.id,
+                    sourceCardID: decision.sourceCardID,
+                    isShiftPressed: isShiftPressed,
+                    seedRangeAnchorWhenNoActive: seedRangeAnchorWhenNoActive
+                )
+                return true
+            }
+
             clearMainBoundaryFeedbackGate()
-            publishPreemptiveMainColumnFocusNavigationIntent(
-                for: parent.id,
-                trigger: "arrowPreview.left"
+            changeActiveCard(to: target, deferToMainAsync: false)
+            finalizeMainArrowNavigationSelection(
+                targetID: target.id,
+                sourceCardID: decision.sourceCardID,
+                isShiftPressed: isShiftPressed,
+                seedRangeAnchorWhenNoActive: seedRangeAnchorWhenNoActive
             )
-            changeActiveCard(to: parent, deferToMainAsync: false)
-            selectedCardIDs = [parent.id]
-            clearKeyboardRangeSelectionAnchor()
             return true
         }
     }

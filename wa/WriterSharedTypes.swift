@@ -224,6 +224,339 @@ struct LevelData {
     let parent: SceneCard?
 }
 
+struct MainWorkspaceNavigationDecision {
+    let direction: ScenarioWriterView.MainArrowDirection
+    let sourceCardID: UUID?
+    let targetCard: SceneCard
+    let updatedActiveHistory: [UUID]
+}
+
+struct MainWorkspaceNavigationModel {
+    static let activeHistoryLimit = 40
+
+    struct Input {
+        let direction: ScenarioWriterView.MainArrowDirection
+        let activeCardID: UUID?
+        let rootCards: [SceneCard]
+        let levels: [[SceneCard]]
+        let boundaryNavigableLevels: [[SceneCard]]
+        let activeHistory: [UUID]
+        let allowChildlessRightFallback: Bool
+        let isChildlessRightFallbackArmed: Bool
+    }
+
+    enum Result {
+        case decision(MainWorkspaceNavigationDecision)
+        case armed
+        case unavailable
+    }
+
+    static func resolve(_ input: Input) -> Result {
+        guard let activeCardID = input.activeCardID else {
+            guard let firstRoot = input.rootCards.first else { return .unavailable }
+            return .decision(
+                MainWorkspaceNavigationDecision(
+                    direction: input.direction,
+                    sourceCardID: nil,
+                    targetCard: firstRoot,
+                    updatedActiveHistory: updatedActiveHistory(
+                        input.activeHistory,
+                        nextActiveID: firstRoot.id
+                    )
+                )
+            )
+        }
+
+        guard let location = location(of: activeCardID, in: input.levels) else {
+            return .unavailable
+        }
+        let levelIndex = location.level
+        let cardIndex = location.index
+        guard input.levels.indices.contains(levelIndex),
+              input.levels[levelIndex].indices.contains(cardIndex) else {
+            return .unavailable
+        }
+
+        let currentLevel = input.levels[levelIndex]
+        let card = currentLevel[cardIndex]
+        let nextLevel = (levelIndex + 1 < input.levels.count) ? input.levels[levelIndex + 1] : []
+
+        switch input.direction {
+        case .up:
+            if cardIndex > 0 {
+                return decision(
+                    direction: input.direction,
+                    sourceCardID: activeCardID,
+                    targetCard: currentLevel[cardIndex - 1],
+                    activeHistory: input.activeHistory
+                )
+            }
+            if let target = crossCategoryBoundaryTarget(
+                for: card,
+                levelIndex: levelIndex,
+                step: -1,
+                boundaryNavigableLevels: input.boundaryNavigableLevels
+            ) {
+                return decision(
+                    direction: input.direction,
+                    sourceCardID: activeCardID,
+                    targetCard: target,
+                    activeHistory: input.activeHistory
+                )
+            }
+            return .unavailable
+
+        case .down:
+            if cardIndex < currentLevel.count - 1 {
+                return decision(
+                    direction: input.direction,
+                    sourceCardID: activeCardID,
+                    targetCard: currentLevel[cardIndex + 1],
+                    activeHistory: input.activeHistory
+                )
+            }
+            if let target = crossCategoryBoundaryTarget(
+                for: card,
+                levelIndex: levelIndex,
+                step: 1,
+                boundaryNavigableLevels: input.boundaryNavigableLevels
+            ) {
+                return decision(
+                    direction: input.direction,
+                    sourceCardID: activeCardID,
+                    targetCard: target,
+                    activeHistory: input.activeHistory
+                )
+            }
+            return .unavailable
+
+        case .left:
+            guard let parent = card.parent else { return .unavailable }
+            return decision(
+                direction: input.direction,
+                sourceCardID: activeCardID,
+                targetCard: parent,
+                activeHistory: input.activeHistory
+            )
+
+        case .right:
+            if let child = preferredNavigationChild(
+                for: card,
+                matching: card.category,
+                activeHistory: input.activeHistory
+            ) {
+                return decision(
+                    direction: input.direction,
+                    sourceCardID: activeCardID,
+                    targetCard: child,
+                    activeHistory: input.activeHistory
+                )
+            }
+            guard input.allowChildlessRightFallback else { return .unavailable }
+            guard input.isChildlessRightFallbackArmed else { return .armed }
+            if let target = nearestLevelChildTarget(
+                in: currentLevel,
+                nextLevel: nextLevel,
+                around: cardIndex,
+                matching: card.category,
+                activeHistory: input.activeHistory
+            ) ?? nearestLevelChildTarget(
+                in: currentLevel,
+                nextLevel: nextLevel,
+                around: cardIndex,
+                matching: nil,
+                activeHistory: input.activeHistory
+            ) {
+                return decision(
+                    direction: input.direction,
+                    sourceCardID: activeCardID,
+                    targetCard: target,
+                    activeHistory: input.activeHistory
+                )
+            }
+            return .unavailable
+        }
+    }
+
+    static func preferredNavigationChild(
+        for card: SceneCard,
+        matching category: String?,
+        activeHistory: [UUID]
+    ) -> SceneCard? {
+        let children = card.sortedChildren
+        guard !children.isEmpty else { return nil }
+
+        if let category {
+            if let historyMatch = firstHistoryChild(
+                in: children,
+                activeHistory: activeHistory,
+                matching: category
+            ) {
+                return historyMatch
+            }
+            if let rememberedID = card.lastSelectedChildID,
+               let remembered = children.first(where: { $0.id == rememberedID && $0.category == category }) {
+                return remembered
+            }
+            return children.first(where: { $0.category == category })
+        }
+
+        if let historyMatch = firstHistoryChild(
+            in: children,
+            activeHistory: activeHistory,
+            matching: nil
+        ) {
+            return historyMatch
+        }
+        if let rememberedID = card.lastSelectedChildID,
+           let remembered = children.first(where: { $0.id == rememberedID }) {
+            return remembered
+        }
+        return children.first
+    }
+
+    static func nearestLevelChildTarget(
+        in level: [SceneCard],
+        nextLevel: [SceneCard],
+        around index: Int,
+        matching category: String?,
+        activeHistory: [UUID]
+    ) -> SceneCard? {
+        guard level.indices.contains(index) else { return nil }
+        guard level.count > 1 else { return nil }
+
+        let rankedLevel = level.enumerated().filter { _, item in
+            category == nil || item.category == category
+        }
+        guard let activeRank = rankedLevel.firstIndex(where: { entry in
+            entry.offset == index
+        }) else {
+            return nil
+        }
+
+        let rankedNextLevel = nextLevel.filter { card in
+            category == nil || card.category == category
+        }
+        var candidates: [(siblingRank: Int, child: SceneCard, nextRank: Int)] = []
+        for (rank, entry) in rankedLevel.enumerated() {
+            if entry.offset == index {
+                continue
+            }
+
+            guard let preferred = preferredNavigationChild(
+                for: entry.element,
+                matching: category,
+                activeHistory: activeHistory
+            ),
+            let nextRank = rankedNextLevel.firstIndex(where: { $0.id == preferred.id }) else {
+                continue
+            }
+            candidates.append((rank, preferred, nextRank))
+        }
+
+        guard !candidates.isEmpty else { return nil }
+        let nearestParentDistance = candidates
+            .map { abs($0.siblingRank - activeRank) }
+            .min()
+            ?? Int.max
+
+        let nearestParents = candidates.filter {
+            abs($0.siblingRank - activeRank) == nearestParentDistance
+        }
+        guard !nearestParents.isEmpty else { return nil }
+
+        let chosenParent = nearestParents.min { lhs, rhs in
+            let lhsBias = lhs.siblingRank > activeRank ? 0 : 1
+            let rhsBias = rhs.siblingRank > activeRank ? 0 : 1
+            if lhsBias != rhsBias {
+                return lhsBias < rhsBias
+            }
+
+            if lhs.siblingRank != rhs.siblingRank {
+                return lhs.siblingRank < rhs.siblingRank
+            }
+
+            if lhs.nextRank != rhs.nextRank {
+                return lhs.nextRank < rhs.nextRank
+            }
+
+            return lhs.child.orderIndex < rhs.child.orderIndex
+        }
+
+        return chosenParent?.child
+    }
+
+    static func updatedActiveHistory(_ activeHistory: [UUID], nextActiveID: UUID?) -> [UUID] {
+        guard let nextActiveID else { return activeHistory }
+        var updated = activeHistory.filter { $0 != nextActiveID }
+        updated.insert(nextActiveID, at: 0)
+        if updated.count > activeHistoryLimit {
+            updated.removeSubrange(activeHistoryLimit..<updated.count)
+        }
+        return updated
+    }
+
+    private static func decision(
+        direction: ScenarioWriterView.MainArrowDirection,
+        sourceCardID: UUID?,
+        targetCard: SceneCard,
+        activeHistory: [UUID]
+    ) -> Result {
+        .decision(
+            MainWorkspaceNavigationDecision(
+                direction: direction,
+                sourceCardID: sourceCardID,
+                targetCard: targetCard,
+                updatedActiveHistory: updatedActiveHistory(
+                    activeHistory,
+                    nextActiveID: targetCard.id
+                )
+            )
+        )
+    }
+
+    private static func firstHistoryChild(
+        in children: [SceneCard],
+        activeHistory: [UUID],
+        matching category: String?
+    ) -> SceneCard? {
+        for childID in activeHistory {
+            if let child = children.first(where: { $0.id == childID }),
+               category == nil || child.category == category {
+                return child
+            }
+        }
+        return nil
+    }
+
+    static func crossCategoryBoundaryTarget(
+        for card: SceneCard,
+        levelIndex: Int,
+        step: Int,
+        boundaryNavigableLevels: [[SceneCard]]
+    ) -> SceneCard? {
+        guard levelIndex >= 2 else { return nil }
+        guard boundaryNavigableLevels.indices.contains(levelIndex) else { return nil }
+        let level = boundaryNavigableLevels[levelIndex]
+        guard let index = level.firstIndex(where: { $0.id == card.id }) else { return nil }
+
+        let targetIndex = index + step
+        guard level.indices.contains(targetIndex) else { return nil }
+        let target = level[targetIndex]
+        guard target.category != card.category else { return nil }
+        return target
+    }
+
+    private static func location(of cardID: UUID, in levels: [[SceneCard]]) -> (level: Int, index: Int)? {
+        for (levelIndex, cards) in levels.enumerated() {
+            if let index = cards.firstIndex(where: { $0.id == cardID }) {
+                return (levelIndex, index)
+            }
+        }
+        return nil
+    }
+}
+
 struct DisplayedMainLevelsCacheKey: Equatable {
     let cardsVersion: Int
     let activeCategory: String?
@@ -388,6 +721,7 @@ final class WriterInteractionRuntime {
     var lastActiveCardID: UUID? = nil
     var lastScrolledLevel: Int = 0
     var pendingMainHorizontalScrollAnimation: Bool? = nil
+    var mainWorkspaceActiveHistory: [UUID] = []
     var pendingMainClickFocusTargetID: UUID? = nil
     var pendingMainClickHorizontalFocusTargetID: UUID? = nil
     var pendingMainEditingViewportKeepVisibleCardID: UUID? = nil

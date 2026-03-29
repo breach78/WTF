@@ -347,55 +347,6 @@ extension ScenarioWriterView {
         )
     }
 
-    func publishPreemptiveMainColumnFocusNavigationIntent(
-        for targetID: UUID?,
-        trigger: String = "arrowPreview"
-    ) {
-        guard let targetID else { return }
-        let shouldAnimate =
-            focusNavigationAnimationEnabled &&
-            !shouldSuppressMainArrowRepeatAnimation()
-        pendingMainPreemptiveFocusNavigationTargetID = targetID
-        _ = publishMainColumnNavigationIntent(
-            kind: .focusChange,
-            scope: .allColumns,
-            targetCardID: targetID,
-            expectedActiveCardID: targetID,
-            animated: shouldAnimate,
-            trigger: trigger
-        )
-        preemptivelyAlignMainCanvasHorizontally(to: targetID, animated: shouldAnimate)
-        mainWorkspacePhase0Log(
-            "preemptive-focus-intent",
-            "target=\(mainWorkspacePhase0CardID(targetID)) animated=\(shouldAnimate) trigger=\(trigger)"
-        )
-    }
-
-    func preemptivelyAlignMainCanvasHorizontally(
-        to targetCardID: UUID,
-        animated: Bool
-    ) {
-        guard !showFocusMode else { return }
-        guard acceptsKeyboardInput else { return }
-        guard !isPreviewingHistory else { return }
-        guard mainCanvasHorizontalScrollMode == .oneStep else { return }
-        guard let targetLevel = displayedMainCardLocationByID(targetCardID)?.level else { return }
-        guard let scrollView = mainCanvasScrollCoordinator.resolvedMainCanvasHorizontalScrollView() else { return }
-
-        let availableWidth = max(1, scrollView.documentVisibleRect.width)
-        guard lastScrolledLevel != targetLevel else { return }
-        lastScrolledLevel = targetLevel
-        let applied = performMainCanvasHorizontalScroll(
-            level: targetLevel,
-            availableWidth: availableWidth,
-            animated: animated
-        )
-        mainWorkspacePhase0Log(
-            "preemptive-horizontal-scroll",
-            "target=\(mainWorkspacePhase0CardID(targetCardID)) level=\(targetLevel) animated=\(animated) applied=\(applied)"
-        )
-    }
-
     // MARK: - Debug Helpers
 
     func debugCGFloat(_ value: CGFloat) -> String {
@@ -2722,7 +2673,8 @@ extension ScenarioWriterView {
             isLinkedCard: isLinkedCard,
             onCloneCard: { copyCardsAsCloneFromContext(card) },
             clonePeerDestinations: clonePeerDestinations,
-            onNavigateToClonePeer: { targetID in navigateToCloneCard(targetID) }
+            onNavigateToClonePeer: { targetID in navigateToCloneCard(targetID) },
+            diagnosticsOwnerKey: mainCanvasDiagnosticsOwnerKey
         )
         .id(card.id)
         .onDrag {
@@ -3478,6 +3430,18 @@ extension ScenarioWriterView {
         )
     }
 
+    func recordMainWorkspaceActiveHistory(_ activeID: UUID?) {
+        guard !showFocusMode else { return }
+        guard !showHistoryBar else { return }
+        guard !isIndexBoardActive else { return }
+        let updated = MainWorkspaceNavigationModel.updatedActiveHistory(
+            mainWorkspaceActiveHistory,
+            nextActiveID: activeID
+        )
+        guard updated != mainWorkspaceActiveHistory else { return }
+        mainWorkspaceActiveHistory = updated
+    }
+
     func changeActiveCard(
         to card: SceneCard,
         shouldFocusMain: Bool = true,
@@ -3521,6 +3485,7 @@ extension ScenarioWriterView {
                 scenario.setSplitPaneActiveCard(card.id, for: splitPaneID)
             }
             card.parent?.lastSelectedChildID = card.id
+            recordMainWorkspaceActiveHistory(card.id)
             synchronizeActiveRelationState(for: card.id)
             if shouldFocusMain { isMainViewFocused = true }
             let levelCount = scenario.allLevels.count

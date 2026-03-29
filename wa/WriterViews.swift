@@ -103,7 +103,6 @@ struct ScenarioWriterView: View {
     @State var activeCardID: UUID? = nil
     @State var selectedCardIDs: Set<UUID> = []
     @State var editingCardID: UUID? = nil
-    @State var pendingMainPreemptiveFocusNavigationTargetID: UUID? = nil
     @State var indexBoardEditorDraft: IndexBoardEditorDraft? = nil
     @State var isIndexBoardInlineEditing: Bool = false
     @State var pendingIndexBoardCreationPrevStateByCardID: [UUID: ScenarioState] = [:]
@@ -370,6 +369,11 @@ struct ScenarioWriterView: View {
     var pendingMainHorizontalScrollAnimation: Bool? {
         get { interactionRuntime.pendingMainHorizontalScrollAnimation }
         nonmutating set { interactionRuntime.pendingMainHorizontalScrollAnimation = newValue }
+    }
+
+    var mainWorkspaceActiveHistory: [UUID] {
+        get { interactionRuntime.mainWorkspaceActiveHistory }
+        nonmutating set { interactionRuntime.mainWorkspaceActiveHistory = newValue }
     }
 
     var pendingMainClickFocusTargetID: UUID? {
@@ -1482,10 +1486,6 @@ struct ScenarioWriterView: View {
             return
         }
         let clickFocusedTarget = pendingMainClickHorizontalFocusTargetID == newID
-        let preemptivelyFocusedTarget = pendingMainPreemptiveFocusNavigationTargetID == newID
-        if preemptivelyFocusedTarget {
-            pendingMainPreemptiveFocusNavigationTargetID = nil
-        }
         if mainColumnViewportRestoreUntil > Date(), !clickFocusedTarget {
             indexBoardRestoreTrace(
                 "main_canvas_handle_active_card_change_preserve_viewport",
@@ -1494,9 +1494,7 @@ struct ScenarioWriterView: View {
             syncMainCanvasInteractionState()
             return
         }
-        if !preemptivelyFocusedTarget {
-            publishMainColumnFocusNavigationIntent(for: newID)
-        }
+        publishMainColumnFocusNavigationIntent(for: newID)
         syncMainCanvasInteractionState(emitNavigationEvent: true)
     }
 
@@ -2947,6 +2945,20 @@ struct ScenarioWriterView: View {
 
                 guard displayedMainCardLocationByID(targetCardID) != nil else {
                     return
+                }
+
+                if index > 0 {
+                    MainCanvasNavigationDiagnostics.shared.recordHorizontalRetry(
+                        ownerKey: mainCanvasDiagnosticsOwnerKey,
+                        reason: "clickFocusAlignment",
+                        attempt: index,
+                        targetID: targetCardID,
+                        animated: false
+                    )
+                    mainWorkspacePhase0Log(
+                        "horizontal-retry",
+                        "reason=clickFocusAlignment attempt=\(index) target=\(mainWorkspacePhase0CardID(targetCardID))"
+                    )
                 }
 
                 if mainCanvasHorizontalScrollMode == .oneStep,

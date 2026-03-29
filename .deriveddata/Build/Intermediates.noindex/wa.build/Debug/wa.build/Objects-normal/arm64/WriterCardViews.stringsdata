@@ -1,0 +1,296 @@
+{
+  "source": "/Users/three/app_build/wa/wa/WriterCardViews.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "카드 복사",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 724
+        }
+      },
+      {
+        "comment": "",
+        "key": "내용 복사",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 725
+        }
+      },
+      {
+        "comment": "",
+        "key": "연결 끊기",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 1188
+        }
+      },
+      {
+        "comment": "",
+        "key": "인덱스 카드 뷰로 보기",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 1193
+        }
+      },
+      {
+        "comment": "",
+        "key": "AI",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 1197
+        }
+      },
+      {
+        "comment": "",
+        "key": "전사 모드",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 1215
+        }
+      },
+      {
+        "comment": "",
+        "key": "내용 없음 카드 전체 삭제",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 1222
+        }
+      },
+      {
+        "comment": "",
+        "key": "인덱스 카드 뷰로 보기",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 1226
+        }
+      },
+      {
+        "comment": "",
+        "key": "클론 카드",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 1230
+        }
+      },
+      {
+        "comment": "",
+        "key": "다른 클론으로 이동",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 1234
+        }
+      },
+      {
+        "comment": "",
+        "key": "레퍼런스 카드로",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 1242
+        }
+      },
+      {
+        "comment": "",
+        "key": "새 상위 카드 만들기",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 1246
+        }
+      },
+      {
+        "comment": "",
+        "key": "AI",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 1250
+        }
+      },
+      {
+        "comment": "",
+        "key": "삭제",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 1266
+        }
+      },
+      {
+        "comment": "",
+        "key": "카드 색",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 1272
+        }
+      },
+      {
+        "comment": "",
+        "key": "전사 모드",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 1284
+        }
+      },
+      {
+        "comment": "",
+        "key": "완전 삭제 (모든 곳)",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 1289
+        }
+      },
+      {
+        "comment": "",
+        "key": "구체화",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 1198
+        }
+      },
+      {
+        "comment": "",
+        "key": "다음 장면",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 1200
+        }
+      },
+      {
+        "comment": "",
+        "key": "대안",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 1202
+        }
+      },
+      {
+        "comment": "",
+        "key": "선택 카드 요약",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 1205
+        }
+      },
+      {
+        "comment": "",
+        "key": "자식 카드 요약",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 1207
+        }
+      },
+      {
+        "comment": "",
+        "key": "구체화",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 1251
+        }
+      },
+      {
+        "comment": "",
+        "key": "다음 장면",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 1253
+        }
+      },
+      {
+        "comment": "",
+        "key": "대안",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 1255
+        }
+      },
+      {
+        "comment": "",
+        "key": "선택 카드 요약",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 1258
+        }
+      },
+      {
+        "comment": "",
+        "key": "자식 카드 요약",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 1260
+        }
+      },
+      {
+        "comment": "",
+        "key": "기본",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 1273
+        }
+      },
+      {
+        "comment": "",
+        "key": "연보라",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 1275
+        }
+      },
+      {
+        "comment": "",
+        "key": "하늘",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 1276
+        }
+      },
+      {
+        "comment": "",
+        "key": "민트",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 1277
+        }
+      },
+      {
+        "comment": "",
+        "key": "살구",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 1278
+        }
+      },
+      {
+        "comment": "",
+        "key": "연노랑",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 1279
+        }
+      },
+      {
+        "comment": "",
+        "key": "AI 후보",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 1459
+        }
+      },
+      {
+        "comment": "",
+        "key": "선택",
+        "location": {
+          "startingColumn": 40,
+          "startingLine": 1466
+        }
+      },
+      {
+        "comment": "",
+        "key": "+",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 1667
+        }
+      }
+    ]
+  },
+  "version": 1
+}

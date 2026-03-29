@@ -431,6 +431,8 @@ private struct MainWorkspaceEditableTextRenderer: NSViewRepresentable {
     }
 
     @Binding var text: String
+    let cardID: UUID
+    let diagnosticsOwnerKey: String?
     let textWidth: CGFloat
     let bodyHeight: CGFloat
     let fontSize: CGFloat
@@ -521,6 +523,14 @@ private struct MainWorkspaceEditableTextRenderer: NSViewRepresentable {
 
         if textView.string != text {
             let selected = textView.selectedRange()
+            let currentLength = (textView.string as NSString).length
+            let modelLength = (text as NSString).length
+            let isFocusedResponder =
+                isFocused &&
+                (
+                    textView.window?.firstResponder === textView ||
+                    NSApp.keyWindow?.firstResponder === textView
+                )
             coordinator.suppressBindingPropagation = true
             if text.isEmpty {
                 textView.string = ""
@@ -534,11 +544,30 @@ private struct MainWorkspaceEditableTextRenderer: NSViewRepresentable {
                     )
                 )
             }
-            let length = (text as NSString).length
-            let clampedLocation = min(selected.location, length)
-            let clampedLength = min(selected.length, max(0, length - clampedLocation))
-            textView.setSelectedRange(NSRange(location: clampedLocation, length: clampedLength))
+            let clampedLocation = min(selected.location, modelLength)
+            let clampedLength = min(selected.length, max(0, modelLength - clampedLocation))
+            let selectionAfter = NSRange(location: clampedLocation, length: clampedLength)
+            textView.setSelectedRange(selectionAfter)
             coordinator.suppressBindingPropagation = false
+
+            if isFocusedResponder, let diagnosticsOwnerKey {
+                mainWorkspacePhase0Log(
+                    "focused-editor-model-overwrite",
+                    "owner=\(diagnosticsOwnerKey) card=\(mainWorkspacePhase0CardID(cardID)) " +
+                    "before=\(selected.location):\(selected.length) after=\(selectionAfter.location):\(selectionAfter.length) " +
+                    "currentLen=\(currentLength) modelLen=\(modelLength)"
+                )
+                Task { @MainActor in
+                    MainCanvasNavigationDiagnostics.shared.recordFocusedEditorOverwrite(
+                        ownerKey: diagnosticsOwnerKey,
+                        cardID: cardID,
+                        selectionBefore: selected,
+                        selectionAfter: selectionAfter,
+                        currentLength: currentLength,
+                        modelLength: modelLength
+                    )
+                }
+            }
         }
 
         if coordinator.lastSignature != signature {
@@ -861,6 +890,7 @@ struct CardItem: View {
     var onCloneCard: (() -> Void)? = nil
     var clonePeerDestinations: [ClonePeerMenuDestination] = []
     var onNavigateToClonePeer: ((UUID) -> Void)? = nil
+    var diagnosticsOwnerKey: String? = nil
     @State private var mainEditingMeasuredBodyHeight: CGFloat = 0
     @State private var mainEditingMeasureWorkItem: DispatchWorkItem? = nil
     @State private var mainEditingMeasureLastAt: Date = .distantPast
@@ -1291,6 +1321,8 @@ struct CardItem: View {
                 if isEditing {
                     MainWorkspaceEditableTextRenderer(
                         text: mainEditorTextBinding,
+                        cardID: card.id,
+                        diagnosticsOwnerKey: diagnosticsOwnerKey,
                         textWidth: mainEditingTextMeasureWidth,
                         bodyHeight: resolvedMainEditingBodyHeight,
                         fontSize: fontSize,

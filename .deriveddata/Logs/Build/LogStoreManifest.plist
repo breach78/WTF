@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>logFormatVersion</key>
+	<integer>12</integer>
+	<key>logs</key>
+	<dict>
+		<key>864A3E89-AAFA-4E46-ADE8-A473CA72ED54</key>
+		<dict>
+			<key>className</key>
+			<string>IDECommandLineBuildLog</string>
+			<key>documentTypeString</key>
+			<string>&lt;nil&gt;</string>
+			<key>domainType</key>
+			<string>Xcode.IDEActivityLogDomainType.BuildLog</string>
+			<key>fileName</key>
+			<string>864A3E89-AAFA-4E46-ADE8-A473CA72ED54.xcactivitylog</string>
+			<key>hasPrimaryLog</key>
+			<true/>
+			<key>primaryObservable</key>
+			<dict>
+				<key>highLevelStatus</key>
+				<string>W</string>
+				<key>totalNumberOfAnalyzerIssues</key>
+				<integer>0</integer>
+				<key>totalNumberOfErrors</key>
+				<integer>0</integer>
+				<key>totalNumberOfTestFailures</key>
+				<integer>0</integer>
+				<key>totalNumberOfWarnings</key>
+				<integer>7</integer>
+			</dict>
+			<key>schemeIdentifier-containerName</key>
+			<string>wa project</string>
+			<key>schemeIdentifier-schemeName</key>
+			<string>wa</string>
+			<key>schemeIdentifier-sharedScheme</key>
+			<integer>1</integer>
+			<key>signature</key>
+			<string>Building project wa with scheme wa and configuration Debug</string>
+			<key>timeStartedRecording</key>
+			<real>796473648.17652202</real>
+			<key>timeStoppedRecording</key>
+			<real>796473685.05514395</real>
+			<key>title</key>
+			<string>Building project wa with scheme wa and configuration Debug</string>
+			<key>uniqueIdentifier</key>
+			<string>864A3E89-AAFA-4E46-ADE8-A473CA72ED54</string>
+		</dict>
+		<key>D99429F6-A893-469B-BBFD-5740AD72D2CD</key>
+		<dict>
+			<key>className</key>
+			<string>IDECommandLineBuildLog</string>
+			<key>documentTypeString</key>
+			<string>&lt;nil&gt;</string>
+			<key>domainType</key>
+			<string>Xcode.IDEActivityLogDomainType.BuildLog</string>
+			<key>fileName</key>
+			<string>D99429F6-A893-469B-BBFD-5740AD72D2CD.xcactivitylog</string>
+			<key>hasPrimaryLog</key>
+			<true/>
+			<key>primaryObservable</key>
+			<dict>
+				<key>highLevelStatus</key>
+				<string>W</string>
+				<key>totalNumberOfAnalyzerIssues</key>
+				<integer>0</integer>
+				<key>totalNumberOfErrors</key>
+				<integer>0</integer>
+				<key>totalNumberOfTestFailures</key>
+				<integer>0</integer>
+				<key>totalNumberOfWarnings</key>
+				<integer>7</integer>
+			</dict>
+			<key>schemeIdentifier-containerName</key>
+			<string>wa project</string>
+			<key>schemeIdentifier-schemeName</key>
+			<string>wa</string>
+			<key>schemeIdentifier-sharedScheme</key>
+			<integer>1</integer>
+			<key>signature</key>
+			<string>Building project wa with scheme wa and configuration Debug</string>
+			<key>timeStartedRecording</key>
+			<real>796483753.40049696</real>
+			<key>timeStoppedRecording</key>
+			<real>796483772.20757198</real>
+			<key>title</key>
+			<string>Building project wa with scheme wa and configuration Debug</string>
+			<key>uniqueIdentifier</key>
+			<string>D99429F6-A893-469B-BBFD-5740AD72D2CD</string>
+		</dict>
+	</dict>
+</dict>
+</plist>
