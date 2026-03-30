@@ -720,18 +720,16 @@ extension ScenarioWriterView {
         guard atTopBoundary else { return false }
         let isRapidBurst = registerMainVerticalArrowPress(for: 126)
 
-        let target: SceneCard
-        if cardIndex > 0 {
-            target = currentLevel[cardIndex - 1]
-        } else if let boundaryTarget = mainCrossCategoryBoundaryTarget(
-            for: editingCard,
-            levelIndex: levelIndex,
-            step: -1
-        ) {
-            target = boundaryTarget
-        } else {
+        let stateSnapshot = mainWorkspaceStateSnapshot()
+        guard case .decision(let decision) = MainWorkspaceNavigationModel.resolve(
+            snapshot: stateSnapshot,
+            direction: .up,
+            allowChildlessRightFallback: false,
+            isChildlessRightFallbackArmed: false
+        ) else {
             return false
         }
+        let target = decision.targetCard
 
         if shouldSuppressCrossCategoryVerticalTransition(
             from: editingCard,
@@ -784,18 +782,16 @@ extension ScenarioWriterView {
         guard atBottomBoundary else { return false }
         let isRapidBurst = registerMainVerticalArrowPress(for: 125)
 
-        let target: SceneCard
-        if cardIndex < currentLevel.count - 1 {
-            target = currentLevel[cardIndex + 1]
-        } else if let boundaryTarget = mainCrossCategoryBoundaryTarget(
-            for: editingCard,
-            levelIndex: levelIndex,
-            step: 1
-        ) {
-            target = boundaryTarget
-        } else {
+        let stateSnapshot = mainWorkspaceStateSnapshot()
+        guard case .decision(let decision) = MainWorkspaceNavigationModel.resolve(
+            snapshot: stateSnapshot,
+            direction: .down,
+            allowChildlessRightFallback: false,
+            isChildlessRightFallbackArmed: false
+        ) else {
             return false
         }
+        let target = decision.targetCard
 
         if shouldSuppressCrossCategoryVerticalTransition(
             from: editingCard,
@@ -846,10 +842,6 @@ extension ScenarioWriterView {
             clearMainBoundaryParentLeftArm()
             return false
         }
-        guard let parentCard = editingCard.parent else {
-            clearMainBoundaryParentLeftArm()
-            return false
-        }
         guard press.phase == .down else {
             return true
         }
@@ -857,6 +849,17 @@ extension ScenarioWriterView {
         clearMainEditTabArm()
         clearMainBoundaryChildRightArm()
         clearMainNoChildRightArm()
+        let stateSnapshot = mainWorkspaceStateSnapshot()
+        guard case .decision(let decision) = MainWorkspaceNavigationModel.resolve(
+            snapshot: stateSnapshot,
+            direction: .left,
+            allowChildlessRightFallback: false,
+            isChildlessRightFallbackArmed: false
+        ) else {
+            clearMainBoundaryParentLeftArm()
+            return false
+        }
+        let parentCard = decision.targetCard
         if isShiftSelection {
             applyMainBoundaryShiftSelection(from: editingCard, to: parentCard, in: currentLevel)
             return true
@@ -900,15 +903,13 @@ extension ScenarioWriterView {
 
         clearMainEditTabArm()
         clearMainBoundaryParentLeftArm()
-        let nextLevel = (levelIndex + 1 < levels.count) ? levels[levelIndex + 1] : []
+        let stateSnapshot = mainWorkspaceStateSnapshot()
 
         if isShiftSelection {
             clearMainBoundaryChildRightArm()
             let result = resolvedMainRightTarget(
                 for: editingCard,
-                currentLevel: currentLevel,
-                nextLevel: nextLevel,
-                currentIndex: cardIndex,
+                snapshot: stateSnapshot,
                 allowDoublePressFallback: true
             )
             if case .target(let target) = result {
@@ -921,9 +922,7 @@ extension ScenarioWriterView {
             clearMainBoundaryChildRightArm()
             let result = resolvedMainRightTarget(
                 for: editingCard,
-                currentLevel: currentLevel,
-                nextLevel: nextLevel,
-                currentIndex: cardIndex,
+                snapshot: stateSnapshot,
                 allowDoublePressFallback: true
             )
             if case .target(let target) = result {
@@ -958,7 +957,6 @@ extension ScenarioWriterView {
         if shouldDiscardEmptyNewCardOnBoundaryMove {
             finishEditing()
         }
-        cancelMainArrowNavigationSettle()
         cancelAllPendingMainColumnFocusWork()
         pendingMainEditingSiblingNavigationTargetID = suppressSiblingNavigationScrolls ? target.id : nil
         pendingMainEditingBoundaryNavigationTargetID = target.id
@@ -1337,22 +1335,14 @@ extension ScenarioWriterView {
 
     func resolvedMainRightTarget(
         for card: SceneCard,
-        currentLevel: [SceneCard],
-        nextLevel: [SceneCard],
-        currentIndex: Int,
+        snapshot: MainWorkspaceStateSnapshot,
         allowDoublePressFallback: Bool
     ) -> MainRightResolution {
         let target = MainWorkspaceNavigationModel.resolve(
-            MainWorkspaceNavigationModel.Input(
-                direction: .right,
-                activeCardID: card.id,
-                rootCards: scenario.rootCards,
-                levels: [currentLevel, nextLevel],
-                boundaryNavigableLevels: [currentLevel, nextLevel],
-                activeHistory: mainWorkspaceActiveHistory,
-                allowChildlessRightFallback: allowDoublePressFallback,
-                isChildlessRightFallbackArmed: isMainNoChildRightArmed(for: card.id)
-            )
+            snapshot: snapshot,
+            direction: .right,
+            allowChildlessRightFallback: allowDoublePressFallback,
+            isChildlessRightFallbackArmed: isMainNoChildRightArmed(for: card.id)
         )
 
         switch target {
@@ -1377,17 +1367,13 @@ extension ScenarioWriterView {
     func resolveMainWorkspaceNavigationResult(
         direction: MainArrowDirection,
         allowChildlessRightFallback: Bool
-    ) -> MainWorkspaceNavigationModel.Result {
-        let levels = resolvedLevelsWithParents().map(\.cards)
-        let boundaryNavigableLevels = resolvedMainWorkspaceBoundaryNavigableLevels(for: levels)
-        return MainWorkspaceNavigationModel.resolve(
-            MainWorkspaceNavigationModel.Input(
+    ) -> (snapshot: MainWorkspaceStateSnapshot, result: MainWorkspaceNavigationModel.Result) {
+        let snapshot = mainWorkspaceStateSnapshot()
+        return (
+            snapshot: snapshot,
+            result: MainWorkspaceNavigationModel.resolve(
+                snapshot: snapshot,
                 direction: direction,
-                activeCardID: activeCardID,
-                rootCards: scenario.rootCards,
-                levels: levels,
-                boundaryNavigableLevels: boundaryNavigableLevels,
-                activeHistory: mainWorkspaceActiveHistory,
                 allowChildlessRightFallback: allowChildlessRightFallback,
                 isChildlessRightFallbackArmed: activeCardID.map { isMainNoChildRightArmed(for: $0) } ?? false
             )
@@ -1432,10 +1418,12 @@ extension ScenarioWriterView {
         consumeRightArrowWhenUnavailable: Bool,
         seedRangeAnchorWhenNoActive: Bool
     ) -> Bool {
-        let result = resolveMainWorkspaceNavigationResult(
+        let navigationContext = resolveMainWorkspaceNavigationResult(
             direction: direction,
             allowChildlessRightFallback: direction == .right && !isRepeat
         )
+        let stateSnapshot = navigationContext.snapshot
+        let result = navigationContext.result
         applyMainWorkspaceRightFallbackState(
             direction: direction,
             result: result,
@@ -1469,7 +1457,7 @@ extension ScenarioWriterView {
                 selectedCardIDs = [sourceCardID]
             }
 
-            let levels = resolvedLevelsWithParents().map(\.cards)
+            let levels = stateSnapshot.levels
             let sourceCard: SceneCard? = decision.sourceCardID.flatMap(findCard(by:))
             let location = decision.sourceCardID.flatMap { displayedMainCardLocationByID($0, in: levels) }
             let currentLevel = location.map { levels[$0.level] }
@@ -1766,11 +1754,9 @@ extension ScenarioWriterView {
             } else {
                 pendingMainHorizontalScrollAnimation = nil
             }
-            cancelMainArrowNavigationSettle()
 
         case .up, .down:
             pendingMainHorizontalScrollAnimation = nil
-            cancelMainArrowNavigationSettle()
         }
     }
 

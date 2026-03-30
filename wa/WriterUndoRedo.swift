@@ -122,10 +122,13 @@ extension ScenarioWriterView {
                 selectedCardIDs = [fallback.id]
             }
         } else {
+            let previousActiveID = activeCardID
             activeCardID = nil
-            activeAncestorIDs = []
-            activeDescendantIDs = []
-            activeSiblingIDs = []
+            synchronizeMainWorkspaceSelectionState(
+                previousActiveID: previousActiveID,
+                nextActiveID: nil,
+                updateHistory: false
+            )
         }
         if showFocusMode {
             focusLastCommittedContentByCard = Dictionary(uniqueKeysWithValues: scenario.cards.map { ($0.id, $0.content) })

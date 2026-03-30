@@ -6,6 +6,17 @@ import os
 final class MainCanvasNavigationDiagnostics {
     static let shared = MainCanvasNavigationDiagnostics()
 
+    enum LayoutCallsite: String {
+        case horizontalDocumentView = "horizontal.documentView"
+        case horizontalContentSuperview = "horizontal.contentView.superview"
+        case horizontalScrollView = "horizontal.scrollView"
+        case columnDocumentView = "column.documentView"
+        case columnContentSuperview = "column.contentView.superview"
+        case columnScrollView = "column.scrollView"
+        case activeEditorTextView = "activeEditor.textView"
+        case keyWindowContentView = "keyWindow.contentView"
+    }
+
     struct DurationStats {
         var count: Int = 0
         var totalMilliseconds: Double = 0
@@ -23,12 +34,59 @@ final class MainCanvasNavigationDiagnostics {
         }
     }
 
+    struct LayoutCounters {
+        var horizontalDocumentViewCount: Int = 0
+        var horizontalContentSuperviewCount: Int = 0
+        var horizontalScrollViewCount: Int = 0
+        var columnDocumentViewCount: Int = 0
+        var columnContentSuperviewCount: Int = 0
+        var columnScrollViewCount: Int = 0
+        var activeEditorTextViewCount: Int = 0
+        var keyWindowContentViewCount: Int = 0
+
+        mutating func record(_ callsite: LayoutCallsite, count: Int = 1) {
+            switch callsite {
+            case .horizontalDocumentView:
+                horizontalDocumentViewCount += count
+            case .horizontalContentSuperview:
+                horizontalContentSuperviewCount += count
+            case .horizontalScrollView:
+                horizontalScrollViewCount += count
+            case .columnDocumentView:
+                columnDocumentViewCount += count
+            case .columnContentSuperview:
+                columnContentSuperviewCount += count
+            case .columnScrollView:
+                columnScrollViewCount += count
+            case .activeEditorTextView:
+                activeEditorTextViewCount += count
+            case .keyWindowContentView:
+                keyWindowContentViewCount += count
+            }
+        }
+
+        var totalCount: Int {
+            horizontalDocumentViewCount +
+            horizontalContentSuperviewCount +
+            horizontalScrollViewCount +
+            columnDocumentViewCount +
+            columnContentSuperviewCount +
+            columnScrollViewCount +
+            activeEditorTextViewCount +
+            keyWindowContentViewCount
+        }
+    }
+
     struct OwnerCounters {
         var focusIntentCount: Int = 0
         var repeatFocusIntentCount: Int = 0
+        var activeCardChangeCount: Int = 0
+        var scrollApplyCount: Int = 0
+        var verifyPassScrollApplyCount: Int = 0
         var firstScrollLatencyStats = DurationStats()
         var relationSyncStats = DurationStats()
         var layoutResolveStats = DurationStats()
+        var layoutCounters = LayoutCounters()
         var layoutCacheMissCount: Int = 0
         var verticalNativeScrollCount: Int = 0
         var verticalFallbackScrollCount: Int = 0
@@ -37,6 +95,8 @@ final class MainCanvasNavigationDiagnostics {
         var animationOverlapCount: Int = 0
         var verticalVerificationRetryCount: Int = 0
         var horizontalRetryCount: Int = 0
+        var programmaticViewportOffsetObservedCount: Int = 0
+        var programmaticViewportOffsetStateWriteCount: Int = 0
         var focusedEditorOverwriteCount: Int = 0
     }
 
@@ -157,6 +217,31 @@ final class MainCanvasNavigationDiagnostics {
         persistSummary(reason: "focus-intent")
     }
 
+    func recordActiveCardChange(
+        ownerKey: String,
+        previousCardID: UUID?,
+        nextCardID: UUID?,
+        trigger: String
+    ) {
+        guard previousCardID != nextCardID else { return }
+        var counters = countersByOwnerKey[ownerKey] ?? OwnerCounters()
+        counters.activeCardChangeCount += 1
+        countersByOwnerKey[ownerKey] = counters
+
+        os_signpost(
+            .event,
+            log: log,
+            name: "ActiveCardChange",
+            "owner=%{public}@ trigger=%{public}@ previous=%{public}@ next=%{public}@ count=%{public}d",
+            ownerKey as NSString,
+            trigger as NSString,
+            cardIDString(previousCardID),
+            cardIDString(nextCardID),
+            counters.activeCardChangeCount
+        )
+        persistSummary(reason: "active-card-change")
+    }
+
     func recordRelationSync(
         ownerKey: String,
         activeCardID: UUID?,
@@ -228,6 +313,49 @@ final class MainCanvasNavigationDiagnostics {
             boolString(containsEditingCard) as NSString,
             durationMilliseconds
         )
+    }
+
+    func recordScrollApply(
+        ownerKey: String,
+        generation: Int,
+        activeCardID: UUID,
+        appliedHorizontal: Bool,
+        appliedVertical: Bool,
+        isVerifyPass: Bool
+    ) {
+        var counters = countersByOwnerKey[ownerKey] ?? OwnerCounters()
+        counters.scrollApplyCount += 1
+        if isVerifyPass {
+            counters.verifyPassScrollApplyCount += 1
+        }
+        countersByOwnerKey[ownerKey] = counters
+
+        os_signpost(
+            .event,
+            log: log,
+            name: "ScrollApply",
+            "owner=%{public}@ generation=%{public}d active=%{public}@ horizontal=%{public}@ vertical=%{public}@ verify=%{public}@ count=%{public}d",
+            ownerKey as NSString,
+            generation,
+            cardIDString(activeCardID),
+            boolString(appliedHorizontal) as NSString,
+            boolString(appliedVertical) as NSString,
+            boolString(isVerifyPass) as NSString,
+            counters.scrollApplyCount
+        )
+        persistSummary(reason: "scroll-apply")
+    }
+
+    func recordLayoutSubtreeIfNeeded(
+        ownerKey: String,
+        callsite: LayoutCallsite,
+        count: Int = 1
+    ) {
+        guard count > 0 else { return }
+        var counters = countersByOwnerKey[ownerKey] ?? OwnerCounters()
+        counters.layoutCounters.record(callsite, count: count)
+        countersByOwnerKey[ownerKey] = counters
+        persistSummary(reason: "layout-subtree")
     }
 
     func beginScrollAnimation(
@@ -374,6 +502,38 @@ final class MainCanvasNavigationDiagnostics {
         persistSummary(reason: "horizontal-retry")
     }
 
+    func recordViewportOffsetObservation(
+        ownerKey: String,
+        viewportKey: String,
+        previousY: CGFloat,
+        currentY: CGFloat,
+        duringProgrammaticScroll: Bool,
+        didWriteState: Bool
+    ) {
+        guard duringProgrammaticScroll else { return }
+        var counters = countersByOwnerKey[ownerKey] ?? OwnerCounters()
+        counters.programmaticViewportOffsetObservedCount += 1
+        if didWriteState {
+            counters.programmaticViewportOffsetStateWriteCount += 1
+        }
+        countersByOwnerKey[ownerKey] = counters
+
+        os_signpost(
+            .event,
+            log: log,
+            name: "ViewportOffsetObservation",
+            "owner=%{public}@ viewport=%{public}@ previous_y=%{public}.1f current_y=%{public}.1f wrote=%{public}@ observed=%{public}d state_writes=%{public}d",
+            ownerKey as NSString,
+            viewportKey as NSString,
+            Double(previousY),
+            Double(currentY),
+            boolString(didWriteState) as NSString,
+            counters.programmaticViewportOffsetObservedCount,
+            counters.programmaticViewportOffsetStateWriteCount
+        )
+        persistSummary(reason: "viewport-offset")
+    }
+
     func recordFocusedEditorOverwrite(
         ownerKey: String,
         cardID: UUID,
@@ -408,19 +568,23 @@ final class MainCanvasNavigationDiagnostics {
         guard let counters = countersByOwnerKey[ownerKey] else { return }
 
         os_log(
-            "summary owner=%{public}@ reason=%{public}@ focus=%{public}d repeat=%{public}d first_scroll_avg_ms=%{public}.2f first_scroll_max_ms=%{public}.2f relation_avg_ms=%{public}.2f relation_max_ms=%{public}.2f layout_avg_ms=%{public}.2f layout_max_ms=%{public}.2f layout_miss=%{public}d v_native=%{public}d v_fallback=%{public}d h_native=%{public}d h_fallback=%{public}d overlaps=%{public}d vertical_retries=%{public}d horizontal_retries=%{public}d focused_overwrites=%{public}d",
+            "summary owner=%{public}@ reason=%{public}@ focus=%{public}d repeat=%{public}d active_changes=%{public}d scroll_apply=%{public}d verify_apply=%{public}d first_scroll_avg_ms=%{public}.2f first_scroll_max_ms=%{public}.2f relation_avg_ms=%{public}.2f relation_max_ms=%{public}.2f layout_avg_ms=%{public}.2f layout_max_ms=%{public}.2f layout_subtree_total=%{public}d layout_miss=%{public}d v_native=%{public}d v_fallback=%{public}d h_native=%{public}d h_fallback=%{public}d overlaps=%{public}d vertical_retries=%{public}d horizontal_retries=%{public}d viewport_observed=%{public}d viewport_writes=%{public}d focused_overwrites=%{public}d",
             log: log,
             type: .info,
             ownerKey as NSString,
             reason as NSString,
             counters.focusIntentCount,
             counters.repeatFocusIntentCount,
+            counters.activeCardChangeCount,
+            counters.scrollApplyCount,
+            counters.verifyPassScrollApplyCount,
             counters.firstScrollLatencyStats.averageMilliseconds,
             counters.firstScrollLatencyStats.maxMilliseconds,
             counters.relationSyncStats.averageMilliseconds,
             counters.relationSyncStats.maxMilliseconds,
             counters.layoutResolveStats.averageMilliseconds,
             counters.layoutResolveStats.maxMilliseconds,
+            counters.layoutCounters.totalCount,
             counters.layoutCacheMissCount,
             counters.verticalNativeScrollCount,
             counters.verticalFallbackScrollCount,
@@ -429,9 +593,20 @@ final class MainCanvasNavigationDiagnostics {
             counters.animationOverlapCount,
             counters.verticalVerificationRetryCount,
             counters.horizontalRetryCount,
+            counters.programmaticViewportOffsetObservedCount,
+            counters.programmaticViewportOffsetStateWriteCount,
             counters.focusedEditorOverwriteCount
         )
         persistSummary(reason: reason)
+    }
+
+    func hasPendingScrollAnimation(ownerKey: String, axis: String? = nil) -> Bool {
+        if let axis {
+            return pendingScrollAnimationByToken.keys.contains {
+                $0.hasPrefix("\(ownerKey)|\(axis)|")
+            }
+        }
+        return pendingScrollAnimationByToken.keys.contains { $0.hasPrefix("\(ownerKey)|") }
     }
 
     private func endScrollAnimation(ownerKey: String, axis: String, engine: String, status: String) {
@@ -498,6 +673,9 @@ final class MainCanvasNavigationDiagnostics {
             lines.append("[\(ownerKey)]")
             lines.append("focus_intent_count=\(counters.focusIntentCount)")
             lines.append("repeat_focus_intent_count=\(counters.repeatFocusIntentCount)")
+            lines.append("active_card_change_count=\(counters.activeCardChangeCount)")
+            lines.append("scroll_apply_count=\(counters.scrollApplyCount)")
+            lines.append("verify_pass_scroll_apply_count=\(counters.verifyPassScrollApplyCount)")
             lines.append(
                 String(
                     format: "arrow_to_first_scroll_avg_ms=%.2f",
@@ -538,11 +716,22 @@ final class MainCanvasNavigationDiagnostics {
                     counters.layoutResolveStats.maxMilliseconds
                 )
             )
+            lines.append("layout_subtree_if_needed_total_count=\(counters.layoutCounters.totalCount)")
+            lines.append("layout_subtree_if_needed_horizontal_document_count=\(counters.layoutCounters.horizontalDocumentViewCount)")
+            lines.append("layout_subtree_if_needed_horizontal_content_superview_count=\(counters.layoutCounters.horizontalContentSuperviewCount)")
+            lines.append("layout_subtree_if_needed_horizontal_scroll_view_count=\(counters.layoutCounters.horizontalScrollViewCount)")
+            lines.append("layout_subtree_if_needed_column_document_count=\(counters.layoutCounters.columnDocumentViewCount)")
+            lines.append("layout_subtree_if_needed_column_content_superview_count=\(counters.layoutCounters.columnContentSuperviewCount)")
+            lines.append("layout_subtree_if_needed_column_scroll_view_count=\(counters.layoutCounters.columnScrollViewCount)")
+            lines.append("layout_subtree_if_needed_active_editor_text_view_count=\(counters.layoutCounters.activeEditorTextViewCount)")
+            lines.append("layout_subtree_if_needed_key_window_content_view_count=\(counters.layoutCounters.keyWindowContentViewCount)")
             lines.append("layout_cache_miss_count=\(counters.layoutCacheMissCount)")
             lines.append("vertical_native_scroll_count=\(counters.verticalNativeScrollCount)")
             lines.append("vertical_fallback_scroll_count=\(counters.verticalFallbackScrollCount)")
             lines.append("horizontal_native_scroll_count=\(counters.horizontalNativeScrollCount)")
             lines.append("horizontal_fallback_scroll_count=\(counters.horizontalFallbackScrollCount)")
+            lines.append("programmatic_viewport_offset_observed_count=\(counters.programmaticViewportOffsetObservedCount)")
+            lines.append("programmatic_viewport_offset_state_write_count=\(counters.programmaticViewportOffsetStateWriteCount)")
         }
 
         let data = Data(lines.joined(separator: "\n").appending("\n").utf8)

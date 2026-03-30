@@ -545,7 +545,13 @@ extension ScenarioWriterView {
                 force: true
             )
         } else {
+            let previousActiveID = activeCardID
             activeCardID = nil
+            synchronizeMainWorkspaceSelectionState(
+                previousActiveID: previousActiveID,
+                nextActiveID: nil,
+                updateHistory: false
+            )
         }
 
         if let editingID = snapshot.editingCardID, let editingCard = findCard(by: editingID) {
@@ -634,7 +640,13 @@ extension ScenarioWriterView {
                 force: true
             )
         } else {
+            let previousActiveID = activeCardID
             activeCardID = nil
+            synchronizeMainWorkspaceSelectionState(
+                previousActiveID: previousActiveID,
+                nextActiveID: nil,
+                updateHistory: false
+            )
         }
 
         if selectionUnchanged,
@@ -1434,10 +1446,15 @@ extension ScenarioWriterView {
     }
 
     func clearIndexBoardSelection() {
+        let previousActiveID = activeCardID
         selectedCardIDs = []
         keyboardRangeSelectionAnchorCardID = nil
         activeCardID = nil
-        synchronizeActiveRelationState(for: nil)
+        synchronizeMainWorkspaceSelectionState(
+            previousActiveID: previousActiveID,
+            nextActiveID: nil,
+            updateHistory: false
+        )
         isMainViewFocused = true
     }
 
@@ -1599,11 +1616,15 @@ extension ScenarioWriterView {
                     force: true
                 )
             } else {
+                let previousActiveID = activeCardID
                 selectedCardIDs = []
                 keyboardRangeSelectionAnchorCardID = nil
                 activeCardID = nil
-                resetActiveRelationStateCache()
-                synchronizeActiveRelationState(for: nil)
+                synchronizeMainWorkspaceSelectionState(
+                    previousActiveID: previousActiveID,
+                    nextActiveID: nil,
+                    updateHistory: false
+                )
             }
             return
         }

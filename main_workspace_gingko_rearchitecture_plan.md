@@ -1,462 +1,407 @@
-# Main Workspace Gingko Rearchitecture Plan
+# Main Workspace Gingko Parity Reset Plan
 
 상태:
-- 이 문서는 `focus_mode_gingko_rearchitecture_plan.md`를 대체한다.
-- 잘못된 범위였던 `포커스 모드` 계획은 폐기하고, 징코 카피 대상을 `메인 작업창 모드`로 다시 고정한다.
+- 이 문서는 기존 `main_workspace_gingko_rearchitecture_plan.md`를 전면 교체한다.
+- 기존 계획은 메인 작업창을 징코처럼 "다시 만든다"는 목표를 충분히 강제하지 못했다.
+- 현재 상태 평가는 10점 만점 기준 3점이다.
+- 이번 문서의 목표는 메인 작업창 체감 품질을 9점 이상으로 끌어올리는 것이다.
 
 작업 범위 한 줄:
-- 징코 라이터의 메인 작업창 카드 이동, 컬럼 정렬, 세로/가로 스크롤 질감을 우리 앱의 메인 작업창 모드에 그대로 복제한다.
+- 메인 작업창 일반 모드를 징코의 `changeMode -> getScrollPositions -> direct scroll` 실행 경로와 undo 철학에 맞춰 다시 만든다.
 
-배수의 진 선언:
-- 이 작업은 메인 작업창에서 징코의 가벼운 질감을 재현하는 것이 목적이다.
-- 숫자 튜닝, suppress flag 추가, retry 횟수 조정 같은 보정성 수정은 성공으로 간주하지 않는다.
-- 메인 작업창의 주 경로가 징코처럼 단순해지지 않으면 이 계획은 실패다.
+## 목표
 
-## 범위
+이 작업의 목표는 "더 빨라 보이게"가 아니다.
 
-이 문서의 대상:
-- `showFocusMode == false` 인 메인 작업창
-- 메인 작업창의 카드 활성 전환
-- 메인 작업창의 세로 컬럼 스크롤
-- 메인 작업창의 가로 캔버스 스크롤
-- 메인 작업창의 활성 편집기 보호
+목표:
+- 메인 작업창 활성 전환의 hot path를 징코처럼 짧고 결정적으로 만든다.
+- 세로 정렬과 가로 정렬이 한 번에 맞게 만든다.
+- undo 동작을 징코와 같은 사용자 모델로 바꾼다.
+- 기존 WA의 복잡한 observer/retry/restore 구조를 메인 작업창 hot path에서 제거한다.
 
-이 문서의 비범위:
-- 포커스 모드
-- 인덱스카드 뷰
-- 히스토리 뷰
-- 히스토리 프리뷰 스크롤
-- 인덱스 보드 전용 AppKit surface
-- 포커스 모드 caret ensure 체계
-- 포커스 모드 텍스트 에디터 geometry 조정
-- 메인 작업창 밖의 뷰 구조 변경
+한 문장으로:
+- 메인 작업창 일반 모드는 더 이상 WA식 범용 상태 트리의 일부가 아니라, 징코 문서 모드와 같은 구조를 가진 독립 실행 경로가 된다.
 
-비범위 파일:
-- `wa/WriterFocusMode.swift`
-- `wa/WriterHistoryView.swift`
-- `wa/WriterIndexBoardPhaseTwo.swift`
-- `wa/WriterIndexBoardPhaseThree.swift`
-- `wa/WriterIndexBoardSurfaceAppKitPhaseTwo.swift`
+## 기준 구현
 
-주 작업 파일:
-- `wa/WriterKeyboardHandlers.swift`
-- `wa/WriterCardManagement.swift`
-- `wa/WriterViews.swift`
-- `wa/MainCanvasScrollCoordinator.swift`
-- `wa/WriterCardViews.swift`
-- `wa/WriterSharedTypes.swift`
+이번 작업의 기준은 WA 기존 구현이 아니라 징코 구현이다.
 
-## 이 문서가 근거로 삼는 코드
+반드시 맞춰야 하는 기준 코드:
+- 활성 전환: `/Users/three/app_build/wa/123/src/elm/Page/Doc.elm:1025`
+- 세로 정렬 정책 계산: `/Users/three/app_build/wa/123/src/elm/Doc/TreeUtils.elm:358`
+- 세로 스크롤 적용: `/Users/three/app_build/wa/123/src/shared/doc-helpers.js:197`
+- 가로 스크롤 적용: `/Users/three/app_build/wa/123/src/shared/doc-helpers.js:247`
+- 일반 모드 undo 메뉴 의미: `/Users/three/app_build/wa/123/src/electron/menu.js:157`
+- 일반 모드 `Cmd+Z` 라우팅: `/Users/three/app_build/wa/123/src/electron/renderer.js:63`
+- immutable commit 저장: `/Users/three/app_build/wa/123/src/electron/main.js:330`
 
-징코 메인 작업창에서 다시 읽은 코드:
-- `/tmp/gingko-client/src/elm/Page/Doc.elm`
-- `/tmp/gingko-client/src/elm/Doc/TreeUtils.elm`
-- `/tmp/gingko-client/src/shared/doc-helpers.js`
-- `/tmp/gingko-client/src/static/style.css`
+이번 계획에서 "같다"의 의미:
+- 같은 이름의 레이어를 쓰는 것이 아니라
+- 같은 책임 분해와 같은 순서를 가진다는 뜻이다.
 
-우리 앱 메인 작업창에서 다시 읽은 코드:
-- `wa/WriterKeyboardHandlers.swift`
-- `wa/WriterCardManagement.swift`
-- `wa/WriterViews.swift`
-- `wa/MainCanvasScrollCoordinator.swift`
-- `wa/WriterCardViews.swift`
-- `wa/WriterSharedTypes.swift`
+## 비타협 요구사항
 
-핵심 판단:
-- 징코의 대응 대상은 `fullscreen`이 아니라 `normal document mode`다.
-- 우리 앱에서 그 대응 대상은 `포커스 모드`가 아니라 `메인 작업창 모드`다.
-- 따라서 징코에서 복제할 구조는 다중 컬럼 메인 작업창의 포커스 이동과 스크롤 파이프라인이다.
+### 1. 활성 전환 hot path
 
-## 징코에서 실제로 복제할 것
+메인 작업창 일반 모드의 활성 전환은 반드시 아래 순서를 따른다.
 
-징코의 메인 작업창은 다음 순서로 움직인다.
+1. `changeMode`에 해당하는 단일 함수가 활성 카드, 조상, 자손, recent history를 한 번 갱신한다.
+2. `getScrollPositions`에 해당하는 단일 함수가 컬럼별 세로 정렬 정책을 한 번 계산한다.
+3. 가로/세로 scroll view에 직접 `scrollTop`/`scrollLeft`에 해당하는 offset을 적용한다.
 
-1. 입력이 들어오면 다음 활성 카드를 트리 모델에서 먼저 고른다.
-2. 활성 카드가 바뀌면 조상, 자손, 최근 활성 히스토리를 한 번에 갱신한다.
-3. `getScrollPositions`가 각 컬럼별 목표를 계산한다.
-4. JS가 세로 컬럼 스크롤과 가로 캔버스 스크롤을 직접 적용한다.
-5. 편집 중인 카드만 live textarea를 갖고, 활성 textarea에는 모델 텍스트를 덮어쓰지 않는다.
+금지:
+- `snapshot -> scroll plan -> scroll driver -> verify ladder` 같은 중간 레이어를 hot path에 두는 것
+- 입력 1회에 대해 apply owner가 둘 이상 존재하는 것
+- 정렬 성공 여부를 observer와 retry로 사후 보정하는 것
 
-징코의 실제 대응점:
-- `Page/Doc.elm changeMode`
-- `TreeUtils.elm getScrollPositions`
-- `doc-helpers.js scrollColumns`
-- `doc-helpers.js scrollHorizontal`
-- `doc-helpers.js gw-textarea.attributeChangedCallback`
+### 2. 세로/가로 정렬
 
-메인 작업창에서 꼭 복제할 구조:
-- `Navigation Decision -> Scroll Plan -> Single Apply`
-- 조상, 활성 카드, 자손 컬럼을 한 번에 계산하는 per-column policy
-- 최근 활성 히스토리를 이용해 자손 컬럼의 우선 대상을 고르는 구조
-- 세로 스크롤과 가로 스크롤을 각각 단일 실행기가 소유하는 구조
-- 새 스크롤 명령이 이전 애니메이션을 덮어쓰는 overwrite semantics
-- 활성 편집기만 live editor로 취급하고, 활성 편집기에는 모델 텍스트를 덮어쓰지 않는 원칙
+반드시 만족해야 한다.
 
-## 현재 우리 메인 작업창이 징코와 다른 이유
+- 세로 정렬은 징코의 `Center / Before / After / Between / None` 규칙과 같은 의미를 가져야 한다.
+- 가로 정렬은 활성 컬럼 중심 정렬 하나만 사용한다.
+- 입력 1회에 대해 가로 1회, 필요한 컬럼 세로 1회만 적용한다.
+- 적용 직후 추가 verify 보정이 들어오지 않아야 한다.
 
-현재 메인 작업창의 주 경로는 한 번의 입력에 대해 너무 많은 계층이 개입한다.
+### 3. undo
 
-현재 hot path:
-- `WriterKeyboardHandlers.performMainArrowNavigation`가 타깃 계산과 preemptive intent 발행을 동시에 한다.
-- `WriterCardManagement.publishPreemptiveMainColumnFocusNavigationIntent`가 활성 변경 전 스크롤 예고를 발행한다.
-- `WriterCardManagement.changeActiveCard`가 활성 카드와 관계 상태를 바꾼다.
-- `WriterViews.syncMainCanvasInteractionState`가 `focusNavigationTick`를 올려 다시 스크롤 경로를 깨운다.
-- `WriterViews.handleMainCanvasActiveCardChange`가 메인 캔버스 가로 스크롤을 다시 건드린다.
-- `WriterCardManagement.handleMainColumnNavigationIntent`가 각 컬럼에서 intent를 소비한다.
-- `WriterCardManagement.scheduleMainColumnActiveCardFocus`가 지연 실행을 건다.
-- `WriterCardManagement.scrollToFocus`가 정렬과 keep-visible을 다시 분기한다.
-- `WriterCardManagement.scheduleMainColumnFocusVerification`가 verification retry 사다리를 추가한다.
-- `WriterViews.scheduleMainCanvasClickHorizontalFocusAlignment`가 가로 정렬 retry 사다리를 추가한다.
+undo는 징코의 사용자 모델을 그대로 따라간다.
 
-현재 구조의 결과:
-- 활성 카드 결정과 스크롤 결정이 분리되어 있지 않다.
-- 세로 스크롤과 가로 스크롤의 소유자가 여러 군데에 흩어져 있다.
-- preemptive scroll, actual scroll, settle recovery, restore retry가 서로 겹친다.
-- 한 번의 입력이 여러 work item과 여러 verify 경로를 만든다.
-- 최신 입력보다 늦은 애니메이션 completion이나 verify가 뒤늦게 개입할 수 있다.
+메인 작업창 일반 모드:
+- 카드 편집 중이면 `NSTextView`의 native undo/redo를 사용한다.
+- 카드 비편집 상태에서 `Cmd+Z`는 메모리 스냅샷 복원이 아니라 version history undo 의미로 동작한다.
+- 지금 WA의 `ScenarioState` 전체 스냅샷 기반 undo를 메인 작업창 일반 모드의 기본 undo로 유지하지 않는다.
 
-즉, 지금 메인 작업창은 징코처럼 가볍게 느껴지는 구조가 아니라, 여러 보정 계층이 서로 충돌하지 않게 붙잡고 있는 구조다.
+즉:
+- 텍스트 편집 undo와 문서 히스토리 undo를 분리한다.
+- 징코처럼 "편집 중 텍스트 undo"와 "일반 모드 history undo"가 다른 경로여야 한다.
+
+### 4. 기준 점수
+
+이 계획은 9점 미만이면 실패다.
+
+판정 기준:
+- 사용자가 징코와 비교해도 "하늘과 땅 차이"가 아니라 "거의 같다"라고 느껴야 한다.
+- 정렬이 한 번에 맞지 않거나, 두 번째 보정이 보이면 실패다.
+- undo가 지금처럼 "앱 상태 전체 snapshot 복원" 느낌이면 실패다.
+
+## 현재 구조에 대한 판정
+
+현재 WA 메인 작업창은 아래 이유로 징코와 거리가 멀다.
+
+1. hot path가 여전히 길다.
+- 현재는 `MainWorkspaceScrollPlan`, `MainWorkspaceScrollDriver`, surface controller, render state fingerprint가 함께 움직인다.
+- 징코보다 책임 레이어가 많다.
+
+2. 세로 정렬 owner가 너무 많다.
+- surface, column observer, geometry cache, restore, verify의 흔적이 남아 있다.
+- 그래서 정렬이 한 번에 맞지 않는 회귀가 반복된다.
+
+3. undo 철학이 다르다.
+- 현재 WA는 `ScenarioState` 전체 스냅샷을 메모리에 쌓아 복원한다.
+- 징코는 일반 모드에서 immutable history/commit 관점으로 undo를 다룬다.
+
+4. 메인 작업창이 아직도 "큰 SwiftUI 상태 트리"의 일부다.
+- 징코는 문서 모드의 핵심 경로가 훨씬 더 얇다.
 
 ## 새 목표 구조
 
-메인 작업창의 새 주 경로는 아래 세 단계로 고정한다.
+이번에는 구조를 아래처럼 다시 잡는다.
 
-1. `MainWorkspaceNavigationModel`
-2. `MainWorkspaceScrollPlan`
-3. `MainWorkspaceScrollExecutor`
+### A. `MainWorkspaceDocRuntime`
 
-보조 원칙:
-- 메인 작업창에서 활성 편집기 보호를 별도 규칙으로 둔다.
-- 메인 작업창 hot path에서는 preview intent, retry ladder, settle recovery를 제거한다.
-- 포커스 모드와 다른 뷰는 이 구조에 끌어들이지 않는다.
+역할:
+- 징코의 `Page.Doc.changeMode`와 같은 역할
 
-## 1. MainWorkspaceNavigationModel
+책임:
+- active card
+- active past
+- ancestors
+- descendants
+- editing / normal mode 전환
+- save-if-needed
 
-목적:
-- DOM, geometry, scroll state를 보기 전에 메인 작업창의 다음 활성 카드를 순수 모델에서 결정한다.
+강제 규칙:
+- 메인 작업창 활성 전환은 이 runtime 하나에서만 결정한다.
+- active/history/ancestor/descendant를 서로 다른 곳에서 따로 갱신하지 않는다.
 
-입력:
-- 현재 활성 카드
-- 현재 트리 구조
-- 메인 작업창 전용 `activeHistory` 최근 40개
-- `lastSelectedChildID` 기반의 branch-local fallback 기억
-- 표시 중인 메인 컬럼 구조
-- 사용자 입력 방향
+### B. `MainWorkspaceTreeProjection`
+
+역할:
+- 현재 시나리오를 징코가 기대하는 "column tree" 형태로 투영한다.
+
+책임:
+- visible columns
+- level별 visible cards
+- active 위치
+- category boundary 이동 정보
+
+중요:
+- 이 레이어는 순수 데이터 계산만 한다.
+
+### C. `MainWorkspaceScrollPositions`
+
+역할:
+- 징코의 `getScrollPositions`를 Swift로 그대로 옮긴 레이어
 
 출력:
-- `newActiveID`
-- `activeAncestorIDs`
-- `activeDescendantIDs`
-- `activeHistory`
-- `preferredDescendantPath`
-- `targetLevel`
-- `trigger`
+- 컬럼별 `Center / Before / After / Between / None`
+- 활성 컬럼 index
+- instant 여부
 
-원칙:
-- 화살표 입력 단계에서는 더 이상 preemptive scroll을 실행하지 않는다.
-- `performMainArrowNavigation`은 타깃 카드 결정까지만 담당한다.
-- `changeActiveCard`는 활성 상태 적용만 담당한다.
-- 메인 작업창에서 다음 카드 결정은 항상 모델 우선이다.
-- 징코의 `activePast`에 대응하는 최근 활성 히스토리를 메인 작업창 전용 보조 상태로 유지한다.
-- `lastSelectedChildID`는 완전 교체하지 않고, `activeHistory`가 해당 깊이에서 해답을 주지 못할 때 fallback으로만 쓴다.
+강제 규칙:
+- 메인 작업창 세로 정렬 정책은 이 함수 하나에서만 계산한다.
+- 지금의 범용 `MainWorkspaceScrollPlan`은 일반 모드 hot path에서 제거한다.
 
-징코 대응:
-- `goUp/goDown/goLeft/goRight`
-- `changeMode` 진입 직전의 active target 계산
+### D. `MainWorkspaceCanvasView`
 
-우리 코드에서 교체 대상:
-- `publishPreemptiveMainColumnFocusNavigationIntent`
-- `pendingMainPreemptiveFocusNavigationTargetID`
-- 활성 변경 전 가로 정렬 preview
+역할:
+- 징코의 `scrollColumns`, `scrollHorizTo`, `scrollTo`에 해당하는 AppKit canvas
 
-## 2. MainWorkspaceScrollPlan
+책임:
+- 컬럼 scroll view 직접 보유
+- 가로 scroll view 직접 보유
+- target card view lookup
+- column index lookup
+- direct scroll offset 적용
 
-목적:
-- 활성 카드가 바뀐 뒤 메인 작업창 전체 컬럼에 대해 한 번만 스크롤 계획을 만든다.
+강제 규칙:
+- 세로 정렬 적용은 `columnScrollView.contentView.bounds.origin.y = targetY` 한 번으로 끝난다.
+- 가로 정렬 적용은 `horizontalScrollView.contentView.bounds.origin.x = targetX` 한 번으로 끝난다.
+- broad `layoutSubtreeIfNeeded()` 호출 금지
+- verify ladder 금지
+- target view가 아직 없으면 다음 run loop 1회만 defer
 
-중요한 범위 결정:
-- 이 계획은 `포커스 모드`용 단일 세로 컬럼 계획이 아니다.
-- 메인 작업창은 징코와 동일하게 다중 컬럼이므로, scroll plan도 per-column policy를 계산해야 한다.
+### E. `MainWorkspaceEditSession`
 
-계획이 계산할 것:
-- 가로 캔버스의 목표 level
-- 가로 캔버스의 목표 `targetX`
-- 각 세로 컬럼의 목표 카드와 목표 정렬 정책
-- oversize 카드의 clamped center 처리
-- 조상 컬럼, 활성 컬럼, 자손 컬럼, 그 밖의 컬럼 표시 정책
-- 이번 scroll transaction의 `animated` 여부
+역할:
+- 일반 모드 카드 편집 세션 관리
 
-제안 타입:
-- `MainWorkspaceScrollPlan`
-- `MainWorkspaceColumnPlan`
-- `MainWorkspaceColumnPolicy`
+책임:
+- 현재 편집기 responder 소유
+- edit enter / save / exit
+- native text undo 연결
+- model overwrite 차단
 
-`MainWorkspaceColumnPolicy`는 징코 `getScrollPositions`와 동형으로 설계한다.
+강제 규칙:
+- 편집 중 typing undo는 `NSTextView`가 담당한다.
+- 일반 모드 문서 undo와 섞지 않는다.
 
-정책 목록:
-- `.centerActive(cardID)`
-- `.centerAncestor(cardID)`
-- `.centerPreferredDescendant(cardID)`
-- `.centerOtherDescendant(cardID)`
-- `.between(afterID, beforeID)`
-- `.before(cardID)`
-- `.after(cardID)`
-- `.none`
+### F. `MainWorkspaceHistoryStore`
 
-추가 anchor 규칙:
-- 카드 높이가 viewport보다 크면 top-anchor로 바꾸지 않는다.
-- 대신 징코처럼 카드의 유효 높이를 clamp한 뒤 center 계산을 유지한다.
-- 기본 규칙은 `clampedCenter(maxHeight: viewportHeight * 0.5 + chromeInset)`로 둔다.
-- `chromeInset`은 징코의 `51px` 역할에 해당하는 메인 작업창 고정 여백으로 정의한다.
-- 이 규칙은 column policy와 별도로 `anchorMode`로 둔다.
+역할:
+- 징코식 immutable commit/history 모델
 
-plan builder의 책임:
-- 활성 컬럼은 활성 카드를 기준으로 계산한다.
-- 조상 컬럼은 해당 컬럼 안의 active ancestor를 선택한다.
-- 자손 컬럼은 `activeHistory`에서 해당 서브트리에 속하는 가장 최근 활성 카드를 먼저 찾는다.
-- `activeHistory`가 해당 깊이에 답을 주지 못하면 `lastSelectedChildID` 사슬을 fallback으로 사용한다.
-- 기타 컬럼은 현재 활성 카드의 preorder 기준 앞뒤 카드로 `before/after/between`을 계산한다.
-- 가로 캔버스는 target level을 한 번만 계산한다.
-- scroll policy 계산 대상은 실제 표시 컬럼만 포함한다.
-- 징코의 synthetic root에 해당하는 가상 컨테이너가 있다면 제외한다.
-- 우리 앱의 visible `level 0`은 실제 루트 카드 컬럼이므로 제외하지 않는다.
+책임:
+- commit object append
+- head ref
+- checkout / restore source
+- 일반 모드 undo의 backing store
 
-징코 대응:
-- `TreeUtils.getScrollPositions`
+구현 원칙:
+- 저장 엔진은 `.wtf` 내부 key-value store 또는 sqlite table일 수 있다.
+- 하지만 모델은 반드시 "immutable object + head ref"여야 한다.
+- 현재 WA의 in-memory scenario snapshot undo를 일반 모드 기본 undo로 계속 쓰지 않는다.
 
-우리 코드에서 교체 대상:
-- `resolvedMainColumnFocusTargetID`
-- `resolvedMainColumnPreferredDescendantTargetID`
-- 컬럼별 `keepVisible`와 `forceAlignment` 분기 중심 판단
-- `handleMainCanvasActiveCardChange` 안의 별도 가로 정렬 판단
-- `oneStep / twoStep` 중심의 가로 이동 의미 체계
+## 저장 구조 결정
 
-## 3. MainWorkspaceScrollExecutor
+현재 `.wtf` 패키지는 유지한다.
+
+대신 메인 작업창 일반 모드 undo/history는 아래처럼 재편한다.
+
+- 기존 시나리오 카드 저장:
+  - 계속 `.wtf` 내부 JSON + card text 파일 유지 가능
+- 새 history store:
+  - `.wtf/history_store/` 하위에 immutable commit object 저장
+  - commit graph + head ref + metadata 유지
+
+즉:
+- 카드 본문 저장 구조와
+- undo/history 구조를 분리한다.
 
 목적:
-- 메인 작업창에서 세로와 가로 스크롤을 실행하는 유일한 소유자가 된다.
+- 사용자는 여전히 `.wtf`를 쓴다.
+- 그러나 일반 모드 undo는 징코처럼 commit 기반이 된다.
 
-입력:
-- `MainWorkspaceScrollPlan`
-- 최신 generation id
+## 기존 구조에서 폐기할 것
 
-`MainWorkspaceScrollPlan` 필수 필드:
-- `animated: Bool`
-- `horizontalTargetX: CGFloat`
-- `columnPlans: [MainWorkspaceColumnPlan]`
+메인 작업창 일반 모드 hot path에서 제거 대상:
+- `MainWorkspaceScrollPlan` 기반 범용 계획/검증 구조
+- `MainWorkspaceScrollDriver`의 verify/retry ownership
+- `navigationFingerprint` 기반 hot path 재실행
+- `PreferenceKey` 기반 상시 프레임 관찰
+- `boundsDidChange -> state write -> re-evaluate` 루프
+- `ScenarioState` 전체 스냅샷 기반 일반 undo
+- 일반 모드에서의 `mainTypingUndoStack`
+- 일반 모드에서의 `undoStack`, `redoStack` 기본 경로
 
-실행 순서:
-1. 새 plan이 오면 진행 중인 메인 작업창 스크롤 애니메이션을 취소한다.
-2. 메인 작업창 레이아웃을 동기적으로 확정한다.
-3. 확정된 레이아웃에서 rect를 측정한다.
-4. 세로 컬럼 스크롤과 가로 캔버스 스크롤을 같은 generation으로 적용한다.
-5. 끝나면 generation 일치 조건에서만 1회 verify 한다.
+남겨도 되는 것:
+- 포커스 모드 전용 undo
+- 인덱스보드 전용 undo
+- `.wtf` 파일 저장 인프라
 
-애니메이션 overwrite 원칙:
-- 새 plan은 이전 plan의 vertical animation, horizontal animation, completion, verify를 모두 무효화한다.
-- 오래된 completion callback이 최신 위치를 덮어쓰면 실패다.
+## 구현 원칙
 
-레이아웃 타이밍 계약:
-- rect 측정 전에는 메인 작업창 관련 NSView 트리에 `layoutSubtreeIfNeeded()`를 강제한다.
-- 활성 NSTextView가 있다면 TextKit layout도 확정한 뒤 측정한다.
-- 측정 전 layout, 측정 후 apply 순서를 문서상 계약으로 고정한다.
+### 1. 더 이상 "현 구조를 다듬지 않는다"
 
-target view 부재 처리:
-- target view가 아직 없으면 다음 run loop 1회만 대기 후 다시 측정한다.
-- 그래도 target view가 없으면 이번 plan은 포기하고 다음 상태 변경을 기다린다.
-- 메인 작업창 hot path에 다단 retry ladder를 다시 만들지 않는다.
+금지:
+- suppress flag 추가
+- retry 횟수 조정
+- delay 숫자 조정
+- observer를 남긴 채 owner만 교체
 
-애니메이션 계약:
-- `animated == false`인 plan은 복원, 첫 진입, semantic restore 같은 비즉각 이동에서 사용한다.
-- `animated == true`인 plan만 animation context를 사용한다.
-- 메인 작업창 executor는 자체 판단으로 애니메이션을 추가하지 않는다.
+이번에는 포팅한다.
 
-스크롤 충돌 억제:
-- 세로 컬럼 스크롤은 메인 작업창 vertical executor만 소유한다.
-- 가로 캔버스 스크롤은 메인 작업창 horizontal executor만 소유한다.
-- 실행 중에는 아래 개입을 억제한다.
-- `scheduleMainCanvasClickHorizontalFocusAlignment`
-- `navigationSettleTick` 기반 가로 재정렬
-- restore retry가 hot path를 덮는 경로
-- proxy fallback과 native scroll이 동시에 경쟁하는 경로
+### 2. 알고리즘 parity를 먼저 맞춘다
 
-메인 작업창에서의 억제 대상 구체화:
-- 징코의 `scroll-snap none`과 정확히 같은 CSS 동작은 없다.
-- 대신 AppKit에서 억제해야 하는 것은 `다른 scroll owner`, `늦은 restore`, `늦은 settle`, `중복 apply`다.
-- 세로 스크롤 자체에 과한 suppression layer를 추가하는 것이 목표가 아니다.
-- 목표는 메인 작업창에서 스크롤 소유자를 하나로 만드는 것이다.
+순서:
+- 징코의 `changeMode`
+- 징코의 `getScrollPositions`
+- 징코의 `scrollColumns / scrollHorizTo`
+- 징코의 undo 의미
 
-가로 스크롤 목표 공식:
-- 가로 스크롤은 "활성 컬럼을 뷰포트 가로 중앙에 놓는 것"으로 고정한다.
-- 목표식은 징코와 동일하게 `columnMinX + 0.5 * (columnWidth - viewportWidth)` 계열의 중앙 정렬 공식을 사용한다.
-- 구현자가 컬럼 왼쪽 끝 snap이나 2단계 예고 정렬로 해석하면 실패다.
+이 순서가 바뀌면 안 된다.
 
-verify 원칙:
-- verify는 generation이 맞을 때만 1회 실행한다.
-- verify는 target이 없을 때 구조적 재시도를 만들지 않는다.
-- verify는 hot path가 아니라 안전장치여야 한다.
+### 3. 한 단계씩 삭제까지 완료한다
 
-징코 대응:
-- `doc-helpers.js scrollColumns`
-- `doc-helpers.js scrollHorizontal`
-- GSAP overwrite에 해당하는 cancellation semantics
+각 단계 완료 기준:
+- 새 경로 추가
+- 기존 hot path 호출 제거
+- dead code 삭제
 
-우리 코드에서 교체 대상:
-- `handleMainColumnNavigationIntent`
-- `scheduleMainColumnActiveCardFocus`
-- `scrollToFocus`
-- `scheduleMainColumnFocusVerification`
-- `scheduleMainCanvasClickHorizontalFocusAlignment`
-- `handleMainCanvasNavigationSettle`
+새 경로를 얹고 기존 경로를 남겨두는 방식은 실패다.
 
-## 4. MainWorkspaceActiveEditorGuard
+## 구현 단계
+
+### Phase 0. Parity Harness
 
 목적:
-- 메인 작업창의 활성 편집기만 live editor로 다루고, 활성 편집기에는 모델 텍스트를 덮어쓰지 않는다.
+- 징코와 WA를 같은 문서 구조에서 비교 가능한 상태로 만든다.
 
-현재 상태 판단:
-- 메인 작업창은 이미 `editingCardID` 기준으로 실질적인 단일 live editor 구조에 가깝다.
-- 하지만 `MainWorkspaceEditableTextRenderer.updateNSView`는 `textView.string != text`이면 활성 상태와 무관하게 editor 내용을 다시 넣는다.
-- 이 구조는 모델 업데이트가 내려올 때 caret jump를 만들 여지가 있다.
+작업:
+- deep tree fixture 3개 준비
+- 활성 전환 시 기대 column policy golden 저장
+- 징코 기준 active/history/ancestor/descendant 결과 golden 저장
+- 징코 기준 세로/가로 target offset golden 저장
+- 메인 작업창 체감 점수 체크리스트 작성
 
-새 원칙:
-- 활성 NSTextView가 first responder이고 동일 card session이면 모델에서 오는 text replacement를 적용하지 않는다.
-- editor에서 model로 가는 업데이트는 계속 허용한다.
-- model에서 editor로 가는 업데이트는 editor가 비활성일 때만 적용한다.
-- 외부 강제 세션 전환이 있을 때만 explicit reset을 허용한다.
+완료 기준:
+- 이후 단계는 모두 "징코와 같은 결과인가"로 판정 가능해야 한다.
 
-징코 대응:
-- `gw-textarea.attributeChangedCallback`
-- `!this._isActive()` 가드
-
-우리 코드에서 교체 대상:
-- `WriterCardViews.MainWorkspaceEditableTextRenderer.updateTextView`
-
-유지할 것:
-- 메인 작업창에서 비활성 카드는 정적 렌더링
-- 활성 카드 높이는 live editor 측정값 우선
-- 비활성 카드 높이는 캐시 기반 계산
-
-## 5. 메인 작업창에서 삭제하거나 hot path 밖으로 밀어낼 것
-
-삭제 대상은 "프로젝트 전체 삭제"가 아니라 "메인 작업창 주 경로에서 제거"를 뜻한다.
-
-우선 제거 대상:
-- `publishPreemptiveMainColumnFocusNavigationIntent`
-- `pendingMainPreemptiveFocusNavigationTargetID`
-- `focusNavigationTick` 기반 메인 작업창 세로 정렬 전달
-- `scheduleMainColumnActiveCardFocus`
-- `scheduleMainColumnFocusVerification`의 다단 retry
-- `scheduleMainCanvasClickHorizontalFocusAlignment`의 다단 retry
-- `navigationSettleTick` 기반 강제 재정렬
-- hot path에서의 `suppressHorizontalAutoScroll` 봉합 경로
-- preview scroll과 actual scroll이 둘 다 존재하는 구조
-- 메인 작업창 hot path의 `oneStep / twoStep` 분기
-
-조건부 유지:
-- restore 기능이 메인 작업창 외 시나리오에 필요하면 남길 수 있다.
-- 단, 메인 작업창 입력 hot path에는 다시 들어오면 안 된다.
-
-실패 조건:
-- 새 구조를 넣은 뒤에도 메인 작업창 화살표 입력이 multiple work item, multiple verify, multiple scroll owner를 만든다면 실패다.
-
-## 구현 Phase
-
-### Phase 0. 기준선 측정
-
-측정 항목:
-- 화살표 입력부터 첫 스크롤 apply 시작까지 시간
-- 화살표 연타 시 animation overlap count
-- vertical verify retry count
-- horizontal retry count
-- active editor caret jump 재현 횟수
+### Phase 1. `changeMode` 포팅
 
 목적:
-- 메인 작업창이 실제로 가벼워졌는지 체감이 아니라 데이터로 확인한다.
-
-### Phase 1. MainWorkspaceNavigationModel 분리
+- 활성 전환의 중심을 징코와 같은 단일 함수로 옮긴다.
 
 작업:
-- 메인 작업창의 카드 이동 결정을 순수 모델 계층으로 뺀다.
-- 화살표 처리에서 preemptive scroll 발행을 제거한다.
-- 활성 카드 변경은 `newActiveID` 적용과 relation state 동기화까지만 담당하게 한다.
+- `MainWorkspaceDocRuntime.changeMode(...)` 도입
+- active card, active past, ancestors, descendants를 한 함수에서 갱신
+- 일반 모드 편집 enter/exit도 이 경로에서 관리
 
 완료 기준:
-- 메인 작업창에서 입력 1회당 활성 카드 결정은 정확히 1회만 일어난다.
+- 메인 작업창 일반 모드에서 active/history/relation 갱신 owner가 하나다.
 
-### Phase 2. MainWorkspaceScrollPlan 도입
+### Phase 2. `getScrollPositions` 포팅
+
+목적:
+- 세로 정렬 정책을 징코와 같은 계산으로 만든다.
 
 작업:
-- 활성 카드 변경 뒤 메인 작업창 전체 컬럼에 대한 scroll plan을 한 번 생성한다.
-- plan은 징코처럼 조상, 활성, 자손, 주변 컬럼 정책을 모두 포함한다.
-- plan은 가로 `targetLevel`, 가로 `targetX`, `animated` 여부를 함께 포함한다.
+- 징코 `TreeUtils.getScrollPositions`를 Swift로 그대로 포팅
+- output enum도 `Center / Before / After / Between / None` 의미를 유지
+- golden fixture와 1:1 비교
 
 완료 기준:
-- 메인 작업창에서 세로 컬럼과 가로 캔버스가 같은 plan generation으로 묶인다.
+- fixture 기준 징코와 동일한 scroll policy가 나온다.
 
-### Phase 3. MainWorkspaceScrollExecutor 교체
+### Phase 3. Direct Scroll Canvas
+
+목적:
+- `scrollTop/scrollLeft` 직접 적용 경로를 만든다.
 
 작업:
-- 메인 작업창 스크롤 실행기를 단일 소유자로 교체한다.
-- animation cancel, layout contract, single apply, single verify를 구현한다.
-- 다단 retry와 settle recovery를 hot path에서 제거한다.
+- `MainWorkspaceCanvasView.scrollColumns(...)`
+- `MainWorkspaceCanvasView.scrollHorizTo(...)`
+- 컬럼/카드 view lookup registry 구현
+- direct offset apply 구현
 
 완료 기준:
-- 빠른 연타 시 이전 animation은 최신 plan에 의해 즉시 무효화된다.
-- rect 측정은 항상 layout 확정 뒤에 일어난다.
-- 메인 작업창 입력 hot path에 다단 verification 사다리가 남아 있지 않다.
+- 입력 1회당 direct apply 1회만 발생한다.
+- verify ladder가 없다.
 
-### Phase 4. MainWorkspaceActiveEditorGuard 적용
+### Phase 4. 일반 모드 렌더 교체
+
+목적:
+- 메인 작업창 일반 모드를 징코식 imperative canvas에 완전히 연결한다.
 
 작업:
-- 활성 editor 보호 가드를 넣는다.
-- 활성 text view에는 model text replacement를 막는다.
-- blur 또는 명시적 session reset 시에만 model->editor sync를 허용한다.
+- 기존 surface/controller/render fingerprint 경로 제거
+- 일반 모드 column/card mount를 canvas registry 방식으로 교체
+- geometry 상시 publish 제거
 
 완료 기준:
-- 메인 작업창 편집 중 외부 state change가 와도 caret가 튀지 않는다.
+- 일반 모드 hot path에서 SwiftUI observer 기반 재정렬이 사라진다.
 
-### Phase 5. 레거시 main workspace 경로 삭제
+### Phase 5. Undo / History 교체
+
+목적:
+- undo를 징코와 같은 사용자 모델로 바꾼다.
 
 작업:
-- 더 이상 필요 없는 preview intent, click alignment retry, settle recovery, verify retry를 정리한다.
-- 메인 작업창 전용 hot path와 비범위 뷰 경로를 분리한다.
+- 일반 모드 편집 중: `NSTextView` native undo
+- 일반 모드 비편집: version history undo
+- immutable commit store 도입
+- 기존 scenario snapshot undo를 일반 모드 경로에서 제거
 
 완료 기준:
-- 메인 작업창 관련 코드가 "결정 -> plan -> apply" 구조로 읽힌다.
+- `Cmd+Z` 의미가 징코와 같아진다.
+- 일반 모드에서 whole-scenario snapshot restore가 기본 undo가 아니다.
+
+### Phase 6. Old Path 삭제
+
+목적:
+- 기존 WA식 hot path를 실제로 지운다.
+
+작업:
+- 일반 모드에서 old scroll plan/driver 삭제
+- 일반 모드 undo snapshot stack 삭제
+- 남은 adapter 정리
+
+완료 기준:
+- 메인 작업창 일반 모드 코드만 읽어도 징코식 경로가 보인다.
 
 ## 수용 기준
 
-1. 메인 작업창만 바뀌고 포커스 모드, 인덱스카드 뷰, 히스토리 뷰는 동작이 유지된다.
-2. 화살표 입력 1회는 활성 카드 결정 1회와 scroll plan 생성 1회만 유발한다.
-3. 메인 작업창의 scroll plan은 조상, 활성, 자손, 주변 컬럼 정책을 징코처럼 per-column으로 계산한다.
-4. 메인 작업창은 최근 활성 `activeHistory`를 유지하고, 자손 컬럼 정책 계산에 이를 사용한다.
-5. oversize 카드는 top-anchor가 아니라 clamped center 규칙으로 정렬된다.
-6. 세로 컬럼 스크롤과 가로 캔버스 스크롤은 같은 generation의 executor가 한 번만 적용한다.
-7. 빠른 연타 시 이전 animation과 completion은 최신 plan에 의해 무효화된다.
-8. rect 측정은 항상 layout 확정 뒤에만 일어난다.
-9. target view가 없을 때 재시도는 다음 run loop 1회까지만 허용된다.
-10. 활성 main editor에 model 업데이트가 내려와도 caret 위치가 바뀌지 않는다.
-11. 가로 스크롤 목표는 항상 활성 컬럼 중앙 정렬 공식으로 계산된다.
-12. 우리 앱의 visible `level 0` 루트 컬럼은 scroll plan 계산 대상에 포함된다.
-13. 메인 작업창 hot path에는 preview scroll, click-focus retry ladder, multi-pass verify ladder가 남아 있지 않다.
-14. 체감상 메인 작업창의 카드 이동과 스크롤이 징코처럼 즉각적이고 가볍게 느껴진다.
+아래를 모두 만족해야 완료다.
 
-## 구현 중 금지
+1. 활성 전환 hot path가 `changeMode -> getScrollPositions -> direct scroll`로 읽힌다.
+2. 메인 작업창 일반 모드에서 `MainWorkspaceScrollPlan`과 `MainWorkspaceScrollDriver`가 hot path가 아니다.
+3. 상하 이동 시 세로 정렬은 한 번에 끝난다.
+4. 좌우 이동 시 가로 정렬은 한 번에 끝난다.
+5. 입력 1회에 대해 "잠깐 뒤 두 번째 보정"이 없다.
+6. 일반 모드 편집 중 undo는 native text undo다.
+7. 일반 모드 비편집 `Cmd+Z`는 version history undo다.
+8. 일반 모드 기본 undo가 `ScenarioState` 전체 snapshot 복원이 아니다.
+9. deep fixture 기준 사용자가 9점 이상을 준다.
 
-- 포커스 모드 코드를 끌어와 메인 작업창 계획을 채우는 것
-- 메인 작업창 문제를 suppress flag 추가로 봉합하는 것
-- retry 계층을 다시 만드는 것
-- restore 로직을 hot path의 일부로 되돌리는 것
-- "일단 보조 경로로 남겨두자"며 주 경로를 다시 오염시키는 것
+## 금지
+
+- 현 구조 위에 또 다른 patch layer를 얹는 것
+- 일반 모드에서 old/new hot path를 동시에 유지하는 것
+- 일반 모드 undo에 snapshot restore를 남겨두는 것
+- 세로 정렬 실패를 retry와 verify로 감추는 것
+- "체감상 조금 나아졌다"를 완료로 선언하는 것
 
 ## 최종 선언
 
-이 문서는 징코의 메인 작업창 구조를 우리 메인 작업창에 복제하기 위한 기준 문서다.
+이번 계획은 기존 WA 메인 작업창을 "최적화"하는 계획이 아니다.
 
-성공 조건은 "조금 덜 불편함"이 아니다.
-- 메인 작업창에서 징코처럼 한 번 결정하고 한 번 움직이는 구조가 되어야 한다.
-- 그 구조가 코드에서 바로 읽혀야 한다.
-- 그 질감이 실제 인터랙션에서 느껴져야 한다.
+이번 계획은:
+- 징코 문서 모드의 핵심 실행 경로를
+- WA 메인 작업창 일반 모드에
+- 알고리즘과 사용자 모델 수준에서 다시 이식하는 계획이다.
 
-그 수준에 못 미치면 이 계획은 완료가 아니다.
+성공 조건은 명확하다.
+
+- 사용자가 더 이상 "하늘과 땅 차이"라고 느끼지 않아야 한다.
+- 점수로는 9점 이상이어야 한다.

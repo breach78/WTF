@@ -277,6 +277,26 @@ struct MainWorkspaceNavigationModel {
         case unavailable
     }
 
+    static func resolve(
+        snapshot: MainWorkspaceStateSnapshot,
+        direction: ScenarioWriterView.MainArrowDirection,
+        allowChildlessRightFallback: Bool,
+        isChildlessRightFallbackArmed: Bool
+    ) -> Result {
+        resolve(
+            Input(
+                direction: direction,
+                activeCardID: snapshot.activeCardID,
+                rootCards: snapshot.rootCards,
+                levels: snapshot.levels,
+                boundaryNavigableLevels: snapshot.boundaryNavigableLevels,
+                activeHistory: snapshot.activeHistory,
+                allowChildlessRightFallback: allowChildlessRightFallback,
+                isChildlessRightFallbackArmed: isChildlessRightFallbackArmed
+            )
+        )
+    }
+
     static func resolve(_ input: Input) -> Result {
         guard let activeCardID = input.activeCardID else {
             guard let firstRoot = input.rootCards.first else { return .unavailable }
@@ -287,6 +307,7 @@ struct MainWorkspaceNavigationModel {
                     targetCard: firstRoot,
                     updatedActiveHistory: updatedActiveHistory(
                         input.activeHistory,
+                        previousActiveID: nil,
                         nextActiveID: firstRoot.id
                     )
                 )
@@ -372,7 +393,7 @@ struct MainWorkspaceNavigationModel {
             if let visibleSelection = preferredVisibleNavigationChildSelection(
                 sourceCardID: activeCardID,
                 visibleChildren: visibleNextChildren,
-                matching: card.category,
+                matching: nil,
                 activeHistory: input.activeHistory
             ) {
                 return decision(
@@ -384,7 +405,7 @@ struct MainWorkspaceNavigationModel {
             }
             if let childSelection = preferredNavigationChildSelection(
                 for: card,
-                matching: card.category,
+                matching: nil,
                 activeHistory: input.activeHistory
             ) {
                 mainWorkspacePhase0Log(
@@ -399,11 +420,17 @@ struct MainWorkspaceNavigationModel {
                     activeHistory: input.activeHistory
                 )
             }
-            guard input.allowChildlessRightFallback else { return .unavailable }
+            guard input.allowChildlessRightFallback else {
+                mainWorkspacePhase0Log(
+                    "right-target-monitor",
+                    "source=\(mainWorkspacePhase0CardID(activeCardID)) mode=noChildren visibleChildren=\(mainWorkspacePhase0CardList(visibleNextChildren.map(\.id))) result=unavailable"
+                )
+                return .unavailable
+            }
             guard input.isChildlessRightFallbackArmed else {
                 mainWorkspacePhase0Log(
                     "right-target-monitor",
-                    "source=\(mainWorkspacePhase0CardID(activeCardID)) mode=doublePressArm visibleChildren=\(mainWorkspacePhase0CardList(visibleNextChildren.map(\.id))) result=armed"
+                    "source=\(mainWorkspacePhase0CardID(activeCardID)) mode=noChildren visibleChildren=\(mainWorkspacePhase0CardList(visibleNextChildren.map(\.id))) result=armed"
                 )
                 return .armed
             }
@@ -420,6 +447,11 @@ struct MainWorkspaceNavigationModel {
                 matching: nil,
                 activeHistory: input.activeHistory
             ) {
+                mainWorkspacePhase0Log(
+                    "right-target-monitor",
+                    "source=\(mainWorkspacePhase0CardID(activeCardID)) mode=noChildFallback visibleChildren=\(mainWorkspacePhase0CardList(visibleNextChildren.map(\.id))) " +
+                    "target=\(mainWorkspacePhase0CardID(target.id))"
+                )
                 return decision(
                     direction: input.direction,
                     sourceCardID: activeCardID,
@@ -429,7 +461,7 @@ struct MainWorkspaceNavigationModel {
             }
             mainWorkspacePhase0Log(
                 "right-target-monitor",
-                "source=\(mainWorkspacePhase0CardID(activeCardID)) mode=doublePressFallback visibleChildren=\(mainWorkspacePhase0CardList(visibleNextChildren.map(\.id))) result=unavailable"
+                "source=\(mainWorkspacePhase0CardID(activeCardID)) mode=noChildren visibleChildren=\(mainWorkspacePhase0CardList(visibleNextChildren.map(\.id))) result=unavailable"
             )
             return .unavailable
         }
@@ -466,13 +498,6 @@ struct MainWorkspaceNavigationModel {
                     source: .activeHistory
                 )
             }
-            if let rememberedID = card.lastSelectedChildID,
-               let remembered = children.first(where: { $0.id == rememberedID && $0.category == category }) {
-                return PreferredNavigationChildSelection(
-                    child: remembered,
-                    source: .lastSelectedChild
-                )
-            }
             if let firstCategoryMatch = children.first(where: { $0.category == category }) {
                 return PreferredNavigationChildSelection(
                     child: firstCategoryMatch,
@@ -490,13 +515,6 @@ struct MainWorkspaceNavigationModel {
             return PreferredNavigationChildSelection(
                 child: historyMatch,
                 source: .activeHistory
-            )
-        }
-        if let rememberedID = card.lastSelectedChildID,
-           let remembered = children.first(where: { $0.id == rememberedID }) {
-            return PreferredNavigationChildSelection(
-                child: remembered,
-                source: .lastSelectedChild
             )
         }
         if let firstChild = children.first {
@@ -620,10 +638,15 @@ struct MainWorkspaceNavigationModel {
         return chosenParent?.child
     }
 
-    static func updatedActiveHistory(_ activeHistory: [UUID], nextActiveID: UUID?) -> [UUID] {
-        guard let nextActiveID else { return activeHistory }
-        var updated = activeHistory.filter { $0 != nextActiveID }
-        updated.insert(nextActiveID, at: 0)
+    static func updatedActiveHistory(
+        _ activeHistory: [UUID],
+        previousActiveID: UUID?,
+        nextActiveID: UUID?
+    ) -> [UUID] {
+        guard let previousActiveID else { return activeHistory }
+        guard previousActiveID != nextActiveID else { return activeHistory }
+        var updated = activeHistory.filter { $0 != previousActiveID }
+        updated.insert(previousActiveID, at: 0)
         if updated.count > activeHistoryLimit {
             updated.removeSubrange(activeHistoryLimit..<updated.count)
         }
@@ -643,6 +666,7 @@ struct MainWorkspaceNavigationModel {
                 targetCard: targetCard,
                 updatedActiveHistory: updatedActiveHistory(
                     activeHistory,
+                    previousActiveID: sourceCardID,
                     nextActiveID: targetCard.id
                 )
             )
@@ -856,8 +880,9 @@ final class WriterInteractionRuntime {
     var lastScrolledLevel: Int = 0
     var pendingMainHorizontalScrollAnimation: Bool? = nil
     var mainWorkspaceActiveHistory: [UUID] = []
+    var mainActiveEditorSessionID: Int = 0
+    var mainActiveEditorSessionCardID: UUID? = nil
     var pendingMainClickFocusTargetID: UUID? = nil
-    var pendingMainClickHorizontalFocusTargetID: UUID? = nil
     var pendingMainEditingViewportKeepVisibleCardID: UUID? = nil
     var pendingMainEditingViewportRevealEdge: MainEditingViewportRevealEdge? = nil
     var pendingMainEditingSiblingNavigationTargetID: UUID? = nil
@@ -878,7 +903,6 @@ final class WriterInteractionRuntime {
     var mainColumnPendingFocusVerificationWorkItemByKey: [String: DispatchWorkItem] = [:]
     var mainColumnViewportCaptureSuspendedUntil: Date = .distantPast
     var mainColumnViewportRestoreUntil: Date = .distantPast
-    var mainArrowNavigationSettleWorkItem: DispatchWorkItem? = nil
     var mainCaretLocationByCardID: [UUID: Int] = [:]
     var mainLineSpacingAppliedCardID: UUID? = nil
     var mainLineSpacingAppliedValue: CGFloat = -1
@@ -1019,13 +1043,7 @@ final class MainCanvasViewState: ObservableObject {
     @Published var pendingRestoreRequest: RestoreRequest? = nil
     @Published var suppressAutoScrollOnce: Bool = false
     @Published var suppressHorizontalAutoScroll: Bool = false
-    @Published var interactionFingerprint: Int = 0
-    @Published var focusNavigationTargetID: UUID? = nil
-    @Published var focusNavigationTrigger: String = "activeCardChange"
-    @Published var focusNavigationTick: Int = 0
-    @Published var navigationSettleTick: Int = 0
     @Published var mainWorkspaceScrollPlan: MainWorkspaceScrollPlan? = nil
-    @Published var mainWorkspaceScrollPlanTick: Int = 0
     @Published var maxLevelCount: Int = 0
 
     private var restoreRequestSequence: Int = 0
@@ -1052,7 +1070,6 @@ final class MainCanvasViewState: ObservableObject {
         mainWorkspaceScrollPlanSequence &+= 1
         nextPlan.generation = mainWorkspaceScrollPlanSequence
         mainWorkspaceScrollPlan = nextPlan
-        mainWorkspaceScrollPlanTick &+= 1
     }
 }
 

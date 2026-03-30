@@ -68,12 +68,7 @@ struct MainWorkspaceColumnPlan: Equatable {
     }
 
     var focusDelay: TimeInterval {
-        switch policy {
-        case .centerPreferredDescendant, .centerOtherDescendant:
-            return 0.10
-        default:
-            return 0
-        }
+        0
     }
 }
 
@@ -96,98 +91,6 @@ private struct MainWorkspaceVisibleDescendantSelection {
     let isPreferred: Bool
     let path: [UUID]
     let source: MainWorkspaceNavigationModel.PreferredNavigationChildSource
-}
-
-@MainActor
-final class MainWorkspaceScrollExecutor: ObservableObject {
-    private(set) var activeGeneration: Int = 0
-    private(set) var activeCardID: UUID? = nil
-
-    private var deferredApplyWorkItem: DispatchWorkItem? = nil
-    private var verifyWorkItem: DispatchWorkItem? = nil
-    private var deferredApplyGeneration: Int? = nil
-    private var pendingMissingViewportKeys: Set<String> = []
-
-    func reset() {
-        deferredApplyWorkItem?.cancel()
-        deferredApplyWorkItem = nil
-        verifyWorkItem?.cancel()
-        verifyWorkItem = nil
-        deferredApplyGeneration = nil
-        pendingMissingViewportKeys = []
-        activeGeneration = 0
-        activeCardID = nil
-    }
-
-    func begin(plan: MainWorkspaceScrollPlan) {
-        deferredApplyWorkItem?.cancel()
-        deferredApplyWorkItem = nil
-        verifyWorkItem?.cancel()
-        verifyWorkItem = nil
-        deferredApplyGeneration = nil
-        pendingMissingViewportKeys = []
-        activeGeneration = plan.generation
-        activeCardID = plan.activeCardID
-    }
-
-    func isCurrent(_ plan: MainWorkspaceScrollPlan) -> Bool {
-        activeGeneration == plan.generation && activeCardID == plan.activeCardID
-    }
-
-    func hasPendingWork(for cardID: UUID?) -> Bool {
-        guard let cardID else { return false }
-        guard activeCardID == cardID else { return false }
-        return deferredApplyWorkItem != nil || verifyWorkItem != nil
-    }
-
-    func setPendingMissingViewportKeys(
-        _ viewportKeys: [String],
-        for plan: MainWorkspaceScrollPlan
-    ) {
-        guard isCurrent(plan) else { return }
-        pendingMissingViewportKeys = Set(viewportKeys)
-    }
-
-    func hasPendingMissingViewportKeys(for plan: MainWorkspaceScrollPlan) -> Bool {
-        guard isCurrent(plan) else { return false }
-        return !pendingMissingViewportKeys.isEmpty
-    }
-
-    func scheduleDeferredApply(
-        for plan: MainWorkspaceScrollPlan,
-        action: @escaping () -> Void
-    ) {
-        guard deferredApplyGeneration != plan.generation else { return }
-        deferredApplyWorkItem?.cancel()
-        deferredApplyGeneration = plan.generation
-        let workItem = DispatchWorkItem { [weak self] in
-            defer {
-                self?.deferredApplyWorkItem = nil
-                if self?.deferredApplyGeneration == plan.generation {
-                    self?.deferredApplyGeneration = nil
-                }
-            }
-            guard self?.isCurrent(plan) == true else { return }
-            action()
-        }
-        deferredApplyWorkItem = workItem
-        DispatchQueue.main.async(execute: workItem)
-    }
-
-    func scheduleSingleVerify(
-        for plan: MainWorkspaceScrollPlan,
-        delay: TimeInterval,
-        action: @escaping () -> Void
-    ) {
-        verifyWorkItem?.cancel()
-        let workItem = DispatchWorkItem { [weak self] in
-            defer { self?.verifyWorkItem = nil }
-            guard self?.isCurrent(plan) == true else { return }
-            action()
-        }
-        verifyWorkItem = workItem
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: workItem)
-    }
 }
 
 extension ScenarioWriterView {
@@ -264,11 +167,11 @@ extension ScenarioWriterView {
 
     func executeMainWorkspaceScrollPlan(
         _ plan: MainWorkspaceScrollPlan,
-        proxy: ScrollViewProxy,
+        proxy: ScrollViewProxy? = nil,
         availableWidth: CGFloat
     ) {
         guard activeCardID == plan.activeCardID else { return }
-        mainWorkspaceScrollExecutor.begin(plan: plan)
+        mainWorkspaceScrollDriver.begin(plan: plan)
         applyMainWorkspaceScrollPlan(
             plan,
             proxy: proxy,
@@ -280,12 +183,12 @@ extension ScenarioWriterView {
 
     private func applyMainWorkspaceScrollPlan(
         _ plan: MainWorkspaceScrollPlan,
-        proxy: ScrollViewProxy,
+        proxy: ScrollViewProxy?,
         availableWidth: CGFloat,
         allowDeferredRetry: Bool,
         isVerifyPass: Bool
     ) {
-        guard mainWorkspaceScrollExecutor.isCurrent(plan) else { return }
+        guard mainWorkspaceScrollDriver.isCurrent(plan) else { return }
         let levelsData = resolvedDisplayedMainLevelsWithParents()
         guard prepareMainWorkspaceScrollExecutionLayout(
             plan: plan,
@@ -296,7 +199,7 @@ extension ScenarioWriterView {
                     "scroll-executor-deferred",
                     "generation=\(plan.generation) active=\(mainWorkspacePhase0CardID(plan.activeCardID))"
                 )
-                mainWorkspaceScrollExecutor.scheduleDeferredApply(for: plan) {
+                mainWorkspaceScrollDriver.scheduleDeferredApply(for: plan) {
                     applyMainWorkspaceScrollPlan(
                         plan,
                         proxy: proxy,
@@ -313,7 +216,7 @@ extension ScenarioWriterView {
             }
             return
         }
-        let hasPendingMissingColumns = mainWorkspaceScrollExecutor.hasPendingMissingViewportKeys(for: plan)
+        let hasPendingMissingColumns = mainWorkspaceScrollDriver.hasPendingMissingViewportKeys(for: plan)
 
         cancelMainWorkspaceScrollAnimations(for: plan)
         lastScrolledLevel = plan.horizontalTargetLevel
@@ -333,12 +236,20 @@ extension ScenarioWriterView {
             "generation=\(plan.generation) active=\(mainWorkspacePhase0CardID(plan.activeCardID)) " +
             "horizontal=\(appliedHorizontal) vertical=\(appliedVertical) verifyPass=\(isVerifyPass)"
         )
+        MainCanvasNavigationDiagnostics.shared.recordScrollApply(
+            ownerKey: mainCanvasDiagnosticsOwnerKey,
+            generation: plan.generation,
+            activeCardID: plan.activeCardID,
+            appliedHorizontal: appliedHorizontal,
+            appliedVertical: appliedVertical,
+            isVerifyPass: isVerifyPass
+        )
 
         if isVerifyPass {
             logMainWorkspaceScrollPlanVerification(plan: plan, levelsData: levelsData)
             return
         }
-        mainWorkspaceScrollExecutor.scheduleSingleVerify(
+        mainWorkspaceScrollDriver.scheduleSingleVerify(
             for: plan,
             delay: resolvedMainWorkspaceScrollVerifyDelay(
                 animated: plan.animated,
@@ -360,14 +271,32 @@ extension ScenarioWriterView {
         levelsData: [LevelData]
     ) -> Bool {
         if let horizontalScrollView = mainCanvasScrollCoordinator.resolvedMainCanvasHorizontalScrollView() {
-            horizontalScrollView.documentView?.layoutSubtreeIfNeeded()
-            horizontalScrollView.contentView.superview?.layoutSubtreeIfNeeded()
-            horizontalScrollView.layoutSubtreeIfNeeded()
+            if !shouldUseMainWorkspaceSurface {
+                MainCanvasNavigationDiagnostics.shared.recordLayoutSubtreeIfNeeded(
+                    ownerKey: mainCanvasDiagnosticsOwnerKey,
+                    callsite: .horizontalDocumentView
+                )
+                horizontalScrollView.documentView?.layoutSubtreeIfNeeded()
+                MainCanvasNavigationDiagnostics.shared.recordLayoutSubtreeIfNeeded(
+                    ownerKey: mainCanvasDiagnosticsOwnerKey,
+                    callsite: .horizontalContentSuperview
+                )
+                horizontalScrollView.contentView.superview?.layoutSubtreeIfNeeded()
+                MainCanvasNavigationDiagnostics.shared.recordLayoutSubtreeIfNeeded(
+                    ownerKey: mainCanvasDiagnosticsOwnerKey,
+                    callsite: .horizontalScrollView
+                )
+                horizontalScrollView.layoutSubtreeIfNeeded()
+            }
         } else {
             mainWorkspacePhase0Log(
                 "scroll-executor-missing-horizontal",
                 "generation=\(plan.generation) active=\(mainWorkspacePhase0CardID(plan.activeCardID))"
             )
+            if shouldUseMainWorkspaceSurface {
+                mainWorkspaceScrollDriver.setPendingMissingViewportKeys(["__horizontal__"], for: plan)
+                return false
+            }
         }
 
         var missingViewportKeys: [String] = []
@@ -380,19 +309,44 @@ extension ScenarioWriterView {
                 missingViewportKeys.append(columnPlan.viewportKey)
                 continue
             }
-            scrollView.documentView?.layoutSubtreeIfNeeded()
-            scrollView.contentView.superview?.layoutSubtreeIfNeeded()
-            scrollView.layoutSubtreeIfNeeded()
+            if !shouldUseMainWorkspaceSurface {
+                MainCanvasNavigationDiagnostics.shared.recordLayoutSubtreeIfNeeded(
+                    ownerKey: mainCanvasDiagnosticsOwnerKey,
+                    callsite: .columnDocumentView
+                )
+                scrollView.documentView?.layoutSubtreeIfNeeded()
+                MainCanvasNavigationDiagnostics.shared.recordLayoutSubtreeIfNeeded(
+                    ownerKey: mainCanvasDiagnosticsOwnerKey,
+                    callsite: .columnContentSuperview
+                )
+                scrollView.contentView.superview?.layoutSubtreeIfNeeded()
+                MainCanvasNavigationDiagnostics.shared.recordLayoutSubtreeIfNeeded(
+                    ownerKey: mainCanvasDiagnosticsOwnerKey,
+                    callsite: .columnScrollView
+                )
+                scrollView.layoutSubtreeIfNeeded()
+            }
         }
 
-        if let textView = NSApp.keyWindow?.firstResponder as? NSTextView,
+        if !shouldUseMainWorkspaceSurface,
+           let textView = NSApp.keyWindow?.firstResponder as? NSTextView,
            let layoutManager = textView.layoutManager,
            let textContainer = textView.textContainer {
             layoutManager.ensureLayout(for: textContainer)
+            MainCanvasNavigationDiagnostics.shared.recordLayoutSubtreeIfNeeded(
+                ownerKey: mainCanvasDiagnosticsOwnerKey,
+                callsite: .activeEditorTextView
+            )
             textView.layoutSubtreeIfNeeded()
         }
 
-        NSApp.keyWindow?.contentView?.layoutSubtreeIfNeeded()
+        if !shouldUseMainWorkspaceSurface {
+            MainCanvasNavigationDiagnostics.shared.recordLayoutSubtreeIfNeeded(
+                ownerKey: mainCanvasDiagnosticsOwnerKey,
+                callsite: .keyWindowContentView
+            )
+            NSApp.keyWindow?.contentView?.layoutSubtreeIfNeeded()
+        }
         if !missingViewportKeys.isEmpty {
             mainWorkspacePhase0Log(
                 "scroll-executor-missing-columns",
@@ -400,7 +354,10 @@ extension ScenarioWriterView {
                 "keys=\(missingViewportKeys.joined(separator: ","))"
             )
         }
-        mainWorkspaceScrollExecutor.setPendingMissingViewportKeys(missingViewportKeys, for: plan)
+        mainWorkspaceScrollDriver.setPendingMissingViewportKeys(missingViewportKeys, for: plan)
+        if shouldUseMainWorkspaceSurface, !missingViewportKeys.isEmpty {
+            return false
+        }
         return true
     }
 
@@ -423,6 +380,9 @@ extension ScenarioWriterView {
         levelsData: [LevelData]
     ) -> Bool {
         var applied = false
+        let consumesKeepVisibleState = plan.columnPlans.contains { columnPlan in
+            columnPlan.keepVisibleOnly && columnPlan.primaryCardID == plan.activeCardID
+        }
         for columnPlan in plan.columnPlans {
             guard levelsData.indices.contains(columnPlan.level) else { continue }
             let data = levelsData[columnPlan.level]
@@ -438,6 +398,10 @@ extension ScenarioWriterView {
                 )
             )
             applied = applied || didApply
+        }
+        if shouldUseMainWorkspaceSurface, consumesKeepVisibleState {
+            pendingMainEditingViewportKeepVisibleCardID = nil
+            pendingMainEditingViewportRevealEdge = nil
         }
         return applied
     }
@@ -486,7 +450,12 @@ extension ScenarioWriterView {
             return false
         }
 
-        let documentHeight = scrollView.documentView?.bounds.height ?? 0
+        let documentHeight = resolvedMainWorkspaceColumnDocumentHeight(
+            viewportKey: columnPlan.viewportKey,
+            cards: cards,
+            viewportHeight: resolvedViewportHeight,
+            scrollView: scrollView
+        )
         let maxY = max(0, documentHeight - visibleRect.height)
         if plan.animated {
             let resolvedTargetY = CaretScrollCoordinator.resolvedVerticalTargetY(
@@ -564,7 +533,7 @@ extension ScenarioWriterView {
     @discardableResult
     func applyMainWorkspaceHorizontalScrollPlan(
         _ plan: MainWorkspaceScrollPlan,
-        proxy: ScrollViewProxy,
+        proxy: ScrollViewProxy?,
         availableWidth: CGFloat
     ) -> Bool {
         guard activeCardID == plan.activeCardID else { return false }
@@ -583,6 +552,10 @@ extension ScenarioWriterView {
             return true
         }
 
+        if shouldUseMainWorkspaceSurface {
+            return false
+        }
+        guard let proxy else { return false }
         let hAnchor = resolvedMainCanvasHorizontalAnchor(availableWidth: max(1, availableWidth))
         if plan.animated {
             MainCanvasNavigationDiagnostics.shared.beginScrollAnimation(
@@ -713,6 +686,7 @@ extension ScenarioWriterView {
         proxy: ScrollViewProxy,
         viewportHeight: CGFloat
     ) {
+        guard !shouldUseMainWorkspaceSurface else { return }
         guard !showFocusMode else { return }
         guard acceptsKeyboardInput else { return }
         guard let plan = mainWorkspaceScrollPlan else { return }
@@ -729,14 +703,6 @@ extension ScenarioWriterView {
         }
         cancelPendingMainColumnFocusWorkItem(for: viewportKey)
         cancelPendingMainColumnFocusVerificationWorkItem(for: viewportKey)
-        if !columnPlan.forceAlignment &&
-            shouldPreserveMainColumnViewportOnReveal(
-                level: level,
-                storageKey: viewportKey,
-                newActiveID: plan.activeCardID
-            ) {
-            return
-        }
         let authority = beginMainVerticalScrollAuthority(
             viewportKey: viewportKey,
             kind: columnPlan.authorityKind,
@@ -761,12 +727,7 @@ extension ScenarioWriterView {
     }
 
     private func resolvedMainWorkspaceHorizontalTargetLevel(for activeLevel: Int) -> Int {
-        switch mainCanvasHorizontalScrollMode {
-        case .oneStep:
-            return activeLevel
-        case .twoStep:
-            return max(0, activeLevel - 1)
-        }
+        activeLevel
     }
 
     private func resolvedMainWorkspaceColumnPlans(
@@ -821,19 +782,19 @@ extension ScenarioWriterView {
         preorderIndexByCardID: [UUID: Int]
     ) -> MainWorkspaceColumnPolicy {
         guard !cards.isEmpty else { return .none }
+        _ = level
+        _ = activeLevel
         if cards.contains(where: { $0.id == activeCard.id }) {
             return .centerActive(cardID: activeCard.id)
         }
         if let ancestor = cards.first(where: { activeAncestorIDs.contains($0.id) }) {
             return .centerAncestor(cardID: ancestor.id)
         }
-        if let descendant = resolvedMainWorkspaceVisibleDescendantSelection(
-            in: cards,
-            startingFrom: activeCard
-        ) {
-            return descendant.isPreferred
-                ? .centerPreferredDescendant(cardID: descendant.cardID)
-                : .centerOtherDescendant(cardID: descendant.cardID)
+        if let descendant = resolvedMainWorkspaceVisibleDescendantSelection(in: cards, startingFrom: activeCard) {
+            return .centerPreferredDescendant(cardID: descendant.cardID)
+        }
+        if let otherDescendant = cards.first(where: { activeDescendantIDs.contains($0.id) }) {
+            return .centerOtherDescendant(cardID: otherDescendant.id)
         }
         return resolvedMainWorkspaceSurroundingPolicy(
             in: cards,
@@ -847,13 +808,9 @@ extension ScenarioWriterView {
         startingFrom root: SceneCard
     ) -> MainWorkspaceVisibleDescendantSelection? {
         let visibleCardIDs = Set(cards.map(\.id))
-        let categories = Set(cards.compactMap(\.category))
-        let matchingCategory = categories.count == 1 ? categories.first : nil
-
-        if let descendantSelection = resolvedMainWorkspaceVisibleDescendantPathSelection(
+        if let descendantSelection = resolvedMainWorkspaceHistorySortedDescendantSelection(
             from: root,
-            visibleCardIDs: visibleCardIDs,
-            matching: matchingCategory
+            visibleCardIDs: visibleCardIDs
         ) {
             mainWorkspacePhase0Log(
                 "descendant-selection-monitor",
@@ -877,54 +834,61 @@ extension ScenarioWriterView {
         visibleCardIDs: Set<UUID>,
         matching category: String?
     ) -> UUID? {
-        resolvedMainWorkspaceVisibleDescendantPathSelection(
+        _ = category
+        return resolvedMainWorkspaceHistorySortedDescendantSelection(
             from: root,
-            visibleCardIDs: visibleCardIDs,
-            matching: category
+            visibleCardIDs: visibleCardIDs
         )?.cardID
     }
 
-    private func resolvedMainWorkspaceVisibleDescendantPathSelection(
+    private func resolvedMainWorkspaceHistorySortedDescendantSelection(
         from root: SceneCard,
-        visibleCardIDs: Set<UUID>,
-        matching category: String?
+        visibleCardIDs: Set<UUID>
     ) -> MainWorkspaceVisibleDescendantSelection? {
-        var current = root
-        var path: [UUID] = [root.id]
-        var visited: Set<UUID> = [root.id]
-
-        while true {
-            let selection =
-                resolvedMainWorkspaceVisibleSubtreeChildSelection(
-                    for: current,
-                    visibleCardIDs: visibleCardIDs,
-                    matching: category,
-                    preferRememberedAfterHistory: false
-                ) ??
-                resolvedMainWorkspaceVisibleFallbackChildSelection(
-                    for: current,
-                    visibleCardIDs: visibleCardIDs,
-                    matching: category
-                )
-            guard let selection else { return nil }
-
-            let child = selection.child
-            guard visited.insert(child.id).inserted else { return nil }
-            path.append(child.id)
-
-            if visibleCardIDs.contains(child.id) {
-                return MainWorkspaceVisibleDescendantSelection(
-                    cardID: child.id,
-                    isPreferred: selection.source == .activeHistory,
-                    path: path,
-                    source: selection.source
-                )
-            }
-
-            let hasVisibleDescendant = !scenario.descendantIDs(for: child.id).isDisjoint(with: visibleCardIDs)
-            guard hasVisibleDescendant else { return nil }
-            current = child
+        let orderedDescendantIDs = resolvedMainWorkspaceHistorySortedDescendantIDs(from: root)
+        guard let cardID = orderedDescendantIDs.first(where: { visibleCardIDs.contains($0) }) else {
+            return nil
         }
+        return MainWorkspaceVisibleDescendantSelection(
+            cardID: cardID,
+            isPreferred: true,
+            path: [root.id, cardID],
+            source: .activeHistory
+        )
+    }
+
+    private func resolvedMainWorkspaceHistorySortedDescendantIDs(from root: SceneCard) -> [UUID] {
+        let historyRankByCardID = resolvedMainWorkspaceHistoryRankByCardID()
+        var descendantIDs: [UUID] = []
+
+        func visit(_ card: SceneCard) {
+            let sortedChildren = card.sortedChildren.sorted { lhs, rhs in
+                let leftRank = historyRankByCardID[lhs.id] ?? Int.max
+                let rightRank = historyRankByCardID[rhs.id] ?? Int.max
+                if leftRank != rightRank {
+                    return leftRank < rightRank
+                }
+                if lhs.orderIndex != rhs.orderIndex {
+                    return lhs.orderIndex < rhs.orderIndex
+                }
+                return lhs.createdAt < rhs.createdAt
+            }
+            for child in sortedChildren {
+                descendantIDs.append(child.id)
+                visit(child)
+            }
+        }
+
+        visit(root)
+        return descendantIDs
+    }
+
+    private func resolvedMainWorkspaceHistoryRankByCardID() -> [UUID: Int] {
+        var rankByID: [UUID: Int] = [:]
+        for (index, cardID) in mainWorkspaceActiveHistory.enumerated() {
+            rankByID[cardID] = index
+        }
+        return rankByID
     }
 
     private func resolvedMainWorkspaceVisibleFallbackChildSelection(
@@ -1097,6 +1061,7 @@ extension ScenarioWriterView {
         authority: MainVerticalScrollAuthority,
         scheduleVerification: Bool = true
     ) {
+        let shouldScheduleColumnVerification = scheduleVerification && !shouldUseMainWorkspaceSurface
         if columnPlan.keepVisibleOnly &&
             isMainWorkspaceColumnPlanVisible(
                 viewportKey: viewportKey,
@@ -1104,17 +1069,19 @@ extension ScenarioWriterView {
                 viewportHeight: viewportHeight,
                 columnPlan: columnPlan
             ) {
-            scheduleMainWorkspaceColumnPlanVerification(
-                viewportKey: viewportKey,
-                cards: cards,
-                level: level,
-                parent: parent,
-                proxy: proxy,
-                viewportHeight: viewportHeight,
-                plan: plan,
-                columnPlan: columnPlan,
-                authority: authority
-            )
+            if shouldScheduleColumnVerification {
+                scheduleMainWorkspaceColumnPlanVerification(
+                    viewportKey: viewportKey,
+                    cards: cards,
+                    level: level,
+                    parent: parent,
+                    proxy: proxy,
+                    viewportHeight: viewportHeight,
+                    plan: plan,
+                    columnPlan: columnPlan,
+                    authority: authority
+                )
+            }
             return
         }
 
@@ -1126,17 +1093,19 @@ extension ScenarioWriterView {
                 viewportHeight: viewportHeight,
                 columnPlan: columnPlan
             ) {
-            scheduleMainWorkspaceColumnPlanVerification(
-                viewportKey: viewportKey,
-                cards: cards,
-                level: level,
-                parent: parent,
-                proxy: proxy,
-                viewportHeight: viewportHeight,
-                plan: plan,
-                columnPlan: columnPlan,
-                authority: authority
-            )
+            if shouldScheduleColumnVerification {
+                scheduleMainWorkspaceColumnPlanVerification(
+                    viewportKey: viewportKey,
+                    cards: cards,
+                    level: level,
+                    parent: parent,
+                    proxy: proxy,
+                    viewportHeight: viewportHeight,
+                    plan: plan,
+                    columnPlan: columnPlan,
+                    authority: authority
+                )
+            }
             return
         }
 
@@ -1153,7 +1122,7 @@ extension ScenarioWriterView {
             plan: plan,
             columnPlan: columnPlan
         ) {
-            if scheduleVerification {
+            if shouldScheduleColumnVerification {
                 scheduleMainWorkspaceColumnPlanVerification(
                     viewportKey: viewportKey,
                     cards: cards,
@@ -1169,6 +1138,7 @@ extension ScenarioWriterView {
             return
         }
 
+        guard !shouldUseMainWorkspaceSurface else { return }
         guard let targetID = columnPlan.primaryCardID else { return }
         let fallbackAnchor: UnitPoint
         switch columnPlan.anchorMode {
@@ -1189,7 +1159,7 @@ extension ScenarioWriterView {
                 proxy.scrollTo(targetID, anchor: fallbackAnchor)
             }
         }
-        if scheduleVerification {
+        if shouldScheduleColumnVerification {
             scheduleMainWorkspaceColumnPlanVerification(
                 viewportKey: viewportKey,
                 cards: cards,
@@ -1425,7 +1395,12 @@ extension ScenarioWriterView {
             return false
         }
 
-        let documentHeight = scrollView.documentView?.bounds.height ?? 0
+        let documentHeight = resolvedMainWorkspaceColumnDocumentHeight(
+            viewportKey: viewportKey,
+            cards: cards,
+            viewportHeight: resolvedViewportHeight,
+            scrollView: scrollView
+        )
         let maxY = max(0, documentHeight - visibleRect.height)
         if plan.animated {
             let resolvedTargetY = CaretScrollCoordinator.resolvedVerticalTargetY(
@@ -1519,7 +1494,11 @@ extension ScenarioWriterView {
             ) else {
                 return nil
             }
-            let adjustedHeight = min(rect.height, viewportHeight - chromeInset)
+            let oversizedThreshold = viewportHeight - chromeInset
+            let adjustedHeight =
+                rect.height > oversizedThreshold
+                ? viewportHeight * 0.5 + chromeInset
+                : rect.height
             return rect.minY + adjustedHeight * 0.5 - viewportHeight * 0.5
         }
     }
@@ -1663,6 +1642,30 @@ extension ScenarioWriterView {
         }
     }
 
+    private func resolvedMainWorkspaceColumnDocumentHeight(
+        viewportKey: String,
+        cards: [SceneCard],
+        viewportHeight: CGFloat,
+        scrollView: NSScrollView
+    ) -> CGFloat {
+        let liveDocumentHeight = scrollView.documentView?.bounds.height ?? 0
+        guard shouldUseMainWorkspaceSurface else {
+            return liveDocumentHeight
+        }
+
+        let predictedDocumentHeight = max(
+            viewportHeight,
+            resolvedMainColumnLayoutSnapshot(in: cards, viewportHeight: viewportHeight).contentBottomY
+        )
+        if predictedDocumentHeight > liveDocumentHeight + 1 {
+            mainWorkspacePhase0Log(
+                "column-plan-document-height-fallback",
+                "viewport=\(viewportKey) liveHeight=\(liveDocumentHeight) predictedHeight=\(predictedDocumentHeight)"
+            )
+        }
+        return max(liveDocumentHeight, predictedDocumentHeight)
+    }
+
     private func resolvedMainColumnFrame(
         viewportKey: String,
         cards: [SceneCard],
@@ -1678,6 +1681,9 @@ extension ScenarioWriterView {
             viewportKey: viewportKey,
             targetID: cardID
         )
+        if shouldUseMainWorkspaceSurface {
+            return predictedFrame ?? observedFrame
+        }
         if let predictedFrame, let observedFrame {
             let minYDelta = abs(predictedFrame.minY - observedFrame.minY)
             let heightDelta = abs(predictedFrame.height - observedFrame.height)
@@ -1688,6 +1694,19 @@ extension ScenarioWriterView {
                     "predictedMinY=\(predictedFrame.minY) observedMinY=\(observedFrame.minY) " +
                     "predictedHeight=\(predictedFrame.height) observedHeight=\(observedFrame.height)"
                 )
+            }
+            let currentOffsetY = resolvedMainColumnCurrentOffsetY(viewportKey: viewportKey)
+            let observedLooksStaleAtTop =
+                currentOffsetY <= 1 &&
+                observedFrame.minY <= viewportHeight &&
+                predictedFrame.minY > max(viewportHeight * 1.5, observedFrame.maxY + viewportHeight)
+            if observedLooksStaleAtTop {
+                mainWorkspacePhase0Log(
+                    "column-plan-frame-prefer-predicted",
+                    "viewport=\(viewportKey) card=\(mainWorkspacePhase0CardID(cardID)) " +
+                    "currentY=\(currentOffsetY) predictedMinY=\(predictedFrame.minY) observedMinY=\(observedFrame.minY)"
+                )
+                return predictedFrame
             }
         }
         return observedFrame ?? predictedFrame

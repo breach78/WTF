@@ -38,7 +38,8 @@ struct ScenarioWriterView: View {
     @State private var interactionRuntime = WriterInteractionRuntime()
     @StateObject private var mainCanvasViewState = MainCanvasViewState()
     @StateObject var mainCanvasScrollCoordinator = MainCanvasScrollCoordinator()
-    @StateObject var mainWorkspaceScrollExecutor = MainWorkspaceScrollExecutor()
+    @StateObject var mainWorkspaceScrollDriver = MainWorkspaceScrollDriver()
+    @StateObject private var mainWorkspaceSurfaceController = MainWorkspaceSurfaceController()
     @StateObject var focusModeLayoutCoordinator = FocusModeLayoutCoordinator()
     @StateObject private var aiFeatureState = WriterAIFeatureState()
     @StateObject private var editEndAutoBackupState = WriterEditEndAutoBackupState()
@@ -377,14 +378,19 @@ struct ScenarioWriterView: View {
         nonmutating set { interactionRuntime.mainWorkspaceActiveHistory = newValue }
     }
 
+    var mainActiveEditorSessionID: Int {
+        get { interactionRuntime.mainActiveEditorSessionID }
+        nonmutating set { interactionRuntime.mainActiveEditorSessionID = newValue }
+    }
+
+    var mainActiveEditorSessionCardID: UUID? {
+        get { interactionRuntime.mainActiveEditorSessionCardID }
+        nonmutating set { interactionRuntime.mainActiveEditorSessionCardID = newValue }
+    }
+
     var pendingMainClickFocusTargetID: UUID? {
         get { interactionRuntime.pendingMainClickFocusTargetID }
         nonmutating set { interactionRuntime.pendingMainClickFocusTargetID = newValue }
-    }
-
-    var pendingMainClickHorizontalFocusTargetID: UUID? {
-        get { interactionRuntime.pendingMainClickHorizontalFocusTargetID }
-        nonmutating set { interactionRuntime.pendingMainClickHorizontalFocusTargetID = newValue }
     }
 
     var pendingMainEditingViewportKeepVisibleCardID: UUID? {
@@ -417,14 +423,19 @@ struct ScenarioWriterView: View {
         nonmutating set { mainCanvasViewState.mainWorkspaceScrollPlan = newValue }
     }
 
-    var mainWorkspaceScrollPlanTick: Int {
-        get { mainCanvasViewState.mainWorkspaceScrollPlanTick }
-        nonmutating set { mainCanvasViewState.mainWorkspaceScrollPlanTick = newValue }
+    func restartMainActiveEditorSession(for cardID: UUID) {
+        mainActiveEditorSessionID &+= 1
+        mainActiveEditorSessionCardID = cardID
     }
 
-    var focusNavigationTrigger: String {
-        get { mainCanvasViewState.focusNavigationTrigger }
-        nonmutating set { mainCanvasViewState.focusNavigationTrigger = newValue }
+    func clearMainActiveEditorSession(for cardID: UUID? = nil) {
+        guard cardID == nil || mainActiveEditorSessionCardID == cardID else { return }
+        mainActiveEditorSessionCardID = nil
+    }
+
+    func resolvedMainActiveEditorSessionID(for cardID: UUID) -> Int? {
+        guard mainActiveEditorSessionCardID == cardID else { return nil }
+        return mainActiveEditorSessionID
     }
 
     func scheduleMainCanvasRestoreRequest(
@@ -460,11 +471,6 @@ struct ScenarioWriterView: View {
     var suppressHorizontalAutoScroll: Bool {
         get { mainCanvasViewState.suppressHorizontalAutoScroll }
         nonmutating set { mainCanvasViewState.suppressHorizontalAutoScroll = newValue }
-    }
-
-    var mainNavigationSettleTick: Int {
-        get { mainCanvasViewState.navigationSettleTick }
-        nonmutating set { mainCanvasViewState.navigationSettleTick = newValue }
     }
 
     var maxLevelCount: Int {
@@ -592,11 +598,6 @@ struct ScenarioWriterView: View {
     var mainColumnViewportRestoreUntil: Date {
         get { interactionRuntime.mainColumnViewportRestoreUntil }
         nonmutating set { interactionRuntime.mainColumnViewportRestoreUntil = newValue }
-    }
-
-    var mainArrowNavigationSettleWorkItem: DispatchWorkItem? {
-        get { interactionRuntime.mainArrowNavigationSettleWorkItem }
-        nonmutating set { interactionRuntime.mainArrowNavigationSettleWorkItem = newValue }
     }
 
     var mainCaretLocationByCardID: [UUID: Int] {
@@ -937,6 +938,7 @@ struct ScenarioWriterView: View {
         let backgroundSignature: String
         let contentFingerprint: Int
         let interactionFingerprint: Int
+        let navigationFingerprint: Int
     }
 
     struct MainCanvasHost: View, Equatable {
@@ -946,8 +948,7 @@ struct ScenarioWriterView: View {
         let backgroundColor: Color
         let onBackgroundTap: () -> Void
         let onHistoryIndexChange: (ScrollViewProxy) -> Void
-        let onActiveCardChange: (UUID?, ScrollViewProxy, CGFloat) -> Void
-        let onNavigationSettle: (ScrollViewProxy, CGFloat) -> Void
+        let onNavigationChange: (ScrollViewProxy, CGFloat) -> Void
         let onRestoreRequest: (ScrollViewProxy, CGFloat) -> Void
         let onAppear: (ScrollViewProxy, CGFloat) -> Void
         let scrollableContent: () -> AnyView
@@ -979,15 +980,8 @@ struct ScenarioWriterView: View {
                     .onChange(of: renderState.historyIndex) { _, _ in
                         onHistoryIndexChange(proxy)
                     }
-                    .onChange(of: viewState.focusNavigationTick) { _, _ in
-                        onActiveCardChange(
-                            viewState.focusNavigationTargetID,
-                            proxy,
-                            renderState.availableWidth
-                        )
-                    }
-                    .onChange(of: viewState.navigationSettleTick) { _, _ in
-                        onNavigationSettle(proxy, renderState.availableWidth)
+                    .onChange(of: renderState.navigationFingerprint) { _, _ in
+                        onNavigationChange(proxy, renderState.availableWidth)
                     }
                     .onChange(of: viewState.pendingRestoreRequest) { _, _ in
                         onRestoreRequest(proxy, renderState.availableWidth)
@@ -1181,12 +1175,8 @@ struct ScenarioWriterView: View {
             .onChange(of: Int(historyIndex)) { _, _ in
                 handleHistoryIndexChange()
             }
-            .onChange(of: activeCardID) { _, newID in
-                handleActiveCardIDChange(newID)
-            }
-            .onChange(of: mainCanvasInteractionFingerprint()) { oldValue, newValue in
-                guard oldValue != newValue else { return }
-                syncMainCanvasInteractionState()
+            .onChange(of: activeCardID) { oldID, newID in
+                handleActiveCardIDChange(oldID: oldID, newID: newID)
             }
             .onChange(of: isSplitPaneActive) { _, _ in
                 syncScenarioTimestampSuppressionIfNeeded()
@@ -1376,13 +1366,16 @@ struct ScenarioWriterView: View {
 
     func handleWorkspaceAppear() {
         mainCanvasScrollCoordinator.reset()
-        mainWorkspaceScrollExecutor.reset()
+        mainWorkspaceScrollDriver.reset()
+        mainWorkspaceSurfaceController.reset()
+        if shouldUseMainWorkspaceSurface {
+            mainWorkspaceSurfaceController.reconnectSurfaceIfAttached()
+        }
         MainCanvasNavigationDiagnostics.shared.reset(
             ownerKey: mainCanvasDiagnosticsOwnerKey,
             scenarioID: scenario.id,
             splitPaneID: splitModeEnabled ? splitPaneID : 0
         )
-        syncMainCanvasInteractionState()
         syncScenarioObservedState()
         restoreStartupViewportIfNeeded()
         let restoredHorizontalViewport = restoreStartupMainCanvasHorizontalViewportIfNeeded()
@@ -1454,12 +1447,17 @@ struct ScenarioWriterView: View {
         }
     }
 
-    func handleActiveCardIDChange(_ newID: UUID?) {
+    func handleActiveCardIDChange(oldID: UUID?, newID: UUID?) {
+        if !showFocusMode, !showHistoryBar, !isIndexBoardActive {
+            MainCanvasNavigationDiagnostics.shared.recordActiveCardChange(
+                ownerKey: mainCanvasDiagnosticsOwnerKey,
+                previousCardID: oldID,
+                nextCardID: newID,
+                trigger: "activeCardID.onChange"
+            )
+        }
         let clearedRequestCount = mainColumnLastFocusRequestByKey.count
         mainColumnLastFocusRequestByKey = [:]
-        if let newID, scenario.rootCards.contains(where: { $0.id == newID }) {
-            mainColumnViewportRestoreUntil = Date().addingTimeInterval(0.35)
-        }
         bounceDebugLog(
             "handleActiveCardIDChange new=\(debugCardIDString(newID)) clearedRequests=\(clearedRequestCount) " +
             "restoreUntil=\(mainColumnViewportRestoreUntil.timeIntervalSince1970) \(debugFocusStateSummary())"
@@ -1483,7 +1481,6 @@ struct ScenarioWriterView: View {
             linkedCardAnchorID = newID
         }
         guard acceptsKeyboardInput else { return }
-        synchronizeActiveRelationState(for: newID)
         let isEditingSiblingNavigationTarget = pendingMainEditingSiblingNavigationTargetID == newID
         if isEditingSiblingNavigationTarget {
             pendingMainHorizontalScrollAnimation = nil
@@ -1502,29 +1499,8 @@ struct ScenarioWriterView: View {
                 pendingMainEditingBoundaryNavigationTargetID == newID
             )
         if editingCardID != nil && !hasExplicitEditingVerticalTransition {
-            syncMainCanvasInteractionState()
             return
         }
-        let clickFocusedTarget = pendingMainClickHorizontalFocusTargetID == newID
-        if mainColumnViewportRestoreUntil > Date(), !clickFocusedTarget {
-            indexBoardRestoreTrace(
-                "main_canvas_handle_active_card_change_preserve_viewport",
-                "newID=\(debugRestoreUUID(newID)) restoreUntil=\(String(format: "%.3f", mainColumnViewportRestoreUntil.timeIntervalSince1970))"
-            )
-            syncMainCanvasInteractionState()
-            return
-        }
-        if clickFocusedTarget {
-            syncMainCanvasInteractionState(
-                emitNavigationEvent: true,
-                navigationTrigger: "clickFocus"
-            )
-            return
-        }
-        syncMainCanvasInteractionState(
-            emitNavigationEvent: true,
-            navigationTrigger: hasExplicitEditingVerticalTransition ? "editingBoundaryChange" : "activeCardChange"
-        )
     }
 
     func handleScenarioCardsVersionChange() {
@@ -1537,24 +1513,12 @@ struct ScenarioWriterView: View {
             scheduleInactivePaneSnapshotRefresh()
             return
         }
-        synchronizeActiveRelationState(for: activeCardID)
-        syncMainCanvasInteractionState()
+        synchronizeMainWorkspaceSelectionState(
+            previousActiveID: activeCardID,
+            nextActiveID: activeCardID,
+            updateHistory: false
+        )
         pruneAICandidateTracking()
-    }
-
-    func syncMainCanvasInteractionState(
-        emitNavigationEvent: Bool = false,
-        navigationTrigger: String = "activeCardChange"
-    ) {
-        let interactionFingerprint = mainCanvasInteractionFingerprint()
-        if mainCanvasViewState.interactionFingerprint != interactionFingerprint {
-            mainCanvasViewState.interactionFingerprint = interactionFingerprint
-        }
-        if emitNavigationEvent {
-            mainCanvasViewState.focusNavigationTargetID = activeCardID
-            mainCanvasViewState.focusNavigationTrigger = navigationTrigger
-            mainCanvasViewState.focusNavigationTick &+= 1
-        }
     }
 
     func handleScenarioHistoryVersionChange() {
@@ -1598,13 +1562,12 @@ struct ScenarioWriterView: View {
         cancelAIChatRequest()
         flushAIThreadsPersistence()
         flushAIEmbeddingPersistence()
-        mainWorkspaceScrollExecutor.reset()
+        mainWorkspaceScrollDriver.reset()
+        mainWorkspaceSurfaceController.reset()
         mainCanvasScrollCoordinator.reset()
         pendingEditEndAutoBackupWorkItem?.cancel()
         pendingEditEndAutoBackupWorkItem = nil
         hasPendingEditEndAutoBackupRequest = false
-        mainArrowNavigationSettleWorkItem?.cancel()
-        mainArrowNavigationSettleWorkItem = nil
         focusModeWindowBackgroundActive = false
         stopHistoryKeyMonitor()
         stopFocusModeKeyMonitor()
@@ -1715,13 +1678,20 @@ struct ScenarioWriterView: View {
                 scheduleEditEndAutoBackup()
             }
             editingSessionHadTextMutation = false
+            clearMainActiveEditorSession(for: oldID)
         } else if oldID == nil, newID != nil {
             pendingEditEndAutoBackupWorkItem?.cancel()
             pendingEditEndAutoBackupWorkItem = nil
             hasPendingEditEndAutoBackupRequest = false
             editingSessionHadTextMutation = false
+            if let newID {
+                restartMainActiveEditorSession(for: newID)
+            }
         } else if oldID != nil, oldID != newID {
             editingSessionHadTextMutation = false
+            if let newID {
+                restartMainActiveEditorSession(for: newID)
+            }
         }
         syncScenarioTimestampSuppressionIfNeeded()
         guard acceptsKeyboardInput else { return }
@@ -1963,7 +1933,11 @@ struct ScenarioWriterView: View {
         } else if activeCardID == nil, let first = scenario.rootCards.first {
             changeActiveCard(to: first)
         }
-        synchronizeActiveRelationState(for: activeCardID)
+        synchronizeMainWorkspaceSelectionState(
+            previousActiveID: activeCardID,
+            nextActiveID: activeCardID,
+            updateHistory: false
+        )
         isMainViewFocused = true
         syncScenarioTimestampSuppressionIfNeeded()
     }
@@ -2564,40 +2538,243 @@ struct ScenarioWriterView: View {
 
     @ViewBuilder
     func mainCanvas(size: CGSize, availableWidth: CGFloat) -> some View {
-        MainCanvasHost(
-            renderState: mainCanvasRenderState(size: size, availableWidth: availableWidth),
-            viewState: mainCanvasViewState,
+        if shouldUseMainWorkspaceSurface {
+            ZStack {
+                resolvedBackgroundColor()
+                    .ignoresSafeArea()
+
+                mainWorkspaceSurfaceHost(size: size, availableWidth: availableWidth)
+            }
+        } else {
+            MainCanvasHost(
+                renderState: mainCanvasRenderState(size: size, availableWidth: availableWidth),
+                viewState: mainCanvasViewState,
+                scrollCoordinator: mainCanvasScrollCoordinator,
+                backgroundColor: resolvedBackgroundColor(),
+                onBackgroundTap: {
+                    deselectAll()
+                    isMainViewFocused = true
+                },
+                onHistoryIndexChange: { proxy in
+                    guard !showFocusMode, !isIndexBoardActive else { return }
+                    handleMainCanvasHistoryIndexChange(hProxy: proxy)
+                },
+                onNavigationChange: { proxy, width in
+                    guard !showFocusMode, !isIndexBoardActive else { return }
+                    handleMainCanvasActiveCardChange(hProxy: proxy, availableWidth: width)
+                },
+                onRestoreRequest: { proxy, width in
+                    guard !showFocusMode, !isIndexBoardActive else { return }
+                    handleMainCanvasRestoreRequest(hProxy: proxy, availableWidth: width)
+                },
+                onAppear: { proxy, width in
+                    guard !showFocusMode, !isIndexBoardActive else { return }
+                    handleMainCanvasAppear(hProxy: proxy, availableWidth: width)
+                },
+                scrollableContent: {
+                    AnyView(mainCanvasScrollableContent(size: size, availableWidth: availableWidth))
+                }
+            )
+            .equatable()
+        }
+    }
+
+    var shouldUseMainWorkspaceSurface: Bool {
+        !showFocusMode &&
+        !showHistoryBar &&
+        !isIndexBoardActive &&
+        !isPreviewingHistory
+    }
+
+    @ViewBuilder
+    func mainWorkspaceSurfaceHost(size: CGSize, availableWidth: CGFloat) -> some View {
+        let snapshot = mainWorkspaceSnapshot(size: size, availableWidth: availableWidth)
+        let renderState = mainWorkspaceSurfaceRenderState()
+        let callbacks = resolvedMainWorkspaceSurfaceCallbacks(snapshot: snapshot)
+
+        MainWorkspaceSurface(
+            controller: mainWorkspaceSurfaceController,
             scrollCoordinator: mainCanvasScrollCoordinator,
-            backgroundColor: resolvedBackgroundColor(),
+            snapshot: snapshot,
+            renderState: renderState,
+            plan: mainWorkspaceScrollPlan,
+            callbacks: callbacks,
+            content: AnyView(mainWorkspaceSurfaceScrollableContent(size: size, availableWidth: availableWidth))
+        )
+        .onDisappear {
+            mainWorkspaceSurfaceController.reset()
+        }
+    }
+
+    func mainWorkspaceSnapshot(size: CGSize, availableWidth: CGFloat) -> MainWorkspaceSnapshot {
+        let baseLevelsData = displayedLevelsData()
+        let stateSnapshot = mainWorkspaceStateSnapshot()
+        let levelsData = stateSnapshot.levelsData
+        let visualMaxLevelCount = max(levelsData.count, displayedMaxLevelCount(for: baseLevelsData))
+
+        let slots: [MainWorkspaceSnapshot.Slot] = (0..<visualMaxLevelCount).map { level in
+            guard levelsData.indices.contains(level) else {
+                return MainWorkspaceSnapshot.Slot(level: level, column: nil)
+            }
+            let data = levelsData[level]
+            guard level <= 1 || !data.cards.isEmpty else {
+                return MainWorkspaceSnapshot.Slot(level: level, column: nil)
+            }
+
+            var cardHeightByID: [UUID: CGFloat] = [:]
+            cardHeightByID.reserveCapacity(data.cards.count)
+            for card in data.cards {
+                cardHeightByID[card.id] = resolvedMainCardHeight(for: card)
+            }
+
+            let column = MainWorkspaceSnapshot.Column(
+                level: level,
+                parent: data.parent,
+                viewportKey: mainColumnViewportStorageKey(level: level, cards: data.cards),
+                cards: data.cards,
+                cardHeightByID: cardHeightByID,
+                viewportHeight: size.height,
+                width: columnWidth,
+                topSpacerHeight: size.height * 0.4,
+                bottomSpacerHeight: size.height * 0.7,
+                rowGap: max(0, CGFloat(mainCardVerticalGap)),
+                separatorHeight: mainParentGroupSeparatorHeight
+            )
+            return MainWorkspaceSnapshot.Slot(level: level, column: column)
+        }
+
+        return MainWorkspaceSnapshot(
+            ownerKey: mainCanvasDiagnosticsOwnerKey,
+            stateSnapshot: stateSnapshot,
+            availableWidth: availableWidth,
+            viewportHeight: size.height,
+            leadingInset: availableWidth / 2,
+            trailingInset: availableWidth / 2,
+            slots: slots,
+            backgroundColor: resolvedMainWorkspaceSurfaceBackgroundColor()
+        )
+    }
+
+    func mainWorkspaceStateSnapshot() -> MainWorkspaceStateSnapshot {
+        mainWorkspaceStateSnapshot(for: activeCardID)
+    }
+
+    func mainWorkspaceStateSnapshot(for resolvedActiveCardID: UUID?) -> MainWorkspaceStateSnapshot {
+        let baseLevelsData = displayedLevelsData()
+        let levelsData = displayedMainLevelsData(from: baseLevelsData)
+        let levels = levelsData.map(\.cards)
+        let boundaryNavigableLevels = resolvedMainWorkspaceBoundaryNavigableLevels(for: levels)
+
+        let relationSnapshot: MainWorkspaceActiveRelationSnapshot
+        if let activeID = resolvedActiveCardID, let card = findCard(by: activeID) {
+            var ancestors: Set<UUID> = []
+            var parent = card.parent
+            while let current = parent {
+                ancestors.insert(current.id)
+                parent = current.parent
+            }
+            let siblings = card.parent?.children ?? scenario.rootCards
+            relationSnapshot = MainWorkspaceActiveRelationSnapshot(
+                sourceCardID: activeID,
+                cardsVersion: scenario.cardsVersion,
+                ancestorIDs: ancestors,
+                siblingIDs: Set(siblings.map(\.id)).subtracting([activeID]),
+                descendantIDs: scenario.descendantIDs(for: activeID)
+            )
+        } else {
+            relationSnapshot = MainWorkspaceActiveRelationSnapshot(
+                sourceCardID: nil,
+                cardsVersion: scenario.cardsVersion,
+                ancestorIDs: [],
+                siblingIDs: [],
+                descendantIDs: []
+            )
+        }
+
+        return MainWorkspaceStateSnapshot(
+            activeCardID: resolvedActiveCardID,
+            activeHistory: mainWorkspaceActiveHistory,
+            cardsVersion: scenario.cardsVersion,
+            rootCards: scenario.rootCards,
+            levelsData: levelsData,
+            boundaryNavigableLevels: boundaryNavigableLevels,
+            relationSnapshot: relationSnapshot
+        )
+    }
+
+    func mainWorkspaceSurfaceRenderState() -> MainWorkspaceSurfaceRenderState {
+        MainWorkspaceSurfaceRenderState(
+            contentFingerprint: mainCanvasContentFingerprint(),
+            navigationFingerprint: mainCanvasNavigationFingerprint(),
+            restoreFingerprint: mainCanvasViewState.pendingRestoreRequest?.id ?? -1,
+            hasPendingRestoreRequest: mainCanvasViewState.pendingRestoreRequest != nil,
+            activeCardID: activeCardID
+        )
+    }
+
+    func resolvedMainWorkspaceSurfaceCallbacks(
+        snapshot: MainWorkspaceSnapshot
+    ) -> MainWorkspaceSurfaceCallbacks {
+        let columnsByViewportKey = snapshot.slots.reduce(into: [String: MainWorkspaceSnapshot.Column]()) { partialResult, slot in
+            if let column = slot.column {
+                partialResult[column.viewportKey] = column
+            }
+        }
+
+        return MainWorkspaceSurfaceCallbacks(
+            onAppear: { width in
+                handleMainWorkspaceSurfaceAppear(availableWidth: width)
+            },
+            onNavigation: { width in
+                handleMainWorkspaceSurfaceNavigation(availableWidth: width)
+            },
+            onRestore: { width in
+                handleMainWorkspaceSurfaceRestore(availableWidth: width)
+            },
+            onApplyPlan: { plan, width in
+                executeMainWorkspaceScrollPlan(plan, availableWidth: width)
+            },
+            onViewportOffsetChange: { viewportKey, originY in
+                guard let column = columnsByViewportKey[viewportKey] else { return }
+                handleMainColumnViewportOffsetChange(
+                    viewportKey: viewportKey,
+                    level: column.level,
+                    parent: column.parent,
+                    cards: column.cards,
+                    viewportHeight: column.viewportHeight,
+                    originY: originY
+                )
+            },
+            onObservedFramesChange: { viewportKey, frames in
+                let previousFrames = mainColumnObservedCardFramesByKey[viewportKey] ?? [:]
+                guard previousFrames != frames else { return }
+                mainColumnObservedCardFramesByKey[viewportKey] = frames
+                mainCanvasScrollCoordinator.updateObservedFrames(frames, for: viewportKey)
+            },
             onBackgroundTap: {
                 deselectAll()
                 isMainViewFocused = true
-            },
-            onHistoryIndexChange: { proxy in
-                guard !showFocusMode, !isIndexBoardActive else { return }
-                handleMainCanvasHistoryIndexChange(hProxy: proxy)
-            },
-            onActiveCardChange: { newID, proxy, width in
-                guard !showFocusMode, !isIndexBoardActive else { return }
-                handleMainCanvasActiveCardChange(newID, hProxy: proxy, availableWidth: width)
-            },
-            onNavigationSettle: { proxy, width in
-                guard !showFocusMode, !isIndexBoardActive else { return }
-                handleMainCanvasNavigationSettle(hProxy: proxy, availableWidth: width)
-            },
-            onRestoreRequest: { proxy, width in
-                guard !showFocusMode, !isIndexBoardActive else { return }
-                handleMainCanvasRestoreRequest(hProxy: proxy, availableWidth: width)
-            },
-            onAppear: { proxy, width in
-                guard !showFocusMode, !isIndexBoardActive else { return }
-                handleMainCanvasAppear(hProxy: proxy, availableWidth: width)
-            },
-            scrollableContent: {
-                AnyView(mainCanvasScrollableContent(size: size, availableWidth: availableWidth))
             }
         )
-        .equatable()
+    }
+
+    func resolvedMainWorkspaceSurfaceBackgroundColor() -> NSColor {
+        if isDarkAppearanceActive {
+            let darkRGB = rgbFromHex(darkBackgroundColorHex) ?? (0.07, 0.08, 0.10)
+            return NSColor(
+                calibratedRed: darkRGB.0,
+                green: darkRGB.1,
+                blue: darkRGB.2,
+                alpha: 1
+            )
+        }
+        let lightRGB = rgbFromHex(backgroundColorHex) ?? (0.96, 0.95, 0.93)
+        return NSColor(
+            calibratedRed: lightRGB.0,
+            green: lightRGB.1,
+            blue: lightRGB.2,
+            alpha: 1
+        )
     }
 
     @ViewBuilder
@@ -2632,6 +2809,54 @@ struct ScenarioWriterView: View {
     }
 
     @ViewBuilder
+    func mainWorkspaceSurfaceScrollableContent(size: CGSize, availableWidth: CGFloat) -> some View {
+        ZStack {
+            Color.clear
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    handleMainCanvasInnerTap()
+                }
+            HStack(alignment: .top, spacing: 0) {
+                Spacer().frame(width: availableWidth / 2)
+                mainWorkspaceSurfaceLevelColumns(screenHeight: size.height)
+                Spacer().frame(width: availableWidth / 2)
+            }
+            .background(
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        handleMainCanvasInnerTap()
+                    }
+            )
+        }
+    }
+
+    @ViewBuilder
+    func mainWorkspaceSurfaceLevelColumns(screenHeight: CGFloat) -> some View {
+        let baseLevelsData = displayedLevelsData()
+        let levelsData = displayedMainLevelsData(from: baseLevelsData)
+        let visualMaxLevelCount = displayedMaxLevelCount(for: baseLevelsData)
+        ForEach(Array(levelsData.enumerated()), id: \.offset) { index, data in
+            if index <= 1 || !data.cards.isEmpty {
+                mainWorkspaceSurfaceColumn(
+                    for: data.cards,
+                    level: index,
+                    parent: data.parent,
+                    screenHeight: screenHeight
+                )
+                .id(index)
+            } else {
+                Color.clear.frame(width: columnWidth)
+            }
+        }
+        if visualMaxLevelCount > levelsData.count {
+            ForEach(levelsData.count..<visualMaxLevelCount, id: \.self) { _ in
+                Color.clear.frame(width: columnWidth)
+            }
+        }
+    }
+
+    @ViewBuilder
     func mainCanvasLevelColumns(screenHeight: CGFloat) -> some View {
         let baseLevelsData = displayedLevelsData()
         let levelsData = displayedMainLevelsData(from: baseLevelsData)
@@ -2652,6 +2877,9 @@ struct ScenarioWriterView: View {
     }
 
     func filteredCardsForMainCanvasColumn(levelIndex: Int, cards: [SceneCard]) -> [SceneCard] {
+        if !isInactiveSplitPane {
+            return cards
+        }
         if levelIndex <= 1 || isActiveCardRoot {
             return cards
         }
@@ -2670,7 +2898,8 @@ struct ScenarioWriterView: View {
             isPreviewingHistory: isPreviewingHistory,
             backgroundSignature: "\(appearance)|\(backgroundColorHex)|\(darkBackgroundColorHex)",
             contentFingerprint: mainCanvasContentFingerprint(),
-            interactionFingerprint: mainCanvasInteractionFingerprint()
+            interactionFingerprint: mainCanvasInteractionFingerprint(),
+            navigationFingerprint: mainCanvasNavigationFingerprint()
         )
     }
 
@@ -2717,6 +2946,18 @@ struct ScenarioWriterView: View {
                 hasher.combine(id)
             }
         }
+        return hasher.finalize()
+    }
+
+    func mainCanvasNavigationFingerprint() -> Int {
+        var hasher = Hasher()
+        hasher.combine(activeCardID)
+        hasher.combine(editingCardID)
+        hasher.combine(pendingMainClickFocusTargetID)
+        hasher.combine(pendingMainEditingViewportKeepVisibleCardID)
+        hasher.combine(pendingMainEditingViewportRevealEdge)
+        hasher.combine(pendingMainEditingBoundaryNavigationTargetID)
+        hasher.combine(pendingMainEditingSiblingNavigationTargetID)
         return hasher.finalize()
     }
 
@@ -2888,10 +3129,21 @@ struct ScenarioWriterView: View {
         }
     }
 
-    func handleMainCanvasActiveCardChange(_ newID: UUID?, hProxy: ScrollViewProxy, availableWidth: CGFloat) {
+    func resolvedMainCanvasNavigationTrigger(for activeID: UUID) -> String {
+        if pendingMainClickFocusTargetID == activeID {
+            return "clickFocus"
+        }
+        if pendingMainEditingViewportKeepVisibleCardID == activeID ||
+            pendingMainEditingBoundaryNavigationTargetID == activeID {
+            return "editingBoundaryChange"
+        }
+        return "activeCardChange"
+    }
+
+    func handleMainCanvasActiveCardChange(hProxy: ScrollViewProxy, availableWidth: CGFloat) {
         guard acceptsKeyboardInput else { return }
-        guard let id = newID else { return }
-        let trigger = focusNavigationTrigger
+        guard let id = activeCardID else { return }
+        let trigger = resolvedMainCanvasNavigationTrigger(for: id)
         if showFocusMode {
             indexBoardRestoreTrace("main_canvas_auto_scroll_skip", "reason=focusMode target=\(debugRestoreUUID(id))")
             return
@@ -2900,176 +3152,54 @@ struct ScenarioWriterView: View {
             indexBoardRestoreTrace("main_canvas_auto_scroll_skip", "reason=pendingSibling target=\(debugRestoreUUID(id))")
             return
         }
-        let clickFocusedTarget = pendingMainClickHorizontalFocusTargetID == id
-        if suppressHorizontalAutoScroll && !clickFocusedTarget {
-            indexBoardRestoreTrace(
-                "main_canvas_auto_scroll_skip",
-                "reason=suppressHorizontal target=\(debugRestoreUUID(id)) clickFocused=\(clickFocusedTarget)"
+        let animated =
+            focusNavigationAnimationEnabled &&
+            (pendingMainHorizontalScrollAnimation ?? !shouldSuppressMainArrowRepeatAnimation())
+        pendingMainHorizontalScrollAnimation = nil
+        guard !isPreviewingHistory else { return }
+        if let plan = publishActiveMainWorkspaceScrollPlan(
+            activeID: id,
+            availableWidth: availableWidth,
+            animated: animated,
+            trigger: trigger
+        ) {
+            executeMainWorkspaceScrollPlan(
+                plan,
+                proxy: hProxy,
+                availableWidth: availableWidth
             )
+        }
+        if pendingMainClickFocusTargetID == id {
+            pendingMainClickFocusTargetID = nil
+        }
+    }
+
+    func handleMainWorkspaceSurfaceNavigation(availableWidth: CGFloat) {
+        guard acceptsKeyboardInput else { return }
+        guard let id = activeCardID else { return }
+        let trigger = resolvedMainCanvasNavigationTrigger(for: id)
+        if showFocusMode {
+            indexBoardRestoreTrace("main_canvas_auto_scroll_skip", "reason=focusMode target=\(debugRestoreUUID(id))")
             return
         }
-        if suppressAutoScrollOnce {
-            suppressAutoScrollOnce = false
-            if !clickFocusedTarget {
-                indexBoardRestoreTrace(
-                    "main_canvas_auto_scroll_skip",
-                    "reason=suppressOnce target=\(debugRestoreUUID(id)) clickFocused=\(clickFocusedTarget)"
-                )
-                return
-            }
+        if pendingMainEditingSiblingNavigationTargetID == id {
+            indexBoardRestoreTrace("main_canvas_auto_scroll_skip", "reason=pendingSibling target=\(debugRestoreUUID(id))")
+            return
         }
         let animated =
             focusNavigationAnimationEnabled &&
             (pendingMainHorizontalScrollAnimation ?? !shouldSuppressMainArrowRepeatAnimation())
         pendingMainHorizontalScrollAnimation = nil
-        if clickFocusedTarget {
-            indexBoardRestoreTrace(
-                "main_canvas_auto_scroll_execute",
-                "target=\(debugRestoreUUID(id)) trigger=clickFocused animated=\(animated) availableWidth=\(String(format: "%.2f", availableWidth))"
-            )
-            scrollToColumnIfNeeded(
-                targetCardID: id,
-                proxy: hProxy,
-                availableWidth: availableWidth,
-                force: mainCanvasHorizontalScrollMode == .oneStep,
-                animated: animated
-            )
-            if pendingMainClickHorizontalFocusTargetID == id {
-                pendingMainClickHorizontalFocusTargetID = nil
-            }
-            return
-        }
-        if !isPreviewingHistory {
-            if let plan = publishActiveMainWorkspaceScrollPlan(
-                activeID: id,
-                availableWidth: availableWidth,
-                animated: animated,
-                trigger: trigger
-            ) {
-                executeMainWorkspaceScrollPlan(
-                    plan,
-                    proxy: hProxy,
-                    availableWidth: availableWidth
-                )
-                return
-            }
-            indexBoardRestoreTrace(
-                "main_canvas_auto_scroll_execute",
-                "target=\(debugRestoreUUID(id)) trigger=activeCardFallback animated=\(animated) availableWidth=\(String(format: "%.2f", availableWidth))"
-            )
-            scrollToColumnIfNeeded(
-                targetCardID: id,
-                proxy: hProxy,
-                availableWidth: availableWidth,
-                force: false,
-                animated: animated
-            )
-        }
-    }
-
-    func scheduleMainCanvasClickHorizontalFocusAlignment(
-        targetCardID: UUID,
-        hProxy: ScrollViewProxy,
-        availableWidth: CGFloat
-    ) {
-        let animated =
-            focusNavigationAnimationEnabled &&
-            (pendingMainHorizontalScrollAnimation ?? !shouldSuppressMainArrowRepeatAnimation())
-        pendingMainHorizontalScrollAnimation = nil
-        let retryDelays: [TimeInterval] = [0.0, 0.03, 0.08, 0.16]
-
-        for (index, delay) in retryDelays.enumerated() {
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-                guard !showFocusMode else { return }
-                guard acceptsKeyboardInput else { return }
-
-                if activeCardID != targetCardID {
-                    if pendingMainClickHorizontalFocusTargetID == targetCardID {
-                        pendingMainClickHorizontalFocusTargetID = nil
-                    }
-                    return
-                }
-
-                guard displayedMainCardLocationByID(targetCardID) != nil else {
-                    return
-                }
-
-                if index > 0 {
-                    MainCanvasNavigationDiagnostics.shared.recordHorizontalRetry(
-                        ownerKey: mainCanvasDiagnosticsOwnerKey,
-                        reason: "clickFocusAlignment",
-                        attempt: index,
-                        targetID: targetCardID,
-                        animated: false
-                    )
-                    mainWorkspacePhase0Log(
-                        "horizontal-retry",
-                        "reason=clickFocusAlignment attempt=\(index) target=\(mainWorkspacePhase0CardID(targetCardID))"
-                    )
-                }
-
-                if mainCanvasHorizontalScrollMode == .oneStep,
-                   let targetLevel = displayedMainCardLocationByID(targetCardID)?.level,
-                   let scrollView = mainCanvasScrollCoordinator.resolvedMainCanvasHorizontalScrollView() {
-                    let visibleRect = scrollView.documentVisibleRect
-                    let targetX = resolvedMainCanvasHorizontalTargetX(
-                        level: targetLevel,
-                        availableWidth: max(1, availableWidth),
-                        visibleWidth: visibleRect.width
-                    )
-                    lastScrolledLevel = targetLevel
-                    mainCanvasScrollCoordinator.scheduleMainCanvasHorizontalRestore(offsetX: targetX)
-                    _ = performMainCanvasHorizontalScroll(
-                        level: targetLevel,
-                        availableWidth: max(1, availableWidth),
-                        animated: index == 0 ? animated : false
-                    )
-                } else {
-                    scrollToColumnIfNeeded(
-                        targetCardID: targetCardID,
-                        proxy: hProxy,
-                        availableWidth: availableWidth,
-                        force: false,
-                        animated: index == 0 ? animated : false
-                    )
-                }
-
-                if isMainCanvasHorizontallyAlignedForClickFocus(
-                    targetCardID: targetCardID,
-                    availableWidth: availableWidth
-                ) {
-                    if pendingMainClickHorizontalFocusTargetID == targetCardID {
-                        pendingMainClickHorizontalFocusTargetID = nil
-                    }
-                }
-            }
-        }
-    }
-
-    func isMainCanvasHorizontallyAlignedForClickFocus(
-        targetCardID: UUID,
-        availableWidth: CGFloat
-    ) -> Bool {
-        guard let targetLevel = displayedMainCardLocationByID(targetCardID)?.level else { return false }
-        guard let scrollView = mainCanvasScrollCoordinator.resolvedMainCanvasHorizontalScrollView() else { return false }
-
-        let visibleRect = scrollView.documentVisibleRect
-        let documentWidth = scrollView.documentView?.bounds.width ?? 0
-        let maxX = max(0, documentWidth - visibleRect.width)
-        let targetX = resolvedMainCanvasHorizontalTargetX(
-            level: targetLevel,
-            availableWidth: max(1, availableWidth),
-            visibleWidth: visibleRect.width
+        guard !isPreviewingHistory else { return }
+        _ = publishActiveMainWorkspaceScrollPlan(
+            activeID: id,
+            availableWidth: availableWidth,
+            animated: animated,
+            trigger: trigger
         )
-        let resolvedTargetX = CaretScrollCoordinator.resolvedHorizontalTargetX(
-            visibleRect: visibleRect,
-            targetX: targetX,
-            minX: 0,
-            maxX: maxX,
-            snapToPixel: true
-        )
-        let currentX = scrollView.contentView.bounds.origin.x
-        return abs(resolvedTargetX - currentX) <= 0.5
+        if pendingMainClickFocusTargetID == id {
+            pendingMainClickFocusTargetID = nil
+        }
     }
 
     func handleMainCanvasRestoreRequest(hProxy: ScrollViewProxy, availableWidth: CGFloat) {
@@ -3078,24 +3208,23 @@ struct ScenarioWriterView: View {
         restoreMainCanvasPositionIfNeeded(proxy: hProxy, availableWidth: availableWidth)
     }
 
-    func handleMainCanvasNavigationSettle(hProxy: ScrollViewProxy, availableWidth: CGFloat) {
+    func handleMainWorkspaceSurfaceRestore(availableWidth: CGFloat) {
         guard !showFocusMode else { return }
         guard acceptsKeyboardInput else { return }
-        guard !isPreviewingHistory else { return }
-        guard let targetID = activeCardID, findCard(by: targetID) != nil else { return }
-        scrollToColumnIfNeeded(
-            targetCardID: targetID,
-            proxy: hProxy,
-            availableWidth: availableWidth,
-            force: true,
-            animated: false
-        )
+        _ = restoreMainCanvasPositionIfPossible(availableWidth: availableWidth)
     }
 
     func handleMainCanvasAppear(hProxy: ScrollViewProxy, availableWidth: CGFloat) {
         guard !showFocusMode else { return }
         if acceptsKeyboardInput {
             restoreMainCanvasPositionIfNeeded(proxy: hProxy, availableWidth: availableWidth)
+        }
+    }
+
+    func handleMainWorkspaceSurfaceAppear(availableWidth: CGFloat) {
+        guard !showFocusMode else { return }
+        if acceptsKeyboardInput {
+            _ = restoreMainCanvasPositionIfPossible(availableWidth: availableWidth)
         }
     }
 

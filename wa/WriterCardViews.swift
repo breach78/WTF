@@ -346,12 +346,9 @@ private struct FocusModeEditableTextRenderer: NSViewRepresentable {
 
 private struct MainWorkspaceEditableTextRenderer: NSViewRepresentable {
     struct Signature: Equatable {
-        let textWidthBucket: Int
-        let bodyHeightBucket: Int
         let fontSizeBucket: Int
         let lineSpacingBucket: Int
         let isLightAppearance: Bool
-        let wantsFocus: Bool
     }
 
     final class TextView: NSTextView {
@@ -378,6 +375,7 @@ private struct MainWorkspaceEditableTextRenderer: NSViewRepresentable {
         var parent: MainWorkspaceEditableTextRenderer
         var suppressBindingPropagation = false
         var lastSignature: Signature?
+        var lastAppliedEditorSessionID: Int?
         var pendingFocusRetry: DispatchWorkItem?
 
         init(_ parent: MainWorkspaceEditableTextRenderer) {
@@ -433,6 +431,7 @@ private struct MainWorkspaceEditableTextRenderer: NSViewRepresentable {
     @Binding var text: String
     let cardID: UUID
     let diagnosticsOwnerKey: String?
+    let activeEditorSessionID: Int?
     let textWidth: CGFloat
     let bodyHeight: CGFloat
     let fontSize: CGFloat
@@ -491,12 +490,9 @@ private struct MainWorkspaceEditableTextRenderer: NSViewRepresentable {
 
     private func updateTextView(_ textView: NSTextView, coordinator: Coordinator) {
         let signature = Signature(
-            textWidthBucket: Int((textWidth * 10).rounded()),
-            bodyHeightBucket: Int((bodyHeight * 10).rounded()),
             fontSizeBucket: Int((fontSize * 10).rounded()),
             lineSpacingBucket: Int((lineSpacing * 10).rounded()),
-            isLightAppearance: appearance == "light",
-            wantsFocus: isFocused
+            isLightAppearance: appearance == "light"
         )
 
         let resolvedWidth = max(1, textWidth)
@@ -520,54 +516,71 @@ private struct MainWorkspaceEditableTextRenderer: NSViewRepresentable {
         let font = resolveFocusModeTextFont(fontSize)
         let color = resolveFocusModeTextColor(appearance)
         let paragraph = makeFocusModeRenderParagraphStyle(lineSpacing)
+        let isFocusedResponder =
+            isFocused &&
+            (
+                textView.window?.firstResponder === textView ||
+                NSApp.keyWindow?.firstResponder === textView
+            )
+        let hasActiveEditorGuard = isFocusedResponder && activeEditorSessionID != nil
+        let hasMarkedText = textView.hasMarkedText()
 
         if textView.string != text {
             let selected = textView.selectedRange()
             let currentLength = (textView.string as NSString).length
             let modelLength = (text as NSString).length
-            let isFocusedResponder =
-                isFocused &&
-                (
-                    textView.window?.firstResponder === textView ||
-                    NSApp.keyWindow?.firstResponder === textView
-                )
-            coordinator.suppressBindingPropagation = true
-            if text.isEmpty {
-                textView.string = ""
-            } else {
-                textView.textStorage?.setAttributedString(
-                    makeFocusModeAttributedString(
-                        text,
-                        fontSize: fontSize,
-                        lineSpacing: lineSpacing,
-                        appearance: appearance
-                    )
-                )
-            }
-            let clampedLocation = min(selected.location, modelLength)
-            let clampedLength = min(selected.length, max(0, modelLength - clampedLocation))
-            let selectionAfter = NSRange(location: clampedLocation, length: clampedLength)
-            textView.setSelectedRange(selectionAfter)
-            coordinator.suppressBindingPropagation = false
 
-            if isFocusedResponder, let diagnosticsOwnerKey {
-                mainWorkspacePhase0Log(
-                    "focused-editor-model-overwrite",
-                    "owner=\(diagnosticsOwnerKey) card=\(mainWorkspacePhase0CardID(cardID)) " +
-                    "before=\(selected.location):\(selected.length) after=\(selectionAfter.location):\(selectionAfter.length) " +
-                    "currentLen=\(currentLength) modelLen=\(modelLength)"
-                )
-                Task { @MainActor in
-                    MainCanvasNavigationDiagnostics.shared.recordFocusedEditorOverwrite(
-                        ownerKey: diagnosticsOwnerKey,
-                        cardID: cardID,
-                        selectionBefore: selected,
-                        selectionAfter: selectionAfter,
-                        currentLength: currentLength,
-                        modelLength: modelLength
+            if hasActiveEditorGuard {
+                if let diagnosticsOwnerKey {
+                    mainWorkspacePhase0Log(
+                        "focused-editor-model-sync-blocked",
+                        "owner=\(diagnosticsOwnerKey) card=\(mainWorkspacePhase0CardID(cardID)) " +
+                        "session=\(activeEditorSessionID ?? -1) currentLen=\(currentLength) modelLen=\(modelLength) " +
+                        "marked=\(hasMarkedText) appliedSession=\(coordinator.lastAppliedEditorSessionID ?? -1)"
                     )
                 }
+            } else {
+                coordinator.suppressBindingPropagation = true
+                if text.isEmpty {
+                    textView.string = ""
+                } else {
+                    textView.textStorage?.setAttributedString(
+                        makeFocusModeAttributedString(
+                            text,
+                            fontSize: fontSize,
+                            lineSpacing: lineSpacing,
+                            appearance: appearance
+                        )
+                    )
+                }
+                let clampedLocation = min(selected.location, modelLength)
+                let clampedLength = min(selected.length, max(0, modelLength - clampedLocation))
+                let selectionAfter = NSRange(location: clampedLocation, length: clampedLength)
+                textView.setSelectedRange(selectionAfter)
+                coordinator.suppressBindingPropagation = false
+                coordinator.lastAppliedEditorSessionID = activeEditorSessionID
+
+                if isFocusedResponder, let diagnosticsOwnerKey {
+                    mainWorkspacePhase0Log(
+                        "focused-editor-model-overwrite",
+                        "owner=\(diagnosticsOwnerKey) card=\(mainWorkspacePhase0CardID(cardID)) " +
+                        "before=\(selected.location):\(selected.length) after=\(selectionAfter.location):\(selectionAfter.length) " +
+                        "currentLen=\(currentLength) modelLen=\(modelLength)"
+                    )
+                    Task { @MainActor in
+                        MainCanvasNavigationDiagnostics.shared.recordFocusedEditorOverwrite(
+                            ownerKey: diagnosticsOwnerKey,
+                            cardID: cardID,
+                            selectionBefore: selected,
+                            selectionAfter: selectionAfter,
+                            currentLength: currentLength,
+                            modelLength: modelLength
+                        )
+                    }
+                }
             }
+        } else {
+            coordinator.lastAppliedEditorSessionID = activeEditorSessionID
         }
 
         if coordinator.lastSignature != signature {
@@ -842,6 +855,11 @@ struct FocusModeCardEditor: View {
 
 // MARK: - 메인 카드 아이템
 
+enum CardItemChromeMode {
+    case full
+    case lite
+}
+
 struct CardItem: View {
     private enum InlineInsertZoneEdge {
         case top
@@ -891,6 +909,8 @@ struct CardItem: View {
     var clonePeerDestinations: [ClonePeerMenuDestination] = []
     var onNavigateToClonePeer: ((UUID) -> Void)? = nil
     var diagnosticsOwnerKey: String? = nil
+    var activeEditorSessionID: Int? = nil
+    var chromeMode: CardItemChromeMode = .full
     @State private var mainEditingMeasuredBodyHeight: CGFloat = 0
     @State private var mainEditingMeasureWorkItem: DispatchWorkItem? = nil
     @State private var mainEditingMeasureLastAt: Date = .distantPast
@@ -931,6 +951,9 @@ struct CardItem: View {
 
     private var isCandidateVisualCard: Bool {
         (forceCustomColorVisibility || card.isAICandidate) && card.colorHex != nil
+    }
+    private var showsFullChrome: Bool {
+        chromeMode == .full
     }
     private var shouldShowChildRightEdge: Bool {
         !isArchived && !card.children.isEmpty
@@ -983,7 +1006,7 @@ struct CardItem: View {
     }
 
     private var shouldShowInlineInsertControls: Bool {
-        !isArchived && !isEditing
+        showsFullChrome && !isArchived && !isEditing
     }
 
     private var bodyDropTrailingInset: CGFloat {
@@ -1323,6 +1346,7 @@ struct CardItem: View {
                         text: mainEditorTextBinding,
                         cardID: card.id,
                         diagnosticsOwnerKey: diagnosticsOwnerKey,
+                        activeEditorSessionID: activeEditorSessionID,
                         textWidth: mainEditingTextMeasureWidth,
                         bodyHeight: resolvedMainEditingBodyHeight,
                         fontSize: fontSize,
@@ -1397,7 +1421,7 @@ struct CardItem: View {
     private func cardChromeApplied<Content: View>(to content: Content) -> some View {
         content
         .overlay {
-            if let onDropOnto {
+            if showsFullChrome, let onDropOnto {
                 cardBodyDropZone(onDrop: onDropOnto)
             }
         }
@@ -1452,7 +1476,7 @@ struct CardItem: View {
         }
         .overlay(alignment: .topTrailing) {
             ZStack(alignment: .topTrailing) {
-                if isCandidateVisualCard {
+                if showsFullChrome, isCandidateVisualCard {
                     VStack {
                         HStack(spacing: 6) {
                             Spacer()
@@ -1479,40 +1503,42 @@ struct CardItem: View {
                     }
                     .padding(8)
                 }
-                HStack(spacing: 3) {
-                    if hasLinkedCards {
-                        Rectangle()
+                if showsFullChrome {
+                    HStack(spacing: 3) {
+                        if hasLinkedCards {
+                            Rectangle()
+                                .fill(appearance == "light" ? Color.black.opacity(0.48) : Color.white.opacity(0.85))
+                                .frame(width: 8, height: 8)
+                                .allowsHitTesting(false)
+                        }
+                        if isLinkedCard {
+                            Path { path in
+                                // Right-angle isosceles triangle with the right angle at top-right.
+                                path.move(to: CGPoint(x: 0, y: 0))
+                                path.addLine(to: CGPoint(x: 8, y: 0))
+                                path.addLine(to: CGPoint(x: 8, y: 8))
+                                path.closeSubpath()
+                            }
                             .fill(appearance == "light" ? Color.black.opacity(0.48) : Color.white.opacity(0.85))
                             .frame(width: 8, height: 8)
                             .allowsHitTesting(false)
-                    }
-                    if isLinkedCard {
-                        Path { path in
-                            // Right-angle isosceles triangle with the right angle at top-right.
-                            path.move(to: CGPoint(x: 0, y: 0))
-                            path.addLine(to: CGPoint(x: 8, y: 0))
-                            path.addLine(to: CGPoint(x: 8, y: 8))
-                            path.closeSubpath()
                         }
-                        .fill(appearance == "light" ? Color.black.opacity(0.48) : Color.white.opacity(0.85))
-                        .frame(width: 8, height: 8)
-                        .allowsHitTesting(false)
                     }
-                }
-                if isSummarizingChildren {
-                    ProgressView()
-                        .controlSize(.small)
-                        .padding(8)
-                        .background(appearance == "light" ? Color.white.opacity(0.92) : Color.black.opacity(0.42))
-                        .clipShape(Capsule())
-                        .padding(.top, 6)
-                        .padding(.trailing, 8)
-                        .allowsHitTesting(false)
+                    if isSummarizingChildren {
+                        ProgressView()
+                            .controlSize(.small)
+                            .padding(8)
+                            .background(appearance == "light" ? Color.white.opacity(0.92) : Color.black.opacity(0.42))
+                            .clipShape(Capsule())
+                            .padding(.top, 6)
+                            .padding(.trailing, 8)
+                            .allowsHitTesting(false)
+                    }
                 }
             }
         }
         .overlay(alignment: .topLeading) {
-            if isCloneLinked {
+            if showsFullChrome, isCloneLinked {
                 Rectangle()
                     .fill(appearance == "light" ? Color.black.opacity(0.48) : Color.white.opacity(0.85))
                     .frame(width: 8, height: 8)
@@ -1543,7 +1569,8 @@ struct CardItem: View {
         cardChromeApplied(to: cardShellContent)
     }
 
-    var body: some View {
+    @ViewBuilder
+    private var interactiveCardSurface: some View {
         Group {
             if isEditing {
                 cardSurface
@@ -1574,8 +1601,18 @@ struct CardItem: View {
                     .simultaneousGesture(TapGesture(count: 2).onEnded { onDoubleClick() })
             }
         }
-        .contextMenu {
-            cardContextMenuContent
+    }
+
+    var body: some View {
+        Group {
+            if showsFullChrome {
+                interactiveCardSurface
+                    .contextMenu {
+                        cardContextMenuContent
+                    }
+            } else {
+                interactiveCardSurface
+            }
         }
     }
 
