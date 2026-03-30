@@ -643,14 +643,11 @@ struct MainWorkspaceNavigationModel {
         previousActiveID: UUID?,
         nextActiveID: UUID?
     ) -> [UUID] {
-        guard let previousActiveID else { return activeHistory }
-        guard previousActiveID != nextActiveID else { return activeHistory }
-        var updated = activeHistory.filter { $0 != previousActiveID }
-        updated.insert(previousActiveID, at: 0)
-        if updated.count > activeHistoryLimit {
-            updated.removeSubrange(activeHistoryLimit..<updated.count)
-        }
-        return updated
+        MainWorkspaceDocRuntime.updatedActiveHistory(
+            activeHistory,
+            previousActiveID: previousActiveID,
+            nextActiveID: nextActiveID
+        )
     }
 
     private static func decision(
@@ -717,8 +714,11 @@ struct MainWorkspaceNavigationModel {
 
 struct DisplayedMainLevelsCacheKey: Equatable {
     let cardsVersion: Int
+    let activeCardID: UUID?
     let activeCategory: String?
     let isActiveCardRoot: Bool
+    let activeHistoryFingerprint: Int
+    let usesTreeProjection: Bool
 }
 
 struct MainColumnFocusRequest: Equatable {

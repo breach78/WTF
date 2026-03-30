@@ -1,0 +1,56 @@
+{
+  "source": "/Users/three/app_build/wa/wa/WriterIndexBoardSurfacePhaseTwo.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "+ Temp 카드",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 951
+        }
+      },
+      {
+        "comment": "",
+        "key": "작업창으로 돌아가기",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 958
+        }
+      },
+      {
+        "comment": "",
+        "key": "BOARD · %lld lanes · %lld cards",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 899
+        }
+      },
+      {
+        "comment": "",
+        "key": "100%",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 923
+        }
+      },
+      {
+        "comment": "",
+        "key": "표시할 카드가 없습니다.",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 976
+        }
+      },
+      {
+        "comment": "",
+        "key": "빈 배경 더블클릭, N, 또는 + Temp 카드로 임시 카드를 만들 수 있습니다.",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 979
+        }
+      }
+    ]
+  },
+  "version": 1
+}

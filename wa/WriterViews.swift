@@ -88,6 +88,7 @@ struct ScenarioWriterView: View {
     @AppStorage("mainCardVerticalGap") var mainCardVerticalGap: Double = 0.0
     @AppStorage("mainCanvasHorizontalScrollMode") var mainCanvasHorizontalScrollModeRawValue: Int = MainCanvasHorizontalScrollMode.twoStep.rawValue
     @AppStorage("mainWorkspaceZoomScale") var mainWorkspaceZoomScale: Double = 1.0
+    @AppStorage("mainWorkspacePhase1CanvasEnabled") var mainWorkspacePhase1CanvasEnabled: Bool = false
     @AppStorage("geminiModelID") var geminiModelID: String = "gemini-3.1-pro-preview"
     @AppStorage("autoBackupEnabledOnQuit") var autoBackupEnabledOnQuit: Bool = true
     @AppStorage("autoBackupDirectoryPath") var autoBackupDirectoryPath: String = ""
@@ -2580,10 +2581,12 @@ struct ScenarioWriterView: View {
     }
 
     var shouldUseMainWorkspaceSurface: Bool {
-        !showFocusMode &&
+        let envOverrideEnabled = ProcessInfo.processInfo.environment["WA_ENABLE_MAIN_WORKSPACE_PHASE1_CANVAS"] == "1"
+        return !showFocusMode &&
         !showHistoryBar &&
         !isIndexBoardActive &&
-        !isPreviewingHistory
+        !isPreviewingHistory &&
+        (mainWorkspacePhase1CanvasEnabled || envOverrideEnabled)
     }
 
     @ViewBuilder
@@ -2598,8 +2601,7 @@ struct ScenarioWriterView: View {
             snapshot: snapshot,
             renderState: renderState,
             plan: mainWorkspaceScrollPlan,
-            callbacks: callbacks,
-            content: AnyView(mainWorkspaceSurfaceScrollableContent(size: size, availableWidth: availableWidth))
+            callbacks: callbacks
         )
         .onDisappear {
             mainWorkspaceSurfaceController.reset()
@@ -2651,7 +2653,12 @@ struct ScenarioWriterView: View {
             leadingInset: availableWidth / 2,
             trailingInset: availableWidth / 2,
             slots: slots,
-            backgroundColor: resolvedMainWorkspaceSurfaceBackgroundColor()
+            backgroundColor: resolvedMainWorkspaceSurfaceBackgroundColor(),
+            cardRenderMetrics: MainWorkspaceCardRenderMetrics(
+                fontSize: CGFloat(fontSize),
+                lineSpacing: CGFloat(mainCardLineSpacingValue),
+                contentPadding: MainEditorLayoutMetrics.mainCardContentPadding
+            )
         )
     }
 
@@ -2661,35 +2668,19 @@ struct ScenarioWriterView: View {
 
     func mainWorkspaceStateSnapshot(for resolvedActiveCardID: UUID?) -> MainWorkspaceStateSnapshot {
         let baseLevelsData = displayedLevelsData()
-        let levelsData = displayedMainLevelsData(from: baseLevelsData)
+        let levelsData =
+            resolvedActiveCardID == activeCardID
+            ? displayedMainLevelsData(from: baseLevelsData)
+            : resolvedDisplayedMainLevelsWithParents(
+                for: resolvedActiveCardID,
+                activeHistory: mainWorkspaceActiveHistory
+            )
         let levels = levelsData.map(\.cards)
         let boundaryNavigableLevels = resolvedMainWorkspaceBoundaryNavigableLevels(for: levels)
-
-        let relationSnapshot: MainWorkspaceActiveRelationSnapshot
-        if let activeID = resolvedActiveCardID, let card = findCard(by: activeID) {
-            var ancestors: Set<UUID> = []
-            var parent = card.parent
-            while let current = parent {
-                ancestors.insert(current.id)
-                parent = current.parent
-            }
-            let siblings = card.parent?.children ?? scenario.rootCards
-            relationSnapshot = MainWorkspaceActiveRelationSnapshot(
-                sourceCardID: activeID,
-                cardsVersion: scenario.cardsVersion,
-                ancestorIDs: ancestors,
-                siblingIDs: Set(siblings.map(\.id)).subtracting([activeID]),
-                descendantIDs: scenario.descendantIDs(for: activeID)
-            )
-        } else {
-            relationSnapshot = MainWorkspaceActiveRelationSnapshot(
-                sourceCardID: nil,
-                cardsVersion: scenario.cardsVersion,
-                ancestorIDs: [],
-                siblingIDs: [],
-                descendantIDs: []
-            )
-        }
+        let relationSnapshot = MainWorkspaceDocRuntime.relationSnapshot(
+            activeCardID: resolvedActiveCardID,
+            scenario: scenario
+        )
 
         return MainWorkspaceStateSnapshot(
             activeCardID: resolvedActiveCardID,
@@ -2750,6 +2741,14 @@ struct ScenarioWriterView: View {
                 guard previousFrames != frames else { return }
                 mainColumnObservedCardFramesByKey[viewportKey] = frames
                 mainCanvasScrollCoordinator.updateObservedFrames(frames, for: viewportKey)
+            },
+            onCardSelect: { cardID in
+                guard let card = findCard(by: cardID) else { return }
+                handleMainWorkspaceCardClick(card)
+            },
+            onCardDoubleClick: { cardID in
+                guard let card = findCard(by: cardID) else { return }
+                beginCardEditing(card)
             },
             onBackgroundTap: {
                 deselectAll()

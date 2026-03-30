@@ -1,0 +1,30 @@
+{
+  "/Users/three/app_build/wa/wa/WriterIndexBoardRestoreDiagnostics.swift" : {
+    "const-values" : "/Users/three/app_build/wa/.codex_derived/phase1_build/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterIndexBoardRestoreDiagnostics.swiftconstvalues",
+    "dependencies" : "/Users/three/app_build/wa/.codex_derived/phase1_build/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterIndexBoardRestoreDiagnostics.d",
+    "diagnostics" : "/Users/three/app_build/wa/.codex_derived/phase1_build/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterIndexBoardRestoreDiagnostics.dia",
+    "object" : "/Users/three/app_build/wa/.codex_derived/phase1_build/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterIndexBoardRestoreDiagnostics.o",
+    "swift-dependencies" : "/Users/three/app_build/wa/.codex_derived/phase1_build/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterIndexBoardRestoreDiagnostics.swiftdeps"
+  },
+  "/Users/three/app_build/wa/wa/WriterIndexBoardScaffolding.swift" : {
+    "const-values" : "/Users/three/app_build/wa/.codex_derived/phase1_build/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterIndexBoardScaffolding.swiftconstvalues",
+    "dependencies" : "/Users/three/app_build/wa/.codex_derived/phase1_build/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterIndexBoardScaffolding.d",
+    "diagnostics" : "/Users/three/app_build/wa/.codex_derived/phase1_build/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterIndexBoardScaffolding.dia",
+    "object" : "/Users/three/app_build/wa/.codex_derived/phase1_build/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterIndexBoardScaffolding.o",
+    "swift-dependencies" : "/Users/three/app_build/wa/.codex_derived/phase1_build/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterIndexBoardScaffolding.swiftdeps"
+  },
+  "/Users/three/app_build/wa/wa/WriterIndexBoardSurfaceAppKitPhaseTwo.swift" : {
+    "const-values" : "/Users/three/app_build/wa/.codex_derived/phase1_build/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterIndexBoardSurfaceAppKitPhaseTwo.swiftconstvalues",
+    "dependencies" : "/Users/three/app_build/wa/.codex_derived/phase1_build/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterIndexBoardSurfaceAppKitPhaseTwo.d",
+    "diagnostics" : "/Users/three/app_build/wa/.codex_derived/phase1_build/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterIndexBoardSurfaceAppKitPhaseTwo.dia",
+    "object" : "/Users/three/app_build/wa/.codex_derived/phase1_build/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterIndexBoardSurfaceAppKitPhaseTwo.o",
+    "swift-dependencies" : "/Users/three/app_build/wa/.codex_derived/phase1_build/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterIndexBoardSurfaceAppKitPhaseTwo.swiftdeps"
+  },
+  "/Users/three/app_build/wa/wa/WriterIndexBoardSurfacePhaseTwo.swift" : {
+    "const-values" : "/Users/three/app_build/wa/.codex_derived/phase1_build/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterIndexBoardSurfacePhaseTwo.swiftconstvalues",
+    "dependencies" : "/Users/three/app_build/wa/.codex_derived/phase1_build/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterIndexBoardSurfacePhaseTwo.d",
+    "diagnostics" : "/Users/three/app_build/wa/.codex_derived/phase1_build/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterIndexBoardSurfacePhaseTwo.dia",
+    "object" : "/Users/three/app_build/wa/.codex_derived/phase1_build/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterIndexBoardSurfacePhaseTwo.o",
+    "swift-dependencies" : "/Users/three/app_build/wa/.codex_derived/phase1_build/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterIndexBoardSurfacePhaseTwo.swiftdeps"
+  }
+}

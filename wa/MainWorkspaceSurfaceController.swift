@@ -41,15 +41,13 @@ final class MainWorkspaceSurfaceController: ObservableObject {
         snapshot: MainWorkspaceSnapshot,
         renderState: MainWorkspaceSurfaceRenderState,
         plan: MainWorkspaceScrollPlan?,
-        callbacks: MainWorkspaceSurfaceCallbacks,
-        content: AnyView
+        callbacks: MainWorkspaceSurfaceCallbacks
     ) {
         guard let surfaceView else { return }
 
         surfaceView.apply(
             snapshot: snapshot,
-            callbacks: callbacks,
-            content: content
+            callbacks: callbacks
         )
         surfaceView.schedulePostApplyRefresh()
 

@@ -3446,31 +3446,95 @@ extension ScenarioWriterView {
         return resolved
     }
 
-    func displayedMainLevelsData(from levelsData: [LevelData]) -> [LevelData] {
-        if isInactiveSplitPane {
-            return levelsData.enumerated().map { index, data in
-                LevelData(
-                    cards: filteredCardsForMainCanvasColumn(levelIndex: index, cards: data.cards),
-                    parent: data.parent
-                )
-            }
-        }
+    private func resolvedMainWorkspaceProjectionActiveCategory(for activeCardID: UUID?) -> String? {
+        guard !isPreviewingHistory else { return nil }
+        guard let activeCardID, let card = findCard(by: activeCardID) else { return nil }
+        return card.category
+    }
 
-        let cacheKey = DisplayedMainLevelsCacheKey(
-            cardsVersion: scenario.cardsVersion,
+    private func resolvedMainWorkspaceProjectionIsActiveRoot(_ activeCardID: UUID?) -> Bool {
+        guard let activeCardID else { return false }
+        return scenario.rootCards.contains { $0.id == activeCardID }
+    }
+
+    private func resolvedMainWorkspaceActiveHistoryFingerprint(_ activeHistory: [UUID]) -> Int {
+        var hasher = Hasher()
+        hasher.combine(activeHistory.count)
+        for id in activeHistory {
+            hasher.combine(id)
+        }
+        return hasher.finalize()
+    }
+
+    private func legacyDisplayedMainLevelsData(
+        from levelsData: [LevelData],
+        activeCategory: String?,
+        isActiveCardRoot: Bool
+    ) -> [LevelData] {
+        levelsData.enumerated().map { index, data in
+            let cards: [SceneCard]
+            if isInactiveSplitPane {
+                cards = filteredCardsForMainCanvasColumn(levelIndex: index, cards: data.cards)
+            } else if index <= 1 || isActiveCardRoot {
+                cards = data.cards
+            } else if let activeCategory {
+                cards = data.cards.filter { $0.category == activeCategory }
+            } else {
+                cards = data.cards
+            }
+            return LevelData(cards: cards, parent: data.parent)
+        }
+    }
+
+    private func resolvedDisplayedMainLevelsData(
+        from levelsData: [LevelData],
+        activeCardID: UUID?,
+        activeHistory: [UUID]
+    ) -> [LevelData] {
+        let activeCategory = resolvedMainWorkspaceProjectionActiveCategory(for: activeCardID)
+        let isActiveCardRoot = resolvedMainWorkspaceProjectionIsActiveRoot(activeCardID)
+        let legacyLevelsData = legacyDisplayedMainLevelsData(
+            from: levelsData,
             activeCategory: activeCategory,
             isActiveCardRoot: isActiveCardRoot
+        )
+
+        guard shouldUseMainWorkspaceSurface, !isInactiveSplitPane else {
+            return legacyLevelsData
+        }
+
+        return MainWorkspaceTreeProjection.build(
+            input: MainWorkspaceTreeProjection.Input(
+                scenario: scenario,
+                activeCardID: activeCardID,
+                activeHistory: activeHistory,
+                activeCategory: activeCategory,
+                isActiveCardRoot: isActiveCardRoot,
+                fallbackLevelsData: legacyLevelsData
+            )
+        ).levelsData
+    }
+
+    func displayedMainLevelsData(from levelsData: [LevelData]) -> [LevelData] {
+        let activeCategory = resolvedMainWorkspaceProjectionActiveCategory(for: activeCardID)
+        let activeHistoryFingerprint = resolvedMainWorkspaceActiveHistoryFingerprint(mainWorkspaceActiveHistory)
+        let cacheKey = DisplayedMainLevelsCacheKey(
+            cardsVersion: scenario.cardsVersion,
+            activeCardID: activeCardID,
+            activeCategory: activeCategory,
+            isActiveCardRoot: resolvedMainWorkspaceProjectionIsActiveRoot(activeCardID),
+            activeHistoryFingerprint: activeHistoryFingerprint,
+            usesTreeProjection: shouldUseMainWorkspaceSurface && !isInactiveSplitPane
         )
         if displayedMainLevelsCacheKey == cacheKey {
             return displayedMainLevelsCache
         }
 
-        let resolved = levelsData.enumerated().map { index, data in
-            LevelData(
-                cards: filteredCardsForMainCanvasColumn(levelIndex: index, cards: data.cards),
-                parent: data.parent
-            )
-        }
+        let resolved = resolvedDisplayedMainLevelsData(
+            from: levelsData,
+            activeCardID: activeCardID,
+            activeHistory: mainWorkspaceActiveHistory
+        )
         var locationByID: [UUID: (level: Int, index: Int)] = [:]
         for (levelIndex, data) in resolved.enumerated() {
             for (index, card) in data.cards.enumerated() {
@@ -3485,6 +3549,17 @@ extension ScenarioWriterView {
 
     func resolvedDisplayedMainLevelsWithParents() -> [LevelData] {
         displayedMainLevelsData(from: resolvedLevelsWithParents())
+    }
+
+    func resolvedDisplayedMainLevelsWithParents(
+        for activeCardID: UUID?,
+        activeHistory: [UUID]
+    ) -> [LevelData] {
+        resolvedDisplayedMainLevelsData(
+            from: resolvedLevelsWithParents(),
+            activeCardID: activeCardID,
+            activeHistory: activeHistory
+        )
     }
 
     func resolvedDisplayedMainLevels() -> [[SceneCard]] {
@@ -3805,25 +3880,39 @@ extension ScenarioWriterView {
         )
     }
 
+    @discardableResult
+    func applyMainWorkspaceDocRuntimeChangeMode(
+        previousActiveID: UUID?,
+        nextActiveID: UUID?,
+        updateHistory: Bool
+    ) -> MainWorkspaceDocRuntime.State {
+        let relationSyncStartedAt = CACurrentMediaTime()
+        let state = MainWorkspaceDocRuntime.changeMode(
+            previousActiveID: previousActiveID,
+            nextActiveID: nextActiveID,
+            activeHistory: mainWorkspaceActiveHistory,
+            updateHistory: updateHistory && !showFocusMode && !showHistoryBar && !isIndexBoardActive,
+            scenario: scenario
+        )
+        if state.activeHistory != mainWorkspaceActiveHistory {
+            mainWorkspaceActiveHistory = state.activeHistory
+        }
+        applyMainWorkspaceRelationSnapshot(
+            state.relationSnapshot,
+            durationMilliseconds: (CACurrentMediaTime() - relationSyncStartedAt) * 1000
+        )
+        return state
+    }
+
     func synchronizeMainWorkspaceSelectionState(
         previousActiveID: UUID?,
         nextActiveID: UUID?,
         updateHistory: Bool = true
     ) {
-        let stateSnapshot = mainWorkspaceStateSnapshot()
-        if updateHistory && !showFocusMode && !showHistoryBar && !isIndexBoardActive {
-            let updatedHistory = MainWorkspaceNavigationModel.updatedActiveHistory(
-                stateSnapshot.activeHistory,
-                previousActiveID: previousActiveID,
-                nextActiveID: nextActiveID
-            )
-            if updatedHistory != mainWorkspaceActiveHistory {
-                mainWorkspaceActiveHistory = updatedHistory
-            }
-        }
-        applyMainWorkspaceRelationSnapshot(
-            stateSnapshot.relationSnapshot,
-            durationMilliseconds: 0
+        _ = applyMainWorkspaceDocRuntimeChangeMode(
+            previousActiveID: previousActiveID,
+            nextActiveID: nextActiveID,
+            updateHistory: updateHistory
         )
     }
 
@@ -3846,15 +3935,16 @@ extension ScenarioWriterView {
     }
 
     func synchronizeActiveRelationState(for activeID: UUID?) {
-        let relationSyncStartedAt = CACurrentMediaTime()
         if activeRelationSourceCardID == activeID,
            activeRelationSourceCardsVersion == scenario.cardsVersion {
             return
         }
-        let stateSnapshot = mainWorkspaceStateSnapshot(for: activeID)
         applyMainWorkspaceRelationSnapshot(
-            stateSnapshot.relationSnapshot,
-            durationMilliseconds: (CACurrentMediaTime() - relationSyncStartedAt) * 1000
+            MainWorkspaceDocRuntime.relationSnapshot(
+                activeCardID: activeID,
+                scenario: scenario
+            ),
+            durationMilliseconds: 0
         )
     }
 
@@ -3862,8 +3952,8 @@ extension ScenarioWriterView {
         guard !showFocusMode else { return }
         guard !showHistoryBar else { return }
         guard !isIndexBoardActive else { return }
-        let updated = MainWorkspaceNavigationModel.updatedActiveHistory(
-            mainWorkspaceStateSnapshot().activeHistory,
+        let updated = MainWorkspaceDocRuntime.updatedActiveHistory(
+            mainWorkspaceActiveHistory,
             previousActiveID: previousActiveID,
             nextActiveID: nextActiveID
         )
@@ -4236,8 +4326,13 @@ extension ScenarioWriterView {
 
     func deselectAll() {
         finishEditing()
+        let previousActiveID = activeCardID
         activeCardID = nil
-        resetActiveRelationStateCache()
+        synchronizeMainWorkspaceSelectionState(
+            previousActiveID: previousActiveID,
+            nextActiveID: nil,
+            updateHistory: false
+        )
         selectedCardIDs = []
     }
 
@@ -5415,8 +5510,13 @@ extension ScenarioWriterView {
             suppressHorizontalAutoScroll = true
             changeActiveCard(to: n)
         } else {
+            let previousActiveID = activeCardID
             activeCardID = nil
-            resetActiveRelationStateCache()
+            synchronizeMainWorkspaceSelectionState(
+                previousActiveID: previousActiveID,
+                nextActiveID: nil,
+                updateHistory: false
+            )
         }
         isMainViewFocused = true
         commitCardMutation(
@@ -6000,8 +6100,13 @@ extension ScenarioWriterView {
                 }
             } else {
                 selectedCardIDs = []
+                let previousActiveID = activeCardID
                 activeCardID = nil
-                resetActiveRelationStateCache()
+                synchronizeMainWorkspaceSelectionState(
+                    previousActiveID: previousActiveID,
+                    nextActiveID: nil,
+                    updateHistory: false
+                )
                 if showFocusMode {
                     editingCardID = nil
                     focusModeEditorCardID = nil

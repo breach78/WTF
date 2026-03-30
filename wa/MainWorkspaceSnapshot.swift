@@ -32,6 +32,12 @@ struct MainWorkspaceSurfaceRenderState {
     let activeCardID: UUID?
 }
 
+struct MainWorkspaceCardRenderMetrics {
+    let fontSize: CGFloat
+    let lineSpacing: CGFloat
+    let contentPadding: CGFloat
+}
+
 struct MainWorkspaceSnapshot {
     struct Slot {
         let level: Int
@@ -60,6 +66,7 @@ struct MainWorkspaceSnapshot {
     let trailingInset: CGFloat
     let slots: [Slot]
     let backgroundColor: NSColor
+    let cardRenderMetrics: MainWorkspaceCardRenderMetrics
 }
 
 struct MainWorkspaceSurfaceCallbacks {
@@ -69,5 +76,7 @@ struct MainWorkspaceSurfaceCallbacks {
     let onApplyPlan: (MainWorkspaceScrollPlan, CGFloat) -> Void
     let onViewportOffsetChange: (String, CGFloat) -> Void
     let onObservedFramesChange: (String, [UUID: CGRect]) -> Void
+    let onCardSelect: (UUID) -> Void
+    let onCardDoubleClick: (UUID) -> Void
     let onBackgroundTap: () -> Void
 }
