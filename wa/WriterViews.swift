@@ -38,6 +38,7 @@ struct ScenarioWriterView: View {
     @State private var interactionRuntime = WriterInteractionRuntime()
     @StateObject private var mainCanvasViewState = MainCanvasViewState()
     @StateObject var mainCanvasScrollCoordinator = MainCanvasScrollCoordinator()
+    @StateObject var mainWorkspaceScrollExecutor = MainWorkspaceScrollExecutor()
     @StateObject var focusModeLayoutCoordinator = FocusModeLayoutCoordinator()
     @StateObject private var aiFeatureState = WriterAIFeatureState()
     @StateObject private var editEndAutoBackupState = WriterEditEndAutoBackupState()
@@ -411,6 +412,21 @@ struct ScenarioWriterView: View {
         nonmutating set { mainCanvasViewState.pendingRestoreRequest = newValue }
     }
 
+    var mainWorkspaceScrollPlan: MainWorkspaceScrollPlan? {
+        get { mainCanvasViewState.mainWorkspaceScrollPlan }
+        nonmutating set { mainCanvasViewState.mainWorkspaceScrollPlan = newValue }
+    }
+
+    var mainWorkspaceScrollPlanTick: Int {
+        get { mainCanvasViewState.mainWorkspaceScrollPlanTick }
+        nonmutating set { mainCanvasViewState.mainWorkspaceScrollPlanTick = newValue }
+    }
+
+    var focusNavigationTrigger: String {
+        get { mainCanvasViewState.focusNavigationTrigger }
+        nonmutating set { mainCanvasViewState.focusNavigationTrigger = newValue }
+    }
+
     func scheduleMainCanvasRestoreRequest(
         targetCardID: UUID,
         visibleLevel: Int? = nil,
@@ -430,6 +446,10 @@ struct ScenarioWriterView: View {
             forceSemantic: forceSemantic,
             reason: reason
         )
+    }
+
+    func publishMainWorkspaceScrollPlan(_ plan: MainWorkspaceScrollPlan) {
+        mainCanvasViewState.publishMainWorkspaceScrollPlan(plan)
     }
 
     var suppressAutoScrollOnce: Bool {
@@ -1356,6 +1376,7 @@ struct ScenarioWriterView: View {
 
     func handleWorkspaceAppear() {
         mainCanvasScrollCoordinator.reset()
+        mainWorkspaceScrollExecutor.reset()
         MainCanvasNavigationDiagnostics.shared.reset(
             ownerKey: mainCanvasDiagnosticsOwnerKey,
             scenarioID: scenario.id,
@@ -1463,9 +1484,9 @@ struct ScenarioWriterView: View {
         }
         guard acceptsKeyboardInput else { return }
         synchronizeActiveRelationState(for: newID)
-        if pendingMainEditingSiblingNavigationTargetID == newID {
+        let isEditingSiblingNavigationTarget = pendingMainEditingSiblingNavigationTargetID == newID
+        if isEditingSiblingNavigationTarget {
             pendingMainHorizontalScrollAnimation = nil
-            syncMainCanvasInteractionState()
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
                 if pendingMainEditingSiblingNavigationTargetID == newID,
                    activeCardID == newID,
@@ -1473,7 +1494,6 @@ struct ScenarioWriterView: View {
                     pendingMainEditingSiblingNavigationTargetID = nil
                 }
             }
-            return
         }
         let hasExplicitEditingVerticalTransition =
             editingCardID != nil &&
@@ -1494,8 +1514,17 @@ struct ScenarioWriterView: View {
             syncMainCanvasInteractionState()
             return
         }
-        publishMainColumnFocusNavigationIntent(for: newID)
-        syncMainCanvasInteractionState(emitNavigationEvent: true)
+        if clickFocusedTarget {
+            syncMainCanvasInteractionState(
+                emitNavigationEvent: true,
+                navigationTrigger: "clickFocus"
+            )
+            return
+        }
+        syncMainCanvasInteractionState(
+            emitNavigationEvent: true,
+            navigationTrigger: hasExplicitEditingVerticalTransition ? "editingBoundaryChange" : "activeCardChange"
+        )
     }
 
     func handleScenarioCardsVersionChange() {
@@ -1513,13 +1542,17 @@ struct ScenarioWriterView: View {
         pruneAICandidateTracking()
     }
 
-    func syncMainCanvasInteractionState(emitNavigationEvent: Bool = false) {
+    func syncMainCanvasInteractionState(
+        emitNavigationEvent: Bool = false,
+        navigationTrigger: String = "activeCardChange"
+    ) {
         let interactionFingerprint = mainCanvasInteractionFingerprint()
         if mainCanvasViewState.interactionFingerprint != interactionFingerprint {
             mainCanvasViewState.interactionFingerprint = interactionFingerprint
         }
         if emitNavigationEvent {
             mainCanvasViewState.focusNavigationTargetID = activeCardID
+            mainCanvasViewState.focusNavigationTrigger = navigationTrigger
             mainCanvasViewState.focusNavigationTick &+= 1
         }
     }
@@ -1565,6 +1598,7 @@ struct ScenarioWriterView: View {
         cancelAIChatRequest()
         flushAIThreadsPersistence()
         flushAIEmbeddingPersistence()
+        mainWorkspaceScrollExecutor.reset()
         mainCanvasScrollCoordinator.reset()
         pendingEditEndAutoBackupWorkItem?.cancel()
         pendingEditEndAutoBackupWorkItem = nil
@@ -2857,6 +2891,7 @@ struct ScenarioWriterView: View {
     func handleMainCanvasActiveCardChange(_ newID: UUID?, hProxy: ScrollViewProxy, availableWidth: CGFloat) {
         guard acceptsKeyboardInput else { return }
         guard let id = newID else { return }
+        let trigger = focusNavigationTrigger
         if showFocusMode {
             indexBoardRestoreTrace("main_canvas_auto_scroll_skip", "reason=focusMode target=\(debugRestoreUUID(id))")
             return
@@ -2905,16 +2940,28 @@ struct ScenarioWriterView: View {
             return
         }
         if !isPreviewingHistory {
+            if let plan = publishActiveMainWorkspaceScrollPlan(
+                activeID: id,
+                availableWidth: availableWidth,
+                animated: animated,
+                trigger: trigger
+            ) {
+                executeMainWorkspaceScrollPlan(
+                    plan,
+                    proxy: hProxy,
+                    availableWidth: availableWidth
+                )
+                return
+            }
             indexBoardRestoreTrace(
                 "main_canvas_auto_scroll_execute",
-                "target=\(debugRestoreUUID(id)) trigger=activeCard animated=\(animated) availableWidth=\(String(format: "%.2f", availableWidth)) " +
-                "clickFocused=\(clickFocusedTarget)"
+                "target=\(debugRestoreUUID(id)) trigger=activeCardFallback animated=\(animated) availableWidth=\(String(format: "%.2f", availableWidth))"
             )
             scrollToColumnIfNeeded(
                 targetCardID: id,
                 proxy: hProxy,
                 availableWidth: availableWidth,
-                force: clickFocusedTarget && mainCanvasHorizontalScrollMode == .oneStep,
+                force: false,
                 animated: animated
             )
         }

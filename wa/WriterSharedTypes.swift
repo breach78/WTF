@@ -61,6 +61,10 @@ func mainWorkspacePhase0CardID(_ id: UUID?) -> String {
     return id.uuidString
 }
 
+func mainWorkspacePhase0CardList(_ ids: [UUID]) -> String {
+    ids.map(\.uuidString).joined(separator: ",")
+}
+
 func mainWorkspacePhase0ResponderSummary(expectedText: String? = nil) -> String {
     guard let textView = NSApp.keyWindow?.firstResponder as? NSTextView else { return "none" }
     let selected = textView.selectedRange()
@@ -234,6 +238,28 @@ struct MainWorkspaceNavigationDecision {
 struct MainWorkspaceNavigationModel {
     static let activeHistoryLimit = 40
 
+    enum PreferredNavigationChildSource {
+        case activeHistory
+        case lastSelectedChild
+        case firstAvailable
+
+        var debugLabel: String {
+            switch self {
+            case .activeHistory:
+                return "activeHistory"
+            case .lastSelectedChild:
+                return "lastSelectedChild"
+            case .firstAvailable:
+                return "firstAvailable"
+            }
+        }
+    }
+
+    struct PreferredNavigationChildSelection {
+        let child: SceneCard
+        let source: PreferredNavigationChildSource
+    }
+
     struct Input {
         let direction: ScenarioWriterView.MainArrowDirection
         let activeCardID: UUID?
@@ -340,20 +366,47 @@ struct MainWorkspaceNavigationModel {
             )
 
         case .right:
-            if let child = preferredNavigationChild(
-                for: card,
+            let visibleNextChildren = nextLevel.filter { child in
+                child.parent?.id == card.id
+            }
+            if let visibleSelection = preferredVisibleNavigationChildSelection(
+                sourceCardID: activeCardID,
+                visibleChildren: visibleNextChildren,
                 matching: card.category,
                 activeHistory: input.activeHistory
             ) {
                 return decision(
                     direction: input.direction,
                     sourceCardID: activeCardID,
-                    targetCard: child,
+                    targetCard: visibleSelection.child,
+                    activeHistory: input.activeHistory
+                )
+            }
+            if let childSelection = preferredNavigationChildSelection(
+                for: card,
+                matching: card.category,
+                activeHistory: input.activeHistory
+            ) {
+                mainWorkspacePhase0Log(
+                    "right-target-monitor",
+                    "source=\(mainWorkspacePhase0CardID(activeCardID)) mode=fallback visibleChildren=\(mainWorkspacePhase0CardList(visibleNextChildren.map(\.id))) " +
+                    "target=\(mainWorkspacePhase0CardID(childSelection.child.id)) sourceKind=\(childSelection.source.debugLabel)"
+                )
+                return decision(
+                    direction: input.direction,
+                    sourceCardID: activeCardID,
+                    targetCard: childSelection.child,
                     activeHistory: input.activeHistory
                 )
             }
             guard input.allowChildlessRightFallback else { return .unavailable }
-            guard input.isChildlessRightFallbackArmed else { return .armed }
+            guard input.isChildlessRightFallbackArmed else {
+                mainWorkspacePhase0Log(
+                    "right-target-monitor",
+                    "source=\(mainWorkspacePhase0CardID(activeCardID)) mode=doublePressArm visibleChildren=\(mainWorkspacePhase0CardList(visibleNextChildren.map(\.id))) result=armed"
+                )
+                return .armed
+            }
             if let target = nearestLevelChildTarget(
                 in: currentLevel,
                 nextLevel: nextLevel,
@@ -374,6 +427,10 @@ struct MainWorkspaceNavigationModel {
                     activeHistory: input.activeHistory
                 )
             }
+            mainWorkspacePhase0Log(
+                "right-target-monitor",
+                "source=\(mainWorkspacePhase0CardID(activeCardID)) mode=doublePressFallback visibleChildren=\(mainWorkspacePhase0CardList(visibleNextChildren.map(\.id))) result=unavailable"
+            )
             return .unavailable
         }
     }
@@ -383,6 +440,18 @@ struct MainWorkspaceNavigationModel {
         matching category: String?,
         activeHistory: [UUID]
     ) -> SceneCard? {
+        preferredNavigationChildSelection(
+            for: card,
+            matching: category,
+            activeHistory: activeHistory
+        )?.child
+    }
+
+    static func preferredNavigationChildSelection(
+        for card: SceneCard,
+        matching category: String?,
+        activeHistory: [UUID]
+    ) -> PreferredNavigationChildSelection? {
         let children = card.sortedChildren
         guard !children.isEmpty else { return nil }
 
@@ -392,13 +461,25 @@ struct MainWorkspaceNavigationModel {
                 activeHistory: activeHistory,
                 matching: category
             ) {
-                return historyMatch
+                return PreferredNavigationChildSelection(
+                    child: historyMatch,
+                    source: .activeHistory
+                )
             }
             if let rememberedID = card.lastSelectedChildID,
                let remembered = children.first(where: { $0.id == rememberedID && $0.category == category }) {
-                return remembered
+                return PreferredNavigationChildSelection(
+                    child: remembered,
+                    source: .lastSelectedChild
+                )
             }
-            return children.first(where: { $0.category == category })
+            if let firstCategoryMatch = children.first(where: { $0.category == category }) {
+                return PreferredNavigationChildSelection(
+                    child: firstCategoryMatch,
+                    source: .firstAvailable
+                )
+            }
+            return nil
         }
 
         if let historyMatch = firstHistoryChild(
@@ -406,13 +487,66 @@ struct MainWorkspaceNavigationModel {
             activeHistory: activeHistory,
             matching: nil
         ) {
-            return historyMatch
+            return PreferredNavigationChildSelection(
+                child: historyMatch,
+                source: .activeHistory
+            )
         }
         if let rememberedID = card.lastSelectedChildID,
            let remembered = children.first(where: { $0.id == rememberedID }) {
-            return remembered
+            return PreferredNavigationChildSelection(
+                child: remembered,
+                source: .lastSelectedChild
+            )
         }
-        return children.first
+        if let firstChild = children.first {
+            return PreferredNavigationChildSelection(
+                child: firstChild,
+                source: .firstAvailable
+            )
+        }
+        return nil
+    }
+
+    static func preferredVisibleNavigationChildSelection(
+        sourceCardID: UUID?,
+        visibleChildren: [SceneCard],
+        matching category: String?,
+        activeHistory: [UUID]
+    ) -> PreferredNavigationChildSelection? {
+        let candidates = visibleChildren.filter { child in
+            guard let category else { return true }
+            return child.category == category
+        }
+        guard !candidates.isEmpty else { return nil }
+
+        if let historyMatch = firstHistoryChild(
+            in: candidates,
+            activeHistory: activeHistory,
+            matching: category
+        ) {
+            mainWorkspacePhase0Log(
+                "right-target-monitor",
+                "source=\(mainWorkspacePhase0CardID(sourceCardID)) mode=visible visibleChildren=\(mainWorkspacePhase0CardList(candidates.map(\.id))) " +
+                "target=\(mainWorkspacePhase0CardID(historyMatch.id)) sourceKind=\(PreferredNavigationChildSource.activeHistory.debugLabel)"
+            )
+            return PreferredNavigationChildSelection(
+                child: historyMatch,
+                source: .activeHistory
+            )
+        }
+        if let firstCandidate = candidates.first {
+            mainWorkspacePhase0Log(
+                "right-target-monitor",
+                "source=\(mainWorkspacePhase0CardID(sourceCardID)) mode=visible visibleChildren=\(mainWorkspacePhase0CardList(candidates.map(\.id))) " +
+                "target=\(mainWorkspacePhase0CardID(firstCandidate.id)) sourceKind=\(PreferredNavigationChildSource.firstAvailable.debugLabel)"
+            )
+            return PreferredNavigationChildSelection(
+                child: firstCandidate,
+                source: .firstAvailable
+            )
+        }
+        return nil
     }
 
     static func nearestLevelChildTarget(
@@ -887,11 +1021,15 @@ final class MainCanvasViewState: ObservableObject {
     @Published var suppressHorizontalAutoScroll: Bool = false
     @Published var interactionFingerprint: Int = 0
     @Published var focusNavigationTargetID: UUID? = nil
+    @Published var focusNavigationTrigger: String = "activeCardChange"
     @Published var focusNavigationTick: Int = 0
     @Published var navigationSettleTick: Int = 0
+    @Published var mainWorkspaceScrollPlan: MainWorkspaceScrollPlan? = nil
+    @Published var mainWorkspaceScrollPlanTick: Int = 0
     @Published var maxLevelCount: Int = 0
 
     private var restoreRequestSequence: Int = 0
+    private var mainWorkspaceScrollPlanSequence: Int = 0
 
     func scheduleRestoreRequest(
         targetCardID: UUID,
@@ -907,6 +1045,14 @@ final class MainCanvasViewState: ObservableObject {
             forceSemantic: forceSemantic,
             reason: reason
         )
+    }
+
+    func publishMainWorkspaceScrollPlan(_ plan: MainWorkspaceScrollPlan) {
+        var nextPlan = plan
+        mainWorkspaceScrollPlanSequence &+= 1
+        nextPlan.generation = mainWorkspaceScrollPlanSequence
+        mainWorkspaceScrollPlan = nextPlan
+        mainWorkspaceScrollPlanTick &+= 1
     }
 }
 

@@ -135,7 +135,7 @@
         "key": "오른쪽 편집을 왼쪽 카드의 연결 카드로 자동 기록합니다.",
         "location": {
           "startingColumn": 15,
-          "startingLine": 2080
+          "startingLine": 2082
         }
       },
       {
@@ -143,7 +143,7 @@
         "key": "왼쪽과 오른쪽 편집을 독립적으로 유지합니다.",
         "location": {
           "startingColumn": 15,
-          "startingLine": 2081
+          "startingLine": 2083
         }
       },
       {
@@ -151,7 +151,7 @@
         "key": "포커스 모드 열기",
         "location": {
           "startingColumn": 15,
-          "startingLine": 2116
+          "startingLine": 2118
         }
       },
       {
@@ -159,7 +159,7 @@
         "key": "보드 뷰 열기",
         "location": {
           "startingColumn": 15,
-          "startingLine": 2131
+          "startingLine": 2133
         }
       },
       {
@@ -167,7 +167,7 @@
         "key": "이름 있는 분기점 만들기",
         "location": {
           "startingColumn": 15,
-          "startingLine": 2157
+          "startingLine": 2159
         }
       },
       {
@@ -175,7 +175,7 @@
         "key": "히스토리 타임라인 열기",
         "location": {
           "startingColumn": 15,
-          "startingLine": 2173
+          "startingLine": 2175
         }
       },
       {
@@ -183,7 +183,7 @@
         "key": "AI와 시나리오 상담하기",
         "location": {
           "startingColumn": 15,
-          "startingLine": 2242
+          "startingLine": 2244
         }
       },
       {
@@ -191,7 +191,7 @@
         "key": "전체 카드 목록 열기",
         "location": {
           "startingColumn": 15,
-          "startingLine": 2259
+          "startingLine": 2261
         }
       },
       {
@@ -199,7 +199,7 @@
         "key": "전사 모드",
         "location": {
           "startingColumn": 18,
-          "startingLine": 2178
+          "startingLine": 2180
         }
       },
       {
@@ -207,7 +207,7 @@
         "key": "취소",
         "location": {
           "startingColumn": 24,
-          "startingLine": 2203
+          "startingLine": 2205
         }
       },
       {
@@ -215,7 +215,7 @@
         "key": "완료",
         "location": {
           "startingColumn": 24,
-          "startingLine": 2212
+          "startingLine": 2214
         }
       },
       {
@@ -223,7 +223,7 @@
         "key": "카드 붙여넣기",
         "location": {
           "startingColumn": 22,
-          "startingLine": 2353
+          "startingLine": 2355
         }
       },
       {
@@ -231,7 +231,7 @@
         "key": "붙여넣을 위치를 선택하세요.",
         "location": {
           "startingColumn": 22,
-          "startingLine": 2355
+          "startingLine": 2357
         }
       },
       {
@@ -239,7 +239,7 @@
         "key": "↑/↓ 선택 · Enter 확인 · Esc 취소",
         "location": {
           "startingColumn": 22,
-          "startingLine": 2364
+          "startingLine": 2366
         }
       },
       {
@@ -247,7 +247,7 @@
         "key": "붙여넣기 방식",
         "location": {
           "startingColumn": 22,
-          "startingLine": 2395
+          "startingLine": 2397
         }
       },
       {
@@ -255,7 +255,7 @@
         "key": "↑/↓ 선택 · Enter 확인 · Esc 취소",
         "location": {
           "startingColumn": 22,
-          "startingLine": 2406
+          "startingLine": 2408
         }
       },
       {
@@ -263,7 +263,7 @@
         "key": "씬 헤딩 %lld개를 감지했습니다.",
         "location": {
           "startingColumn": 40,
-          "startingLine": 2397
+          "startingLine": 2399
         }
       },
       {
@@ -271,7 +271,7 @@
         "key": "붙여넣기 방식을 선택하세요.",
         "location": {
           "startingColumn": 95,
-          "startingLine": 2397
+          "startingLine": 2399
         }
       }
     ]

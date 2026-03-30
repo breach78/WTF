@@ -48,6 +48,48 @@
 			<key>uniqueIdentifier</key>
 			<string>CED6E49B-A1DE-43BB-B406-9EAF1A20531A</string>
 		</dict>
+		<key>E8766200-D663-4357-AE75-041334B90738</key>
+		<dict>
+			<key>className</key>
+			<string>IDECommandLineBuildLog</string>
+			<key>documentTypeString</key>
+			<string>&lt;nil&gt;</string>
+			<key>domainType</key>
+			<string>Xcode.IDEActivityLogDomainType.BuildLog</string>
+			<key>fileName</key>
+			<string>E8766200-D663-4357-AE75-041334B90738.xcactivitylog</string>
+			<key>hasPrimaryLog</key>
+			<true/>
+			<key>primaryObservable</key>
+			<dict>
+				<key>highLevelStatus</key>
+				<string>W</string>
+				<key>totalNumberOfAnalyzerIssues</key>
+				<integer>0</integer>
+				<key>totalNumberOfErrors</key>
+				<integer>0</integer>
+				<key>totalNumberOfTestFailures</key>
+				<integer>0</integer>
+				<key>totalNumberOfWarnings</key>
+				<integer>7</integer>
+			</dict>
+			<key>schemeIdentifier-containerName</key>
+			<string>wa project</string>
+			<key>schemeIdentifier-schemeName</key>
+			<string>wa</string>
+			<key>schemeIdentifier-sharedScheme</key>
+			<integer>1</integer>
+			<key>signature</key>
+			<string>Building project wa with scheme wa and configuration Debug</string>
+			<key>timeStartedRecording</key>
+			<real>796490797.52651799</real>
+			<key>timeStoppedRecording</key>
+			<real>796490807.29846203</real>
+			<key>title</key>
+			<string>Building project wa with scheme wa and configuration Debug</string>
+			<key>uniqueIdentifier</key>
+			<string>E8766200-D663-4357-AE75-041334B90738</string>
+		</dict>
 	</dict>
 </dict>
 </plist>

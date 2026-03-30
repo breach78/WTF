@@ -187,8 +187,66 @@ extension ScenarioWriterView {
     }
 
     func resolvedMainColumnViewportKey(forCardID cardID: UUID) -> String? {
-        guard let level = displayedMainCardLocationByID(cardID)?.level else { return nil }
-        return mainColumnViewportStorageKey(level: level)
+        guard let location = displayedMainCardLocationByID(cardID) else { return nil }
+        let levelsData = resolvedDisplayedMainLevelsWithParents()
+        guard levelsData.indices.contains(location.level) else { return nil }
+        return mainColumnViewportStorageKey(level: location.level, cards: levelsData[location.level].cards)
+    }
+
+    private func stableMainColumnCardFingerprint(_ cards: [SceneCard]) -> String {
+        var hash: UInt64 = 1469598103934665603
+        for card in cards {
+            for byte in card.id.uuidString.utf8 {
+                hash ^= UInt64(byte)
+                hash &*= 1099511628211
+            }
+        }
+        return String(hash, radix: 16)
+    }
+
+    func activeMainWorkspaceColumnPlanForViewportKey(
+        _ viewportKey: String
+    ) -> (plan: MainWorkspaceScrollPlan, columnPlan: MainWorkspaceColumnPlan?)? {
+        guard let plan = activeMainWorkspaceScrollPlanForColumnAlignment() else { return nil }
+        return (plan, plan.columnPlan(for: viewportKey))
+    }
+
+    @discardableResult
+    func rerouteLegacyMainColumnAlignmentToScrollPlanIfNeeded(
+        viewportKey: String,
+        cards: [SceneCard],
+        level: Int,
+        parent: SceneCard?,
+        proxy: ScrollViewProxy,
+        viewportHeight: CGFloat,
+        reason: String,
+        authority: MainVerticalScrollAuthority?
+    ) -> Bool {
+        switch authority?.kind {
+        case .caretEnsure, .viewportRestore:
+            return false
+        default:
+            break
+        }
+        guard let current = activeMainWorkspaceColumnPlanForViewportKey(viewportKey),
+              let columnPlan = current.columnPlan,
+              columnPlan.policy != .none else { return false }
+        guard activeCardID == current.plan.activeCardID else { return false }
+
+        mainWorkspacePhase0Log(
+            "legacy-column-alignment-reroute",
+            "reason=\(reason) viewport=\(viewportKey) policy=\(columnPlan.policy.debugSummary) " +
+            "authority=\(authority?.kind.rawValue ?? "nil") active=\(mainWorkspacePhase0CardID(activeCardID))"
+        )
+        handleMainWorkspaceScrollPlan(
+            viewportKey: viewportKey,
+            cards: cards,
+            level: level,
+            parent: parent,
+            proxy: proxy,
+            viewportHeight: viewportHeight
+        )
+        return true
     }
 
     func resolvedVisibleMainCanvasLevelFromCurrentScrollPosition() -> Int? {
@@ -297,14 +355,21 @@ extension ScenarioWriterView {
                 "mainArrowNavigationSettle target=\(debugCardIDString(activeID)) " +
                 "\(debugFocusStateSummary())"
             )
-            _ = mainCanvasScrollCoordinator.publishIntent(
-                kind: .settleRecovery,
-                scope: .allColumns,
-                targetCardID: activeID,
-                expectedActiveCardID: activeID,
-                animated: false,
-                trigger: "navigationSettle"
-            )
+            if activeMainWorkspaceScrollPlanForColumnAlignment() == nil {
+                _ = mainCanvasScrollCoordinator.publishIntent(
+                    kind: .settleRecovery,
+                    scope: .allColumns,
+                    targetCardID: activeID,
+                    expectedActiveCardID: activeID,
+                    animated: false,
+                    trigger: "navigationSettle"
+                )
+            } else {
+                mainWorkspacePhase0Log(
+                    "legacy-column-intent-skip",
+                    "kind=settleRecovery viewport=all trigger=navigationSettle active=\(mainWorkspacePhase0CardID(activeID))"
+                )
+            }
             mainNavigationSettleTick += 1
         }
         mainArrowNavigationSettleWorkItem = workItem
@@ -345,6 +410,53 @@ extension ScenarioWriterView {
             animated: shouldAnimate,
             trigger: trigger
         )
+    }
+
+    func activeMainWorkspaceScrollPlanForColumnAlignment() -> MainWorkspaceScrollPlan? {
+        guard let plan = mainWorkspaceScrollPlan else { return nil }
+        guard plan.activeCardID == activeCardID else { return nil }
+        guard mainWorkspaceScrollExecutor.isCurrent(plan) else { return nil }
+        return plan
+    }
+
+    @discardableResult
+    func rerouteLegacyMainColumnIntentToScrollPlanIfNeeded(
+        kind: MainCanvasScrollCoordinator.NavigationIntentKind,
+        viewportKey: String,
+        cards: [SceneCard],
+        level: Int,
+        parent: SceneCard?,
+        proxy: ScrollViewProxy,
+        viewportHeight: CGFloat,
+        trigger: String
+    ) -> Bool {
+        guard activeMainWorkspaceScrollPlanForColumnAlignment() != nil else { return false }
+        switch kind {
+        case .childListChange, .columnAppear:
+            mainWorkspacePhase0Log(
+                "legacy-column-intent-reroute",
+                "kind=\(kind.rawValue) viewport=\(viewportKey) trigger=\(trigger) active=\(mainWorkspacePhase0CardID(activeCardID))"
+            )
+            handleMainWorkspaceScrollPlan(
+                viewportKey: viewportKey,
+                cards: cards,
+                level: level,
+                parent: parent,
+                proxy: proxy,
+                viewportHeight: viewportHeight
+            )
+            return true
+
+        case .focusChange, .settleRecovery:
+            mainWorkspacePhase0Log(
+                "legacy-column-intent-skip",
+                "kind=\(kind.rawValue) viewport=\(viewportKey) trigger=\(trigger) active=\(mainWorkspacePhase0CardID(activeCardID))"
+            )
+            return true
+
+        case .bottomReveal:
+            return false
+        }
     }
 
     // MARK: - Debug Helpers
@@ -506,6 +618,19 @@ extension ScenarioWriterView {
     ) {
         guard !showFocusMode else { return }
         guard acceptsKeyboardInput else { return }
+        if rerouteLegacyMainColumnAlignmentToScrollPlanIfNeeded(
+            viewportKey: viewportKey,
+            cards: cards,
+            level: level,
+            parent: parent,
+            proxy: proxy,
+            viewportHeight: viewportHeight,
+            reason: "observedTargetFrameChange",
+            authority: nil
+        ) {
+            return
+        }
+        guard !mainWorkspaceScrollExecutor.hasPendingWork(for: activeCardID) else { return }
         guard let targetID = resolvedMainColumnFocusTargetID(in: cards) else { return }
         guard activeCardID == targetID else { return }
         guard let previousFrame = previousFrames[targetID] else { return }
@@ -795,7 +920,7 @@ extension ScenarioWriterView {
     @ViewBuilder
     func column(for cards: [SceneCard], level: Int, parent: SceneCard?, screenHeight: CGFloat) -> some View {
         let childListSignature = scenario.childListSignature(parentID: parent?.id)
-        let viewportKey = mainColumnViewportStorageKey(level: level)
+        let viewportKey = mainColumnViewportStorageKey(level: level, cards: cards)
         let containsActiveCard = cards.contains { $0.id == activeCardID }
         let containsActiveAncestor = cards.contains { activeAncestorIDs.contains($0.id) }
         let observedCardIDs = mainColumnGeometryObservationCardIDs(
@@ -940,6 +1065,18 @@ extension ScenarioWriterView {
                         return
                     }
                     guard shouldAutoAlignMainColumn(cards: cards, activeID: activeCardID) else { return }
+                    if rerouteLegacyMainColumnIntentToScrollPlanIfNeeded(
+                        kind: .childListChange,
+                        viewportKey: viewportKey,
+                        cards: cards,
+                        level: level,
+                        parent: parent,
+                        proxy: proxy,
+                        viewportHeight: screenHeight,
+                        trigger: "childListChange"
+                    ) {
+                        return
+                    }
                     _ = publishMainColumnNavigationIntent(
                         kind: .childListChange,
                         scope: .viewport(viewportKey),
@@ -962,6 +1099,18 @@ extension ScenarioWriterView {
                         return
                     }
                     guard shouldAutoAlignMainColumn(cards: cards, activeID: activeCardID) else { return }
+                    if rerouteLegacyMainColumnIntentToScrollPlanIfNeeded(
+                        kind: .columnAppear,
+                        viewportKey: viewportKey,
+                        cards: cards,
+                        level: level,
+                        parent: parent,
+                        proxy: proxy,
+                        viewportHeight: screenHeight,
+                        trigger: "columnAppear"
+                    ) {
+                        return
+                    }
                     _ = publishMainColumnNavigationIntent(
                         kind: .columnAppear,
                         scope: .viewport(viewportKey),
@@ -1018,8 +1167,20 @@ extension ScenarioWriterView {
     ) {
         guard acceptsKeyboardInput else { return }
         let requestKey = mainColumnScrollCacheKey(level: level, parent: parent)
-        let viewportKey = mainColumnViewportStorageKey(level: level)
+        let viewportKey = mainColumnViewportStorageKey(level: level, cards: cards)
         guard isMainVerticalScrollAuthorityCurrent(authority, viewportKey: viewportKey) else { return }
+        if rerouteLegacyMainColumnAlignmentToScrollPlanIfNeeded(
+            viewportKey: viewportKey,
+            cards: cards,
+            level: level,
+            parent: parent,
+            proxy: proxy,
+            viewportHeight: viewportHeight,
+            reason: reason,
+            authority: authority
+        ) {
+            return
+        }
         mainWorkspacePhase0Log(
             "scroll-to-focus-request",
             "reason=\(reason) level=\(level) active=\(mainWorkspacePhase0CardID(activeCardID)) " +
@@ -1196,6 +1357,18 @@ extension ScenarioWriterView {
         viewportHeight: CGFloat
     ) {
         guard let intent = mainCanvasScrollCoordinator.consumeLatestIntent(for: viewportKey) else { return }
+        if rerouteLegacyMainColumnIntentToScrollPlanIfNeeded(
+            kind: intent.kind,
+            viewportKey: viewportKey,
+            cards: cards,
+            level: level,
+            parent: parent,
+            proxy: proxy,
+            viewportHeight: viewportHeight,
+            trigger: intent.trigger
+        ) {
+            return
+        }
 
         switch intent.kind {
         case .focusChange:
@@ -1367,7 +1540,14 @@ extension ScenarioWriterView {
     ) {
         guard !showFocusMode else { return }
         guard acceptsKeyboardInput else { return }
-        guard editingCardID == nil else { return }
+        let isEditingKeepVisibleTransition = pendingMainEditingViewportKeepVisibleCardID == newActiveID
+        let isEditingBoundaryTransition =
+            editingCardID == newActiveID &&
+            (
+                pendingMainEditingBoundaryNavigationTargetID == newActiveID ||
+                pendingMainEditingSiblingNavigationTargetID == newActiveID
+            )
+        guard editingCardID == nil || isEditingKeepVisibleTransition || isEditingBoundaryTransition else { return }
         cancelPendingMainColumnFocusWorkItem(for: viewportKey)
         cancelPendingMainColumnFocusVerificationWorkItem(for: viewportKey)
         let forceClickAlignment = trigger == "clickFocus"
@@ -1405,7 +1585,7 @@ extension ScenarioWriterView {
             ))
         let authority = beginMainVerticalScrollAuthority(
             viewportKey: viewportKey,
-            kind: editDrivenKeepVisible ? .editingTransition : .columnNavigation,
+            kind: (editDrivenKeepVisible || isEditingBoundaryTransition) ? .editingTransition : .columnNavigation,
             targetCardID: newActiveID
         )
 
@@ -1413,7 +1593,8 @@ extension ScenarioWriterView {
             "\(trigger) level=\(level) viewportKey=\(viewportKey) " +
             "newID=\(newActiveID?.uuidString ?? "nil") activeColumn=\(containsActiveCard) " +
             "ancestorColumn=\(containsActiveAncestor) descendantColumn=\(containsPreferredDescendantTarget) topReveal=\(activeCardNeedsTopReveal) " +
-            "editKeepVisible=\(editDrivenKeepVisible) forceClick=\(forceClickAlignment) animate=\(shouldAnimate) " +
+            "editKeepVisible=\(editDrivenKeepVisible) editBoundary=\(isEditingBoundaryTransition) " +
+            "forceClick=\(forceClickAlignment) animate=\(shouldAnimate) " +
             "offset=\(debugCGFloat(mainColumnViewportOffsetByKey[viewportKey] ?? 0)) " +
             "visible=\(debugMainColumnVisibleCardSummary(viewportKey: viewportKey, cards: cards, viewportHeight: viewportHeight, offsetY: mainColumnViewportOffsetByKey[viewportKey] ?? 0))"
         )
@@ -1723,7 +1904,7 @@ extension ScenarioWriterView {
     ) -> Bool {
         guard prefersTopAnchor else { return false }
         guard activeCardID == targetID else { return false }
-        let viewportKey = mainColumnViewportStorageKey(level: level)
+        let viewportKey = mainColumnViewportStorageKey(level: level, cards: cards)
         guard let frame = observedMainColumnTargetFrame(
             viewportKey: viewportKey,
             targetID: targetID
@@ -1909,12 +2090,13 @@ extension ScenarioWriterView {
         }
     }
 
-    func mainColumnViewportStorageKey(level: Int) -> String {
+    func mainColumnViewportStorageKey(level: Int, cards: [SceneCard]) -> String {
         if level <= 1 || isActiveCardRoot {
             return "level:\(level)|all"
         }
         let category = activeCategory ?? "all"
-        return "level:\(level)|category:\(category)"
+        let fingerprint = stableMainColumnCardFingerprint(cards)
+        return "level:\(level)|category:\(category)|cards:\(fingerprint)"
     }
 
     func shouldPreserveMainColumnViewportOnReveal(level: Int, storageKey: String, newActiveID: UUID?) -> Bool {
@@ -1981,25 +2163,13 @@ extension ScenarioWriterView {
         startingFrom root: SceneCard
     ) -> UUID? {
         let visibleCardIDs = Set(cards.map(\.id))
-        var current: SceneCard? = root
-        var visited: Set<UUID> = []
-
-        while let node = current, visited.insert(node.id).inserted {
-            let children = node.children
-            guard !children.isEmpty else { return nil }
-
-            let preferredChild =
-                children.first(where: { $0.id == node.lastSelectedChildID })
-                ?? children.first
-
-            guard let preferredChild else { return nil }
-            if visibleCardIDs.contains(preferredChild.id) {
-                return preferredChild.id
-            }
-            current = preferredChild
-        }
-
-        return nil
+        let categories = Set(cards.compactMap(\.category))
+        let matchingCategory = categories.count == 1 ? categories.first : nil
+        return resolvedMainWorkspaceVisibleDescendantTargetID(
+            from: root,
+            visibleCardIDs: visibleCardIDs,
+            matching: matchingCategory
+        )
     }
 
     func isMainColumnFocusTargetVisible(
@@ -2324,6 +2494,18 @@ extension ScenarioWriterView {
             guard !showFocusMode else { return }
             guard acceptsKeyboardInput else { return }
             guard isMainVerticalScrollAuthorityCurrent(authority, viewportKey: viewportKey) else { return }
+            if rerouteLegacyMainColumnAlignmentToScrollPlanIfNeeded(
+                viewportKey: viewportKey,
+                cards: cards,
+                level: level,
+                parent: parent,
+                proxy: proxy,
+                viewportHeight: viewportHeight,
+                reason: "legacyVerification",
+                authority: authority
+            ) {
+                return
+            }
             guard resolvedMainColumnFocusTargetID(in: cards) == targetID else { return }
             let hasObservedTargetFrame = observedMainColumnTargetFrame(
                 viewportKey: viewportKey,
