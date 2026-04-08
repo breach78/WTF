@@ -164,225 +164,30 @@ extension ScenarioWriterView {
         }
     }
 
-    func pushUndoState(_ previous: ScenarioState, actionName: String) {
-        if isApplyingUndo { return }
-        undoStack.append(previous)
-        if undoStack.count > maxUndoCount {
-            undoStack.removeFirst(undoStack.count - maxUndoCount)
-        }
-        redoStack.removeAll()
-    }
-
-    func pushMainTypingUndoState(_ previous: ScenarioState, actionName: String) {
-        if isApplyingUndo { return }
-        mainTypingUndoStack.append(previous)
-        if mainTypingUndoStack.count > maxMainTypingUndoCount {
-            mainTypingUndoStack.removeFirst(mainTypingUndoStack.count - maxMainTypingUndoCount)
-        }
-        mainTypingRedoStack.removeAll()
-    }
-
-    func scheduleMainTypingIdleFinalize() {
-        mainTypingIdleFinalizeWorkItem?.cancel()
-        let work = DispatchWorkItem {
-            finalizeMainTypingCoalescing(reason: "typing-idle")
-        }
-        mainTypingIdleFinalizeWorkItem = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + focusTypingIdleInterval, execute: work)
-    }
-
-    func resetMainTypingCoalescing() {
-        mainTypingIdleFinalizeWorkItem?.cancel()
-        mainTypingIdleFinalizeWorkItem = nil
-        mainTypingCoalescingBaseState = nil
-        mainTypingCoalescingCardID = nil
-        mainTypingLastEditAt = .distantPast
-        mainPendingReturnBoundary = false
-    }
-
-    func finalizeMainTypingCoalescing(reason: String) {
-        mainTypingIdleFinalizeWorkItem?.cancel()
-        mainTypingIdleFinalizeWorkItem = nil
-        guard let base = mainTypingCoalescingBaseState else { return }
-        mainTypingCoalescingBaseState = nil
-        mainTypingCoalescingCardID = nil
-        pushMainTypingUndoState(base, actionName: "텍스트 편집(\(reason))")
-    }
-
-    func handleMainTypingContentChange(cardID: UUID, oldValue: String, newValue: String) {
-        guard !showFocusMode else { return }
-        guard !isApplyingUndo else { return }
-        guard oldValue != newValue else { return }
-        guard cardID == (editingCardID ?? focusModeEditorCardID) else { return }
-
-        let delta = utf16ChangeDelta(oldValue: oldValue, newValue: newValue)
-        if Date() < mainProgrammaticContentSuppressUntil {
-            mainLastCommittedContentByCard[cardID] = newValue
-            return
-        }
-
-        if let textView = NSApp.keyWindow?.firstResponder as? NSTextView,
-           textView.hasMarkedText() {
-            return
-        }
-
-        let now = Date()
-        let shouldBreakByGap = now.timeIntervalSince(mainTypingLastEditAt) > focusTypingIdleInterval
-        let shouldBreakByCard = mainTypingCoalescingCardID != nil && mainTypingCoalescingCardID != cardID
-        if shouldBreakByGap || shouldBreakByCard {
-            finalizeMainTypingCoalescing(reason: shouldBreakByCard ? "typing-card-switch" : "typing-gap")
-        }
-
-        if mainTypingCoalescingBaseState == nil {
-            let committedOld = mainLastCommittedContentByCard[cardID] ?? oldValue
-            mainTypingCoalescingBaseState = captureScenarioState(
-                overridingContentForCardID: cardID,
-                overridingContent: committedOld
-            )
-            mainTypingCoalescingCardID = cardID
-        }
-
-        mainTypingLastEditAt = now
-        mainLastCommittedContentByCard[cardID] = newValue
-        scheduleMainTypingIdleFinalize()
-
-        if mainPendingReturnBoundary {
-            mainPendingReturnBoundary = false
-            if delta.newChangedLength > 0 && delta.inserted.contains("\n") {
-                finalizeMainTypingCoalescing(reason: "typing-boundary-return")
-                return
-            }
-        }
-
-        if isStrongTextBoundaryChange(newValue: newValue, delta: delta) {
-            finalizeMainTypingCoalescing(reason: "typing-boundary")
-        }
-    }
-
-    func performMainTypingUndo() -> Bool {
-        guard !showFocusMode else { return false }
-        guard editingCardID != nil else { return false }
-        finalizeMainTypingCoalescing(reason: "undo-request")
-        guard let previous = mainTypingUndoStack.popLast() else {
-            return true
-        }
-        let current = captureScenarioState()
-        pendingMainUndoCaretHint = computeFocusUndoCaretHint(from: current, to: previous)
-        mainProgrammaticContentSuppressUntil = Date().addingTimeInterval(0.4)
-        mainTypingRedoStack.append(current)
-        if mainTypingRedoStack.count > maxMainTypingUndoCount {
-            mainTypingRedoStack.removeFirst(mainTypingRedoStack.count - maxMainTypingUndoCount)
-        }
-        restoreScenarioState(previous)
-        restoreMainEditingContextAfterUndoRedo(restoredState: previous)
-        return true
-    }
-
-    func performMainTypingRedo() -> Bool {
-        guard !showFocusMode else { return false }
-        guard editingCardID != nil else { return false }
-        finalizeMainTypingCoalescing(reason: "redo-request")
-        guard let next = mainTypingRedoStack.popLast() else {
-            return true
-        }
-        let current = captureScenarioState()
-        pendingMainUndoCaretHint = computeFocusUndoCaretHint(from: current, to: next)
-        mainProgrammaticContentSuppressUntil = Date().addingTimeInterval(0.4)
-        mainTypingUndoStack.append(current)
-        if mainTypingUndoStack.count > maxMainTypingUndoCount {
-            mainTypingUndoStack.removeFirst(mainTypingUndoStack.count - maxMainTypingUndoCount)
-        }
-        restoreScenarioState(next)
-        restoreMainEditingContextAfterUndoRedo(restoredState: next)
-        return true
-    }
-
-    func restoreMainEditingContextAfterUndoRedo(restoredState: ScenarioState) {
-        guard !showFocusMode else { return }
-        let resolvedCard: SceneCard? = {
-            if let id = restoredState.activeCardID, let card = findCard(by: id) { return card }
-            if let id = lastActiveCardID, let card = findCard(by: id) { return card }
-            if let id = activeCardID, let card = findCard(by: id) { return card }
-            return scenario.rootCards.first
-        }()
-        guard let card = resolvedCard else {
-            editingCardID = nil
-            pendingMainUndoCaretHint = nil
-            resetMainTypingCoalescing()
-            return
-        }
-        if activeCardID != card.id {
-            changeActiveCard(to: card, shouldFocusMain: false, deferToMainAsync: false, force: true)
-        }
-        let id = card.id
-        editingCardID = id
-        editingStartContent = card.content
-        editingStartState = captureScenarioState()
-        editingIsNewCard = false
-        mainLastCommittedContentByCard[id] = card.content
-        resetMainTypingCoalescing()
-        let length = (card.content as NSString).length
-        let targetLocation: Int = {
-            if let hint = pendingMainUndoCaretHint, hint.cardID == id {
-                return min(max(0, hint.location), length)
-            }
-            if restoredState.activeCardID == id, let saved = restoredState.activeCaretLocation {
-                return min(max(0, saved), length)
-            }
-            return length
-        }()
-        pendingMainUndoCaretHint = nil
-        mainCaretLocationByCardID[id] = targetLocation
-        mainCaretRestoreRequestID += 1
-        let requestID = mainCaretRestoreRequestID
-        applyMainCaretWithRetry(
-            expectedCardID: id,
-            location: targetLocation,
-            retries: 12,
-            requestID: requestID,
-            suppressInitialEnsure: false
-        )
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
-            applyMainCaretWithRetry(
-                expectedCardID: id,
-                location: targetLocation,
-                retries: 6,
-                requestID: requestID,
-                suppressInitialEnsure: false
-            )
-        }
-        requestCoalescedMainCaretEnsure(minInterval: mainCaretSelectionEnsureMinInterval, delay: 0.0)
-    }
-
     func performMainTextUndoIfPossible() -> Bool {
-        performMainTypingUndo()
+        performMainWorkspaceNativeTextUndoIfPossible()
     }
 
     func performMainTextRedoIfPossible() -> Bool {
-        performMainTypingRedo()
+        performMainWorkspaceNativeTextRedoIfPossible()
     }
 
     func performUndo() {
-        finishEditing()
-        guard let previous = undoStack.popLast() else {
+        guard !showFocusMode else { return }
+        if editingCardID != nil {
+            _ = performMainWorkspaceNativeTextUndoIfPossible()
             return
         }
-        let current = captureScenarioState()
-        redoStack.append(current)
-        restoreScenarioState(previous)
+        performMainWorkspaceHistoryUndo()
     }
 
     func performRedo() {
-        finishEditing()
-        guard let next = redoStack.popLast() else {
+        guard !showFocusMode else { return }
+        if editingCardID != nil {
+            _ = performMainWorkspaceNativeTextRedoIfPossible()
             return
         }
-        let current = captureScenarioState()
-        undoStack.append(current)
-        if undoStack.count > maxUndoCount {
-            undoStack.removeFirst(undoStack.count - maxUndoCount)
-        }
-        restoreScenarioState(next)
+        performMainWorkspaceHistoryRedo()
     }
 
     // MARK: - Focus Typing Coalescing

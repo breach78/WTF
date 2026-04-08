@@ -16,29 +16,6 @@ final class MainCanvasScrollCoordinator: ObservableObject {
         }
     }
 
-    enum NavigationIntentKind: String {
-        case focusChange
-        case settleRecovery
-        case childListChange
-        case columnAppear
-        case bottomReveal
-    }
-
-    enum NavigationIntentScope: Equatable {
-        case allColumns
-        case viewport(String)
-    }
-
-    struct NavigationIntent: Equatable {
-        let id: Int
-        let kind: NavigationIntentKind
-        let scope: NavigationIntentScope
-        let targetCardID: UUID?
-        let expectedActiveCardID: UUID?
-        let animated: Bool
-        let trigger: String
-    }
-
     private final class ScrollViewEntry {
         weak var scrollView: NSScrollView?
 
@@ -47,12 +24,6 @@ final class MainCanvasScrollCoordinator: ObservableObject {
         }
     }
 
-    @Published private(set) var navigationIntentTick: Int = 0
-
-    private var intentSequence: Int = 0
-    private var latestGlobalIntent: NavigationIntent?
-    private var latestScopedIntentByViewportKey: [String: NavigationIntent] = [:]
-    private var lastConsumedIntentIDByViewportKey: [String: Int] = [:]
     private var scrollViewEntriesByViewportKey: [String: ScrollViewEntry] = [:]
     private var geometryModelByViewportKey: [String: MainColumnGeometryModel] = [:]
     private weak var mainCanvasHorizontalScrollView: NSScrollView?
@@ -60,60 +31,11 @@ final class MainCanvasScrollCoordinator: ObservableObject {
     private var pendingMainCanvasHorizontalRestoreX: CGFloat?
 
     func reset() {
-        intentSequence = 0
-        navigationIntentTick = 0
-        latestGlobalIntent = nil
-        latestScopedIntentByViewportKey = [:]
-        lastConsumedIntentIDByViewportKey = [:]
         geometryModelByViewportKey = [:]
         mainCanvasHorizontalScrollView = nil
         mainCanvasHorizontalOffsetSnapshot = nil
         pendingMainCanvasHorizontalRestoreX = nil
         pruneReleasedScrollViews()
-    }
-
-    @discardableResult
-    func publishIntent(
-        kind: NavigationIntentKind,
-        scope: NavigationIntentScope,
-        targetCardID: UUID? = nil,
-        expectedActiveCardID: UUID? = nil,
-        animated: Bool,
-        trigger: String
-    ) -> NavigationIntent {
-        intentSequence &+= 1
-        let intent = NavigationIntent(
-            id: intentSequence,
-            kind: kind,
-            scope: scope,
-            targetCardID: targetCardID,
-            expectedActiveCardID: expectedActiveCardID,
-            animated: animated,
-            trigger: trigger
-        )
-
-        switch scope {
-        case .allColumns:
-            latestGlobalIntent = intent
-        case .viewport(let viewportKey):
-            latestScopedIntentByViewportKey[viewportKey] = intent
-        }
-
-        navigationIntentTick &+= 1
-        return intent
-    }
-
-    func consumeLatestIntent(for viewportKey: String) -> NavigationIntent? {
-        guard let intent = latestRelevantIntent(for: viewportKey) else { return nil }
-        if lastConsumedIntentIDByViewportKey[viewportKey] == intent.id {
-            return nil
-        }
-        lastConsumedIntentIDByViewportKey[viewportKey] = intent.id
-        return intent
-    }
-
-    func isIntentCurrent(_ intentID: Int, for viewportKey: String) -> Bool {
-        latestRelevantIntent(for: viewportKey)?.id == intentID
     }
 
     func register(scrollView: NSScrollView, for viewportKey: String) {
@@ -201,20 +123,6 @@ final class MainCanvasScrollCoordinator: ObservableObject {
         )
         if let scrollView = mainCanvasHorizontalScrollView {
             applyPendingMainCanvasHorizontalRestoreIfNeeded(to: scrollView)
-        }
-    }
-
-    private func latestRelevantIntent(for viewportKey: String) -> NavigationIntent? {
-        let scopedIntent = latestScopedIntentByViewportKey[viewportKey]
-        switch (latestGlobalIntent, scopedIntent) {
-        case let (global?, scoped?):
-            return scoped.id >= global.id ? scoped : global
-        case let (global?, nil):
-            return global
-        case let (nil, scoped?):
-            return scoped
-        case (nil, nil):
-            return nil
         }
     }
 

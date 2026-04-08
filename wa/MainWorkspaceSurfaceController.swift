@@ -11,7 +11,6 @@ final class MainWorkspaceSurfaceController: ObservableObject {
     private var lastNavigationFingerprint: Int?
     private var lastContentFingerprint: Int?
     private var lastRestoreFingerprint: Int?
-    private var lastAppliedPlanGeneration: Int?
 
     func attach(surfaceView: MainWorkspaceSurfaceView) {
         self.surfaceView = surfaceView
@@ -26,7 +25,6 @@ final class MainWorkspaceSurfaceController: ObservableObject {
         lastNavigationFingerprint = nil
         lastContentFingerprint = nil
         lastRestoreFingerprint = nil
-        lastAppliedPlanGeneration = nil
     }
 
     func rectForCard(viewportKey: String, cardID: UUID) -> CGRect? {
@@ -40,7 +38,6 @@ final class MainWorkspaceSurfaceController: ObservableObject {
     func apply(
         snapshot: MainWorkspaceSnapshot,
         renderState: MainWorkspaceSurfaceRenderState,
-        plan: MainWorkspaceScrollPlan?,
         callbacks: MainWorkspaceSurfaceCallbacks
     ) {
         guard let surfaceView else { return }
@@ -64,13 +61,6 @@ final class MainWorkspaceSurfaceController: ObservableObject {
                       lastContentFingerprint != renderState.contentFingerprint {
                 callbacks.onRestore(snapshot.availableWidth)
             }
-        }
-
-        if let plan, lastAppliedPlanGeneration != plan.generation {
-            callbacks.onApplyPlan(plan, snapshot.availableWidth)
-            lastAppliedPlanGeneration = plan.generation
-        } else if plan == nil {
-            lastAppliedPlanGeneration = nil
         }
 
         lastNavigationFingerprint = renderState.navigationFingerprint

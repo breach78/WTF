@@ -587,7 +587,6 @@ extension ScenarioWriterView {
         let content = card.content
         mainLastCommittedContentByCard[cardID] = content
         focusLastCommittedContentByCard[cardID] = content
-        mainProgrammaticContentSuppressUntil = Date().addingTimeInterval(0.5)
         focusProgrammaticContentSuppressUntil = Date().addingTimeInterval(0.5)
 
         if let sourceTextView = dictationSourceTextViewBox.textView {

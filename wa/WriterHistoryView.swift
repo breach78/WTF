@@ -1201,6 +1201,7 @@ extension ScenarioWriterView {
             applyHistoryRetentionPolicyIfNeeded()
             requestHistoryAutosave(immediate: true)
             DispatchQueue.main.async {
+                self.syncMainWorkspaceHistoryHeadToLatest()
                 self.historyIndex = Double(max(0, self.scenario.sortedSnapshots.count - 1))
                 if self.showHistoryBar {
                     self.syncNamedSnapshotNoteForCurrentSelection(focusEditor: false)
@@ -1213,7 +1214,10 @@ extension ScenarioWriterView {
         scenario.changeCountSinceLastSnapshot = 0
         applyHistoryRetentionPolicyIfNeeded()
         requestHistoryAutosave(immediate: true)
-        DispatchQueue.main.async { self.historyIndex = Double(max(0, self.scenario.sortedSnapshots.count - 1)) }
+        DispatchQueue.main.async {
+            self.syncMainWorkspaceHistoryHeadToLatest()
+            self.historyIndex = Double(max(0, self.scenario.sortedSnapshots.count - 1))
+        }
     }
 
     @discardableResult

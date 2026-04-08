@@ -11,10 +11,6 @@ extension ScenarioWriterView {
         [0.0, 0.05, 0.18]
     }
 
-    private var mainColumnDescendantFocusCoalescingDelay: TimeInterval {
-        0.10
-    }
-
     private func enqueueMainCanvasRestoreRequest(
         targetID: UUID?,
         visibleLevel: Int? = nil,
@@ -40,35 +36,6 @@ extension ScenarioWriterView {
                 action()
             }
         }
-    }
-
-    func restoreMainCanvasPositionIfNeeded(proxy: ScrollViewProxy, availableWidth: CGFloat) {
-        guard !showFocusMode else { return }
-        guard !isPreviewingHistory else { return }
-        guard let request = pendingMainCanvasRestoreRequest else { return }
-
-        if let visibleLevel = request.visibleLevel {
-            lastScrolledLevel = max(0, visibleLevel)
-            let restored = performMainCanvasHorizontalScroll(
-                level: lastScrolledLevel,
-                availableWidth: availableWidth,
-                animated: false
-            )
-            guard restored else {
-                return
-            }
-            pendingMainCanvasRestoreRequest = nil
-            return
-        }
-
-        scrollToColumnIfNeeded(
-            targetCardID: request.targetCardID,
-            proxy: proxy,
-            availableWidth: availableWidth,
-            force: request.forceSemantic,
-            animated: false
-        )
-        pendingMainCanvasRestoreRequest = nil
     }
 
     @discardableResult
@@ -237,51 +204,6 @@ extension ScenarioWriterView {
         return String(hash, radix: 16)
     }
 
-    func activeMainWorkspaceColumnPlanForViewportKey(
-        _ viewportKey: String
-    ) -> (plan: MainWorkspaceScrollPlan, columnPlan: MainWorkspaceColumnPlan?)? {
-        guard let plan = activeMainWorkspaceScrollPlanForColumnAlignment() else { return nil }
-        return (plan, plan.columnPlan(for: viewportKey))
-    }
-
-    @discardableResult
-    func rerouteLegacyMainColumnAlignmentToScrollPlanIfNeeded(
-        viewportKey: String,
-        cards: [SceneCard],
-        level: Int,
-        parent: SceneCard?,
-        proxy: ScrollViewProxy,
-        viewportHeight: CGFloat,
-        reason: String,
-        authority: MainVerticalScrollAuthority?
-    ) -> Bool {
-        switch authority?.kind {
-        case .caretEnsure, .viewportRestore:
-            return false
-        default:
-            break
-        }
-        guard let current = activeMainWorkspaceColumnPlanForViewportKey(viewportKey),
-              let columnPlan = current.columnPlan,
-              columnPlan.policy != .none else { return false }
-        guard activeCardID == current.plan.activeCardID else { return false }
-
-        mainWorkspacePhase0Log(
-            "legacy-column-alignment-reroute",
-            "reason=\(reason) viewport=\(viewportKey) policy=\(columnPlan.policy.debugSummary) " +
-            "authority=\(authority?.kind.rawValue ?? "nil") active=\(mainWorkspacePhase0CardID(activeCardID))"
-        )
-        handleMainWorkspaceScrollPlan(
-            viewportKey: viewportKey,
-            cards: cards,
-            level: level,
-            parent: parent,
-            proxy: proxy,
-            viewportHeight: viewportHeight
-        )
-        return true
-    }
-
     func resolvedVisibleMainCanvasLevelFromCurrentScrollPosition() -> Int? {
         guard let scrollView = mainCanvasScrollCoordinator.resolvedMainCanvasHorizontalScrollView() else { return nil }
         let visualLevelCount = max(1, resolvedDisplayedMainLevelsWithParents().count)
@@ -368,101 +290,6 @@ extension ScenarioWriterView {
         enqueueMainCanvasRestoreRequest(
             targetID: activeCardID ?? editingCardID ?? lastActiveCardID ?? scenario.rootCards.first?.id
         )
-    }
-
-    @discardableResult
-    func publishMainColumnNavigationIntent(
-        kind: MainCanvasScrollCoordinator.NavigationIntentKind,
-        scope: MainCanvasScrollCoordinator.NavigationIntentScope,
-        targetCardID: UUID? = nil,
-        expectedActiveCardID: UUID? = nil,
-        animated: Bool,
-        trigger: String
-    ) -> MainCanvasScrollCoordinator.NavigationIntent {
-        if shouldUseMainWorkspaceSurface {
-            return MainCanvasScrollCoordinator.NavigationIntent(
-                id: -1,
-                kind: kind,
-                scope: scope,
-                targetCardID: targetCardID,
-                expectedActiveCardID: expectedActiveCardID,
-                animated: animated,
-                trigger: trigger
-            )
-        }
-        return mainCanvasScrollCoordinator.publishIntent(
-            kind: kind,
-            scope: scope,
-            targetCardID: targetCardID,
-            expectedActiveCardID: expectedActiveCardID,
-            animated: animated,
-            trigger: trigger
-        )
-    }
-
-    func publishMainColumnFocusNavigationIntent(
-        for activeID: UUID?,
-        trigger: String = "activeCardChange"
-    ) {
-        let shouldAnimate =
-            focusNavigationAnimationEnabled &&
-            !shouldSuppressMainArrowRepeatAnimation()
-        _ = publishMainColumnNavigationIntent(
-            kind: .focusChange,
-            scope: .allColumns,
-            targetCardID: activeID,
-            expectedActiveCardID: activeID,
-            animated: shouldAnimate,
-            trigger: trigger
-        )
-    }
-
-    func activeMainWorkspaceScrollPlanForColumnAlignment() -> MainWorkspaceScrollPlan? {
-        guard !shouldUseMainWorkspaceSurface else { return nil }
-        guard let plan = mainWorkspaceScrollPlan else { return nil }
-        guard plan.activeCardID == activeCardID else { return nil }
-        guard mainWorkspaceScrollDriver.isCurrent(plan) else { return nil }
-        return plan
-    }
-
-    @discardableResult
-    func rerouteLegacyMainColumnIntentToScrollPlanIfNeeded(
-        kind: MainCanvasScrollCoordinator.NavigationIntentKind,
-        viewportKey: String,
-        cards: [SceneCard],
-        level: Int,
-        parent: SceneCard?,
-        proxy: ScrollViewProxy,
-        viewportHeight: CGFloat,
-        trigger: String
-    ) -> Bool {
-        guard activeMainWorkspaceScrollPlanForColumnAlignment() != nil else { return false }
-        switch kind {
-        case .childListChange, .columnAppear:
-            mainWorkspacePhase0Log(
-                "legacy-column-intent-reroute",
-                "kind=\(kind.rawValue) viewport=\(viewportKey) trigger=\(trigger) active=\(mainWorkspacePhase0CardID(activeCardID))"
-            )
-            handleMainWorkspaceScrollPlan(
-                viewportKey: viewportKey,
-                cards: cards,
-                level: level,
-                parent: parent,
-                proxy: proxy,
-                viewportHeight: viewportHeight
-            )
-            return true
-
-        case .focusChange, .settleRecovery:
-            mainWorkspacePhase0Log(
-                "legacy-column-intent-skip",
-                "kind=\(kind.rawValue) viewport=\(viewportKey) trigger=\(trigger) active=\(mainWorkspacePhase0CardID(activeCardID))"
-            )
-            return true
-
-        case .bottomReveal:
-            return false
-        }
     }
 
     // MARK: - Debug Helpers
@@ -613,78 +440,6 @@ extension ScenarioWriterView {
         return observedIDs
     }
 
-    func handleMainColumnObservedTargetFrameChange(
-        viewportKey: String,
-        previousFrames: [UUID: CGRect],
-        cards: [SceneCard],
-        level: Int,
-        parent: SceneCard?,
-        proxy: ScrollViewProxy,
-        viewportHeight: CGFloat
-    ) {
-        guard !shouldUseMainWorkspaceSurface else { return }
-        guard !showFocusMode else { return }
-        guard acceptsKeyboardInput else { return }
-        if rerouteLegacyMainColumnAlignmentToScrollPlanIfNeeded(
-            viewportKey: viewportKey,
-            cards: cards,
-            level: level,
-            parent: parent,
-            proxy: proxy,
-            viewportHeight: viewportHeight,
-            reason: "observedTargetFrameChange",
-            authority: nil
-        ) {
-            return
-        }
-        guard !mainWorkspaceScrollDriver.hasPendingWork(for: activeCardID) else { return }
-        guard let targetID = resolvedMainColumnFocusTargetID(in: cards) else { return }
-        guard activeCardID == targetID else { return }
-        guard let previousFrame = previousFrames[targetID] else { return }
-        guard let currentFrame = observedMainColumnTargetFrame(
-            viewportKey: viewportKey,
-            targetID: targetID
-        ) else { return }
-
-        let minYDelta = abs(currentFrame.minY - previousFrame.minY)
-        let heightDelta = abs(currentFrame.height - previousFrame.height)
-        guard max(minYDelta, heightDelta) > 0.5 else { return }
-
-        let prefersTopAnchor = currentFrame.height > viewportHeight
-        guard !isMainColumnFocusTargetAligned(
-            viewportKey: viewportKey,
-            cards: cards,
-            targetID: targetID,
-            viewportHeight: viewportHeight,
-            prefersTopAnchor: prefersTopAnchor
-        ) else { return }
-
-        let authority = beginMainVerticalScrollAuthority(
-            viewportKey: viewportKey,
-            kind: editingCardID == targetID ? .editingTransition : .columnNavigation,
-            targetCardID: targetID
-        )
-        mainWorkspacePhase0Log(
-            "observed-focus-frame-change",
-            "level=\(level) key=\(viewportKey) target=\(mainWorkspacePhase0CardID(targetID)) " +
-            "minDelta=\(minYDelta) heightDelta=\(heightDelta) editing=\(mainWorkspacePhase0CardID(editingCardID)) " +
-            "active=\(mainWorkspacePhase0CardID(activeCardID))"
-        )
-        cancelPendingMainColumnFocusWorkItem(for: viewportKey)
-        cancelPendingMainColumnFocusVerificationWorkItem(for: viewportKey)
-        scrollToFocus(
-            in: cards,
-            level: level,
-            parent: parent,
-            proxy: proxy,
-            viewportHeight: viewportHeight,
-            forceAlignment: true,
-            animated: false,
-            reason: "observedTargetFrameChange",
-            authority: authority
-        )
-    }
-
     // MARK: - Resolved Colors & Search
 
     func resolvedBackgroundColor() -> Color {
@@ -749,6 +504,9 @@ extension ScenarioWriterView {
 
     func persistCardMutation(forceSnapshot: Bool = false, immediateSave: Bool = false) {
         saveWriterChanges(immediate: immediateSave)
+        if forceSnapshot && !showFocusMode {
+            prepareMainWorkspaceHistoryTimelineForCommitIfNeeded()
+        }
         takeSnapshot(force: forceSnapshot)
     }
 
@@ -759,15 +517,16 @@ extension ScenarioWriterView {
         immediateSave: Bool = false,
         undoMode: MutationUndoMode = .main
     ) {
-        persistCardMutation(forceSnapshot: forceSnapshot, immediateSave: immediateSave)
+        let resolvedForceSnapshot = forceSnapshot || !showFocusMode
+        persistCardMutation(forceSnapshot: resolvedForceSnapshot, immediateSave: immediateSave)
         switch undoMode {
         case .main:
-            pushUndoState(previousState, actionName: actionName)
+            if showFocusMode {
+                pushFocusUndoState(previousState, actionName: actionName)
+            }
         case .focusAware:
             if showFocusMode {
                 pushFocusUndoState(previousState, actionName: actionName)
-            } else {
-                pushUndoState(previousState, actionName: actionName)
             }
         case .none:
             break
@@ -922,719 +681,6 @@ extension ScenarioWriterView {
             MainCardDragSessionTracker.shared.begin()
             return NSItemProvider(object: card.id.uuidString as NSString)
         }
-    }
-
-    @ViewBuilder
-    func column(for cards: [SceneCard], level: Int, parent: SceneCard?, screenHeight: CGFloat) -> some View {
-        let childListSignature = scenario.childListSignature(parentID: parent?.id)
-        let viewportKey = mainColumnViewportStorageKey(level: level, cards: cards)
-        let observedCardIDs = mainColumnGeometryObservationCardIDs(
-            in: cards,
-            viewportKey: viewportKey,
-            viewportHeight: screenHeight
-        )
-        VStack(spacing: 0) {
-            ScrollViewReader { proxy in
-                ScrollView(.vertical, showsIndicators: false) {
-                    LazyVStack(spacing: 0) {
-                        if cards.isEmpty {
-                            DropSpacer(target: .columnTop(parent?.id), alignment: .bottom) { providers, includeTrailingSiblingBlock in
-                                handleGeneralDrop(
-                                    providers,
-                                    target: .columnTop(parent?.id),
-                                    includeTrailingSiblingBlock: includeTrailingSiblingBlock
-                                )
-                            }
-                            .frame(height: screenHeight * 0.4)
-
-                            if level == 0 { addFirstButton(level: level) }
-
-                            DropSpacer(target: .columnBottom(parent?.id), alignment: .top) { providers, includeTrailingSiblingBlock in
-                                handleGeneralDrop(
-                                    providers,
-                                    target: .columnBottom(parent?.id),
-                                    includeTrailingSiblingBlock: includeTrailingSiblingBlock
-                                )
-                            }
-                            .frame(height: screenHeight * 0.7)
-                        } else {
-                            Color.clear.frame(height: screenHeight * 0.4)
-
-                            ForEach(Array(cards.enumerated()), id: \.element.id) { index, card in
-                                VStack(spacing: 0) {
-                                    cardRow(
-                                        card,
-                                        level: level,
-                                        parent: parent,
-                                        columnCards: cards
-                                    )
-                                        .background(
-                                            Group {
-                                                if observedCardIDs.contains(card.id) {
-                                                    GeometryReader { geometry in
-                                                        Color.clear.preference(
-                                                            key: MainColumnCardFramePreferenceKey.self,
-                                                            value: [
-                                                                card.id: geometry.frame(
-                                                                    in: .named(mainColumnViewportCoordinateSpaceName(viewportKey))
-                                                                )
-                                                            ]
-                                                        )
-                                                    }
-                                                }
-                                            }
-                                        )
-
-                                    if index < cards.count - 1 {
-                                        let next = cards[index + 1]
-                                        if card.parent?.id != next.parent?.id {
-                                            Rectangle()
-                                                .fill(appearance == "light" ? Color.black.opacity(0.16) : Color.black.opacity(0.40))
-                                                .frame(height: mainParentGroupSeparatorHeight)
-                                                .padding(.horizontal, 14)
-                                        }
-                                        Color.clear.frame(height: max(0, CGFloat(mainCardVerticalGap)))
-                                    }
-                                }
-                            }
-
-                            Color.clear.frame(height: screenHeight * 0.7)
-                        }
-                    }
-                    .coordinateSpace(name: mainColumnViewportCoordinateSpaceName(viewportKey))
-                    .onPreferenceChange(MainColumnCardFramePreferenceKey.self) { frames in
-                        let previousFrames = mainColumnObservedCardFramesByKey[viewportKey] ?? [:]
-                        mainColumnObservedCardFramesByKey[viewportKey] = frames
-                        mainCanvasScrollCoordinator.updateObservedFrames(frames, for: viewportKey)
-                        handleMainColumnObservedTargetFrameChange(
-                            viewportKey: viewportKey,
-                            previousFrames: previousFrames,
-                            cards: cards,
-                            level: level,
-                            parent: parent,
-                            proxy: proxy,
-                            viewportHeight: screenHeight
-                        )
-                    }
-                    .padding(.horizontal, MainCanvasLayoutMetrics.columnHorizontalPadding)
-                    .frame(width: columnWidth)
-                    .background(
-                        mainColumnScrollObserver(
-                            viewportKey: viewportKey,
-                            level: level,
-                            parent: parent,
-                            cards: cards,
-                            viewportHeight: screenHeight
-                        )
-                    )
-                }
-                .onChange(of: mainCanvasScrollCoordinator.navigationIntentTick) { _, _ in
-                    handleMainColumnNavigationIntent(
-                        viewportKey: viewportKey,
-                        cards: cards,
-                        level: level,
-                        parent: parent,
-                        proxy: proxy,
-                        viewportHeight: screenHeight
-                    )
-                }
-                .onChange(of: activeCardID) { _, newID in
-                    guard pendingMainClickFocusTargetID == newID else { return }
-                    handleMainColumnActiveFocusChange(
-                        viewportKey: viewportKey,
-                        newActiveID: newID,
-                        cards: cards,
-                        level: level,
-                        parent: parent,
-                        proxy: proxy,
-                        viewportHeight: screenHeight,
-                        trigger: "clickFocus"
-                    )
-                    DispatchQueue.main.async {
-                        if pendingMainClickFocusTargetID == newID {
-                            pendingMainClickFocusTargetID = nil
-                        }
-                    }
-                }
-                .onChange(of: childListSignature) { _, _ in
-                    guard !showFocusMode else { return }
-                    guard acceptsKeyboardInput else { return }
-                    guard editingCardID == nil else { return }
-                    if pendingMainEditingSiblingNavigationTargetID == activeCardID {
-                        return
-                    }
-                    cancelPendingMainColumnFocusWorkItem(for: viewportKey)
-                    cancelPendingMainColumnFocusVerificationWorkItem(for: viewportKey)
-                    if shouldPreserveMainColumnViewportOnReveal(level: level, storageKey: viewportKey, newActiveID: activeCardID) {
-                        return
-                    }
-                    guard shouldAutoAlignMainColumn(cards: cards, activeID: activeCardID) else { return }
-                    if rerouteLegacyMainColumnIntentToScrollPlanIfNeeded(
-                        kind: .childListChange,
-                        viewportKey: viewportKey,
-                        cards: cards,
-                        level: level,
-                        parent: parent,
-                        proxy: proxy,
-                        viewportHeight: screenHeight,
-                        trigger: "childListChange"
-                    ) {
-                        return
-                    }
-                    _ = publishMainColumnNavigationIntent(
-                        kind: .childListChange,
-                        scope: .viewport(viewportKey),
-                        targetCardID: activeCardID,
-                        expectedActiveCardID: activeCardID,
-                        animated: false,
-                        trigger: "childListChange"
-                    )
-                }
-                .onAppear {
-                    guard !showFocusMode else { return }
-                    guard acceptsKeyboardInput else { return }
-                    guard editingCardID == nil else { return }
-                    if pendingMainEditingSiblingNavigationTargetID == activeCardID {
-                        return
-                    }
-                    cancelPendingMainColumnFocusWorkItem(for: viewportKey)
-                    cancelPendingMainColumnFocusVerificationWorkItem(for: viewportKey)
-                    if shouldPreserveMainColumnViewportOnReveal(level: level, storageKey: viewportKey, newActiveID: activeCardID) {
-                        return
-                    }
-                    guard shouldAutoAlignMainColumn(cards: cards, activeID: activeCardID) else { return }
-                    if rerouteLegacyMainColumnIntentToScrollPlanIfNeeded(
-                        kind: .columnAppear,
-                        viewportKey: viewportKey,
-                        cards: cards,
-                        level: level,
-                        parent: parent,
-                        proxy: proxy,
-                        viewportHeight: screenHeight,
-                        trigger: "columnAppear"
-                    ) {
-                        return
-                    }
-                    _ = publishMainColumnNavigationIntent(
-                        kind: .columnAppear,
-                        scope: .viewport(viewportKey),
-                        targetCardID: activeCardID,
-                        expectedActiveCardID: activeCardID,
-                        animated: false,
-                        trigger: "columnAppear"
-                    )
-                }
-                .onChange(of: mainBottomRevealTick) { _, _ in
-                    guard !showFocusMode else { return }
-                    guard acceptsKeyboardInput else { return }
-                    guard editingCardID == nil else { return }
-                    if pendingMainEditingSiblingNavigationTargetID == activeCardID {
-                        return
-                    }
-                    guard let requestedID = mainBottomRevealCardID else { return }
-                    guard activeCardID == requestedID else { return }
-                    guard cards.last?.id == requestedID else { return }
-                    guard let requestedCard = findCard(by: requestedID) else { return }
-                    let cardHeight = resolvedMainCardHeight(for: requestedCard)
-                    guard cardHeight > screenHeight else { return }
-                    _ = publishMainColumnNavigationIntent(
-                        kind: .bottomReveal,
-                        scope: .viewport(viewportKey),
-                        targetCardID: requestedID,
-                        expectedActiveCardID: requestedID,
-                        animated: focusNavigationAnimationEnabled,
-                        trigger: "mainBottomReveal"
-                    )
-                }
-            }
-            .contentShape(Rectangle())
-            .contextMenu {
-                indexBoardColumnContextMenu(level: level, parent: parent, cards: cards)
-            }
-            .onTapGesture { finishEditing(); isMainViewFocused = true }
-        }
-        .frame(width: columnWidth)
-    }
-
-    @ViewBuilder
-    func mainWorkspaceSurfaceColumn(
-        for cards: [SceneCard],
-        level: Int,
-        parent: SceneCard?,
-        screenHeight: CGFloat
-    ) -> some View {
-        column(for: cards, level: level, parent: parent, screenHeight: screenHeight)
-    }
-
-    func scrollToFocus(
-        in cards: [SceneCard],
-        level: Int,
-        parent: SceneCard?,
-        proxy: ScrollViewProxy,
-        viewportHeight: CGFloat,
-        keepVisibleOnly: Bool = false,
-        editingRevealEdge: MainEditingViewportRevealEdge? = nil,
-        forceAlignment: Bool = false,
-        animated: Bool = true,
-        reason: String = "unspecified",
-        authority: MainVerticalScrollAuthority? = nil
-    ) {
-        guard acceptsKeyboardInput else { return }
-        let requestKey = mainColumnScrollCacheKey(level: level, parent: parent)
-        let viewportKey = mainColumnViewportStorageKey(level: level, cards: cards)
-        guard isMainVerticalScrollAuthorityCurrent(authority, viewportKey: viewportKey) else { return }
-        if rerouteLegacyMainColumnAlignmentToScrollPlanIfNeeded(
-            viewportKey: viewportKey,
-            cards: cards,
-            level: level,
-            parent: parent,
-            proxy: proxy,
-            viewportHeight: viewportHeight,
-            reason: reason,
-            authority: authority
-        ) {
-            return
-        }
-        mainWorkspacePhase0Log(
-            "scroll-to-focus-request",
-            "reason=\(reason) level=\(level) active=\(mainWorkspacePhase0CardID(activeCardID)) " +
-            "editing=\(mainWorkspacePhase0CardID(editingCardID)) keepVisible=\(keepVisibleOnly) " +
-            "edge=\(String(describing: editingRevealEdge)) force=\(forceAlignment) animated=\(animated) " +
-            "authority=\(authority?.id ?? -1):\(authority?.kind.rawValue ?? "nil")"
-        )
-
-        guard let idToScroll = resolvedMainColumnFocusTargetID(in: cards) else {
-            bounceDebugLog(
-                "scrollToFocus noTarget reason=\(reason) key=\(requestKey) viewportKey=\(viewportKey) " +
-                "\(debugFocusStateSummary())"
-            )
-            mainColumnLastFocusRequestByKey.removeValue(forKey: requestKey)
-            cancelPendingMainColumnFocusVerificationWorkItem(for: viewportKey)
-            return
-        }
-
-        let currentOffsetY = resolvedMainColumnCurrentOffsetY(viewportKey: viewportKey)
-        let targetLayout = resolvedMainColumnTargetLayout(
-            in: cards,
-            targetID: idToScroll,
-            viewportHeight: viewportHeight
-        )
-        let targetHeight = targetLayout.map { $0.targetMaxY - $0.targetMinY }
-            ?? findCard(by: idToScroll).map { resolvedMainCardHeight(for: $0) }
-            ?? 0
-        let prefersTopAnchor = targetHeight > viewportHeight
-        let request = MainColumnFocusRequest(
-            targetID: idToScroll,
-            prefersTopAnchor: prefersTopAnchor,
-            keepVisibleOnly: keepVisibleOnly,
-            editingRevealEdge: editingRevealEdge,
-            cardsCount: cards.count,
-            firstCardID: cards.first?.id,
-            lastCardID: cards.last?.id,
-            viewportHeightBucket: Int(viewportHeight.rounded())
-        )
-        if !forceAlignment,
-           mainColumnLastFocusRequestByKey[requestKey] == request {
-            bounceDebugLog(
-                "scrollToFocus skipped reason=\(reason) key=\(requestKey) viewportKey=\(viewportKey) " +
-                "target=\(debugCardIDString(idToScroll)) offset=\(debugCGFloat(currentOffsetY)) " +
-                "\(debugMainColumnEstimatedTargetSummary(targetLayout)) " +
-                "\(debugMainColumnObservedTargetSummary(viewportKey: viewportKey, targetID: idToScroll, offsetY: currentOffsetY)) " +
-                "visible=\(debugMainColumnVisibleCardSummary(viewportKey: viewportKey, cards: cards, viewportHeight: viewportHeight, offsetY: currentOffsetY))"
-            )
-            scheduleMainColumnFocusVerification(
-                viewportKey: viewportKey,
-                cards: cards,
-                level: level,
-                parent: parent,
-                targetID: idToScroll,
-                proxy: proxy,
-                viewportHeight: viewportHeight,
-                prefersTopAnchor: prefersTopAnchor,
-                keepVisibleOnly: keepVisibleOnly,
-                editingRevealEdge: editingRevealEdge,
-                animated: false,
-                authority: authority
-            )
-            return
-        }
-        mainColumnLastFocusRequestByKey[requestKey] = request
-
-        if keepVisibleOnly,
-           isMainColumnFocusTargetVisible(
-                viewportKey: viewportKey,
-                cards: cards,
-                targetID: idToScroll,
-                viewportHeight: viewportHeight,
-                prefersTopAnchor: prefersTopAnchor
-           ) {
-            scheduleMainColumnFocusVerification(
-                viewportKey: viewportKey,
-                cards: cards,
-                level: level,
-                parent: parent,
-                targetID: idToScroll,
-                proxy: proxy,
-                viewportHeight: viewportHeight,
-                prefersTopAnchor: prefersTopAnchor,
-                keepVisibleOnly: true,
-                editingRevealEdge: editingRevealEdge,
-                animated: false,
-                authority: authority
-            )
-            return
-        }
-
-        if !forceAlignment && shouldSkipMainColumnFocusScroll(
-            targetID: idToScroll,
-            cards: cards,
-            level: level,
-            viewportHeight: viewportHeight,
-            prefersTopAnchor: prefersTopAnchor
-        ) {
-            bounceDebugLog(
-                "scrollToFocus preserved reason=\(reason) key=\(requestKey) viewportKey=\(viewportKey) " +
-                "target=\(debugCardIDString(idToScroll)) offset=\(debugCGFloat(currentOffsetY)) top=\(prefersTopAnchor) " +
-                "\(debugMainColumnEstimatedTargetSummary(targetLayout)) " +
-                "\(debugMainColumnObservedTargetSummary(viewportKey: viewportKey, targetID: idToScroll, offsetY: currentOffsetY))"
-            )
-            scheduleMainColumnFocusVerification(
-                viewportKey: viewportKey,
-                cards: cards,
-                level: level,
-                parent: parent,
-                targetID: idToScroll,
-                proxy: proxy,
-                viewportHeight: viewportHeight,
-                prefersTopAnchor: prefersTopAnchor,
-                keepVisibleOnly: keepVisibleOnly,
-                editingRevealEdge: editingRevealEdge,
-                animated: false,
-                authority: authority
-            )
-            return
-        }
-
-        bounceDebugLog(
-            "scrollToFocus reason=\(reason) key=\(requestKey) viewportKey=\(viewportKey) " +
-            "target=\(debugCardToken(findCard(by: idToScroll))) height=\(debugCGFloat(targetHeight)) " +
-            "viewport=\(debugCGFloat(viewportHeight)) offset=\(debugCGFloat(currentOffsetY)) " +
-            "top=\(prefersTopAnchor) keepVisible=\(keepVisibleOnly) force=\(forceAlignment) edge=\(String(describing: editingRevealEdge)) animated=\(animated) " +
-            "\(debugMainColumnEstimatedTargetSummary(targetLayout)) " +
-            "\(debugMainColumnObservedTargetSummary(viewportKey: viewportKey, targetID: idToScroll, offsetY: currentOffsetY)) " +
-            "visible=\(debugMainColumnVisibleCardSummary(viewportKey: viewportKey, cards: cards, viewportHeight: viewportHeight, offsetY: currentOffsetY))"
-        )
-        if keepVisibleOnly {
-            applyMainColumnFocusVisibility(
-                viewportKey: viewportKey,
-                cards: cards,
-                targetID: idToScroll,
-                proxy: proxy,
-                viewportHeight: viewportHeight,
-                prefersTopAnchor: prefersTopAnchor,
-                editingRevealEdge: editingRevealEdge,
-                animated: animated
-            )
-        } else {
-            applyMainColumnFocusAlignment(
-                viewportKey: viewportKey,
-                cards: cards,
-                targetID: idToScroll,
-                proxy: proxy,
-                viewportHeight: viewportHeight,
-                prefersTopAnchor: prefersTopAnchor,
-                animated: animated
-            )
-        }
-        scheduleMainColumnFocusVerification(
-            viewportKey: viewportKey,
-            cards: cards,
-            level: level,
-            parent: parent,
-            targetID: idToScroll,
-            proxy: proxy,
-            viewportHeight: viewportHeight,
-            prefersTopAnchor: prefersTopAnchor,
-            keepVisibleOnly: keepVisibleOnly,
-            editingRevealEdge: editingRevealEdge,
-            animated: animated,
-            authority: authority
-        )
-    }
-
-    func handleMainColumnNavigationIntent(
-        viewportKey: String,
-        cards: [SceneCard],
-        level: Int,
-        parent: SceneCard?,
-        proxy: ScrollViewProxy,
-        viewportHeight: CGFloat
-    ) {
-        guard !shouldUseMainWorkspaceSurface else { return }
-        guard let intent = mainCanvasScrollCoordinator.consumeLatestIntent(for: viewportKey) else { return }
-        if rerouteLegacyMainColumnIntentToScrollPlanIfNeeded(
-            kind: intent.kind,
-            viewportKey: viewportKey,
-            cards: cards,
-            level: level,
-            parent: parent,
-            proxy: proxy,
-            viewportHeight: viewportHeight,
-            trigger: intent.trigger
-        ) {
-            return
-        }
-
-        switch intent.kind {
-        case .focusChange:
-            handleMainColumnActiveFocusChange(
-                viewportKey: viewportKey,
-                newActiveID: intent.expectedActiveCardID,
-                cards: cards,
-                level: level,
-                parent: parent,
-                proxy: proxy,
-                viewportHeight: viewportHeight,
-                trigger: intent.trigger,
-                animatedOverride: intent.animated,
-                intentID: intent.id
-            )
-
-        case .settleRecovery:
-            handleMainColumnNavigationSettle(
-                viewportKey: viewportKey,
-                cards: cards,
-                level: level,
-                parent: parent,
-                proxy: proxy,
-                viewportHeight: viewportHeight
-            )
-
-        case .childListChange, .columnAppear:
-            handleMainColumnImmediateAlignmentIntent(
-                viewportKey: viewportKey,
-                cards: cards,
-                level: level,
-                parent: parent,
-                proxy: proxy,
-                viewportHeight: viewportHeight,
-                trigger: intent.trigger
-            )
-
-        case .bottomReveal:
-            handleMainColumnBottomRevealIntent(
-                viewportKey: viewportKey,
-                cards: cards,
-                proxy: proxy,
-                viewportHeight: viewportHeight,
-                requestedID: intent.targetCardID,
-                animated: intent.animated,
-                trigger: intent.trigger
-            )
-        }
-    }
-
-    func handleMainColumnImmediateAlignmentIntent(
-        viewportKey: String,
-        cards: [SceneCard],
-        level: Int,
-        parent: SceneCard?,
-        proxy: ScrollViewProxy,
-        viewportHeight: CGFloat,
-        trigger: String
-    ) {
-        guard !showFocusMode else { return }
-        guard acceptsKeyboardInput else { return }
-        guard editingCardID == nil else { return }
-        cancelPendingMainColumnFocusWorkItem(for: viewportKey)
-        cancelPendingMainColumnFocusVerificationWorkItem(for: viewportKey)
-        if shouldPreserveMainColumnViewportOnReveal(level: level, storageKey: viewportKey, newActiveID: activeCardID) {
-            return
-        }
-        guard shouldAutoAlignMainColumn(cards: cards, activeID: activeCardID) else { return }
-        let authority = beginMainVerticalScrollAuthority(
-            viewportKey: viewportKey,
-            kind: .columnNavigation,
-            targetCardID: activeCardID
-        )
-        bounceDebugLog(
-            "\(trigger) level=\(level) viewportKey=\(viewportKey) " +
-            "offset=\(debugCGFloat(mainColumnViewportOffsetByKey[viewportKey] ?? 0)) " +
-            "visible=\(debugMainColumnVisibleCardSummary(viewportKey: viewportKey, cards: cards, viewportHeight: viewportHeight, offsetY: mainColumnViewportOffsetByKey[viewportKey] ?? 0))"
-        )
-        scrollToFocus(
-            in: cards,
-            level: level,
-            parent: parent,
-            proxy: proxy,
-            viewportHeight: viewportHeight,
-            animated: false,
-            reason: trigger,
-            authority: authority
-        )
-    }
-
-    func handleMainColumnBottomRevealIntent(
-        viewportKey: String,
-        cards: [SceneCard],
-        proxy: ScrollViewProxy,
-        viewportHeight: CGFloat,
-        requestedID: UUID?,
-        animated: Bool,
-        trigger: String
-    ) {
-        guard !showFocusMode else { return }
-        guard acceptsKeyboardInput else { return }
-        guard editingCardID == nil else { return }
-        guard let requestedID else { return }
-        guard activeCardID == requestedID else { return }
-        guard cards.last?.id == requestedID else { return }
-        guard let requestedCard = findCard(by: requestedID) else { return }
-        let cardHeight = resolvedMainCardHeight(for: requestedCard)
-        guard cardHeight > viewportHeight else { return }
-
-        bounceDebugLog(
-            "\(trigger) viewportKey=\(viewportKey) target=\(debugCardToken(requestedCard)) " +
-            "offset=\(debugCGFloat(mainColumnViewportOffsetByKey[viewportKey] ?? 0)) height=\(debugCGFloat(cardHeight))"
-        )
-        _ = beginMainVerticalScrollAuthority(
-            viewportKey: viewportKey,
-            kind: .columnNavigation,
-            targetCardID: requestedID
-        )
-        if performMainColumnNativeFocusScroll(
-            viewportKey: viewportKey,
-            cards: cards,
-            targetID: requestedID,
-            viewportHeight: viewportHeight,
-            anchorY: 1.0,
-            animated: animated
-        ) {
-            return
-        }
-
-        suspendMainColumnViewportCapture(for: animated ? 0.32 : 0.12)
-        if animated {
-            MainCanvasNavigationDiagnostics.shared.beginScrollAnimation(
-                ownerKey: mainCanvasDiagnosticsOwnerKey,
-                axis: "vertical",
-                engine: "proxy",
-                animated: true,
-                target: "\(viewportKey)|\(requestedID.uuidString)",
-                expectedDuration: 0.24
-            )
-            withAnimation(quickEaseAnimation) {
-                proxy.scrollTo(requestedID, anchor: .bottom)
-            }
-        } else {
-            MainCanvasNavigationDiagnostics.shared.beginScrollAnimation(
-                ownerKey: mainCanvasDiagnosticsOwnerKey,
-                axis: "vertical",
-                engine: "proxy",
-                animated: false,
-                target: "\(viewportKey)|\(requestedID.uuidString)",
-                expectedDuration: 0
-            )
-            performWithoutAnimation {
-                proxy.scrollTo(requestedID, anchor: .bottom)
-            }
-        }
-    }
-
-    func handleMainColumnActiveFocusChange(
-        viewportKey: String,
-        newActiveID: UUID?,
-        cards: [SceneCard],
-        level: Int,
-        parent: SceneCard?,
-        proxy: ScrollViewProxy,
-        viewportHeight: CGFloat,
-        trigger: String,
-        animatedOverride: Bool? = nil,
-        intentID: Int? = nil
-    ) {
-        if shouldUseMainWorkspaceSurface {
-            if pendingMainClickFocusTargetID == newActiveID {
-                pendingMainClickFocusTargetID = nil
-            }
-            return
-        }
-        guard !showFocusMode else { return }
-        guard acceptsKeyboardInput else { return }
-        let isEditingKeepVisibleTransition = pendingMainEditingViewportKeepVisibleCardID == newActiveID
-        let isEditingBoundaryTransition =
-            editingCardID == newActiveID &&
-            (
-                pendingMainEditingBoundaryNavigationTargetID == newActiveID ||
-                pendingMainEditingSiblingNavigationTargetID == newActiveID
-            )
-        guard editingCardID == nil || isEditingKeepVisibleTransition || isEditingBoundaryTransition else { return }
-        cancelPendingMainColumnFocusWorkItem(for: viewportKey)
-        cancelPendingMainColumnFocusVerificationWorkItem(for: viewportKey)
-        let forceClickAlignment = trigger == "clickFocus"
-        if !forceClickAlignment &&
-            shouldPreserveMainColumnViewportOnReveal(level: level, storageKey: viewportKey, newActiveID: newActiveID) {
-            return
-        }
-
-        let containsActiveCard = cards.contains { $0.id == newActiveID }
-        let containsActiveAncestor = cards.contains { activeAncestorIDs.contains($0.id) }
-        let containsPreferredDescendantTarget =
-            !containsActiveCard &&
-            !containsActiveAncestor &&
-            resolvedMainColumnFocusTargetID(in: cards) != nil
-        guard containsActiveCard || containsActiveAncestor || containsPreferredDescendantTarget else { return }
-
-        let activeCardNeedsTopReveal = containsActiveCard && {
-            guard let newActiveID, let targetCard = findCard(by: newActiveID) else { return false }
-            return resolvedMainCardHeight(for: targetCard) > viewportHeight
-        }()
-        let editDrivenKeepVisible = containsActiveCard && pendingMainEditingViewportKeepVisibleCardID == newActiveID
-        let editingRevealEdge = editDrivenKeepVisible ? pendingMainEditingViewportRevealEdge : nil
-        if editDrivenKeepVisible {
-            pendingMainEditingViewportKeepVisibleCardID = nil
-            pendingMainEditingViewportRevealEdge = nil
-        }
-        let focusDelayOverride = containsPreferredDescendantTarget
-            ? mainColumnDescendantFocusCoalescingDelay
-            : nil
-        let shouldAnimate = containsPreferredDescendantTarget
-            ? false
-            : (animatedOverride ?? (
-                focusNavigationAnimationEnabled &&
-                !shouldSuppressMainArrowRepeatAnimation()
-            ))
-        let authority = beginMainVerticalScrollAuthority(
-            viewportKey: viewportKey,
-            kind: (editDrivenKeepVisible || isEditingBoundaryTransition) ? .editingTransition : .columnNavigation,
-            targetCardID: newActiveID
-        )
-
-        bounceDebugLog(
-            "\(trigger) level=\(level) viewportKey=\(viewportKey) " +
-            "newID=\(newActiveID?.uuidString ?? "nil") activeColumn=\(containsActiveCard) " +
-            "ancestorColumn=\(containsActiveAncestor) descendantColumn=\(containsPreferredDescendantTarget) topReveal=\(activeCardNeedsTopReveal) " +
-            "editKeepVisible=\(editDrivenKeepVisible) editBoundary=\(isEditingBoundaryTransition) " +
-            "forceClick=\(forceClickAlignment) animate=\(shouldAnimate) " +
-            "offset=\(debugCGFloat(mainColumnViewportOffsetByKey[viewportKey] ?? 0)) " +
-            "visible=\(debugMainColumnVisibleCardSummary(viewportKey: viewportKey, cards: cards, viewportHeight: viewportHeight, offsetY: mainColumnViewportOffsetByKey[viewportKey] ?? 0))"
-        )
-        scheduleMainColumnActiveCardFocus(
-            viewportKey: viewportKey,
-            expectedActiveID: newActiveID,
-            cards: cards,
-            level: level,
-            parent: parent,
-            proxy: proxy,
-            viewportHeight: viewportHeight,
-            keepVisibleOnly: editDrivenKeepVisible,
-            editingRevealEdge: editingRevealEdge,
-            forceAlignment: forceClickAlignment,
-            animated: shouldAnimate,
-            focusDelayOverride: focusDelayOverride,
-            intentID: intentID,
-            authority: authority
-        )
     }
 
     func resolvedMainColumnCurrentOffsetY(viewportKey: String) -> CGFloat {
@@ -2526,267 +1572,6 @@ extension ScenarioWriterView {
         }
     }
 
-    func scheduleMainColumnFocusVerification(
-        viewportKey: String,
-        cards: [SceneCard],
-        level: Int,
-        parent: SceneCard?,
-        targetID: UUID,
-        proxy: ScrollViewProxy,
-        viewportHeight: CGFloat,
-        prefersTopAnchor: Bool,
-        keepVisibleOnly: Bool,
-        editingRevealEdge: MainEditingViewportRevealEdge?,
-        animated: Bool,
-        attempt: Int = 0,
-        authority: MainVerticalScrollAuthority? = nil
-    ) {
-        cancelPendingMainColumnFocusVerificationWorkItem(for: viewportKey)
-        let delay: TimeInterval
-        if animated {
-            delay = attempt == 0 ? 0.18 : 0.10
-        } else {
-            delay = attempt == 0 ? 0.05 : 0.08
-        }
-        let requestKey = mainColumnScrollCacheKey(level: level, parent: parent)
-        var verificationWorkItem: DispatchWorkItem?
-        verificationWorkItem = DispatchWorkItem {
-            defer {
-                if let verificationWorkItem,
-                   mainColumnPendingFocusVerificationWorkItemByKey[viewportKey] === verificationWorkItem {
-                    mainColumnPendingFocusVerificationWorkItemByKey[viewportKey] = nil
-                }
-            }
-
-            guard !showFocusMode else { return }
-            guard acceptsKeyboardInput else { return }
-            guard isMainVerticalScrollAuthorityCurrent(authority, viewportKey: viewportKey) else { return }
-            if rerouteLegacyMainColumnAlignmentToScrollPlanIfNeeded(
-                viewportKey: viewportKey,
-                cards: cards,
-                level: level,
-                parent: parent,
-                proxy: proxy,
-                viewportHeight: viewportHeight,
-                reason: "legacyVerification",
-                authority: authority
-            ) {
-                return
-            }
-            guard resolvedMainColumnFocusTargetID(in: cards) == targetID else { return }
-            let hasObservedTargetFrame = observedMainColumnTargetFrame(
-                viewportKey: viewportKey,
-                targetID: targetID
-            ) != nil
-            let targetIsVisible = isMainColumnFocusTargetVisible(
-                viewportKey: viewportKey,
-                cards: cards,
-                targetID: targetID,
-                viewportHeight: viewportHeight,
-                prefersTopAnchor: prefersTopAnchor
-            )
-            let targetIsAligned = hasObservedTargetFrame && isMainColumnFocusTargetAligned(
-                viewportKey: viewportKey,
-                cards: cards,
-                targetID: targetID,
-                viewportHeight: viewportHeight,
-                prefersTopAnchor: prefersTopAnchor
-            )
-            if hasObservedTargetFrame && targetIsVisible && (keepVisibleOnly || targetIsAligned) {
-                return
-            }
-            if !hasObservedTargetFrame {
-                guard attempt < 4 else { return }
-                scheduleMainColumnFocusVerification(
-                    viewportKey: viewportKey,
-                    cards: cards,
-                    level: level,
-                    parent: parent,
-                    targetID: targetID,
-                    proxy: proxy,
-                    viewportHeight: viewportHeight,
-                    prefersTopAnchor: prefersTopAnchor,
-                    keepVisibleOnly: keepVisibleOnly,
-                    editingRevealEdge: editingRevealEdge,
-                    animated: animated,
-                    attempt: attempt + 1,
-                    authority: authority
-                )
-                return
-            }
-
-            bounceDebugLog(
-                "verifyMainColumnFocus retry level=\(level) viewportKey=\(viewportKey) " +
-                "attempt=\(attempt) target=\(debugCardIDString(targetID)) " +
-                "observed=\(hasObservedTargetFrame) " +
-                "offset=\(debugCGFloat(resolvedMainColumnCurrentOffsetY(viewportKey: viewportKey))) " +
-                "\(debugMainColumnObservedTargetSummary(viewportKey: viewportKey, targetID: targetID, offsetY: resolvedMainColumnCurrentOffsetY(viewportKey: viewportKey)))"
-            )
-            mainColumnLastFocusRequestByKey.removeValue(forKey: requestKey)
-            let retryAnimated = animated && hasObservedTargetFrame
-            MainCanvasNavigationDiagnostics.shared.recordVerificationRetry(
-                ownerKey: mainCanvasDiagnosticsOwnerKey,
-                viewportKey: viewportKey,
-                attempt: attempt,
-                targetID: targetID,
-                observedFrame: hasObservedTargetFrame,
-                animatedRetry: retryAnimated
-            )
-            if keepVisibleOnly {
-                applyMainColumnFocusVisibility(
-                    viewportKey: viewportKey,
-                    cards: cards,
-                    targetID: targetID,
-                    proxy: proxy,
-                    viewportHeight: viewportHeight,
-                    prefersTopAnchor: prefersTopAnchor,
-                    editingRevealEdge: editingRevealEdge,
-                    animated: retryAnimated
-                )
-            } else {
-                applyMainColumnFocusAlignment(
-                    viewportKey: viewportKey,
-                    cards: cards,
-                    targetID: targetID,
-                    proxy: proxy,
-                    viewportHeight: viewportHeight,
-                    prefersTopAnchor: prefersTopAnchor,
-                    animated: retryAnimated
-                )
-            }
-            guard attempt < (hasObservedTargetFrame ? 2 : 4) else { return }
-            scheduleMainColumnFocusVerification(
-                viewportKey: viewportKey,
-                cards: cards,
-                level: level,
-                parent: parent,
-                targetID: targetID,
-                proxy: proxy,
-                viewportHeight: viewportHeight,
-                prefersTopAnchor: prefersTopAnchor,
-                keepVisibleOnly: keepVisibleOnly,
-                editingRevealEdge: editingRevealEdge,
-                animated: animated,
-                attempt: attempt + 1,
-                authority: authority
-            )
-        }
-        if let verificationWorkItem {
-            mainColumnPendingFocusVerificationWorkItemByKey[viewportKey] = verificationWorkItem
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: verificationWorkItem)
-        }
-    }
-
-    func handleMainColumnNavigationSettle(
-        viewportKey: String,
-        cards: [SceneCard],
-        level: Int,
-        parent: SceneCard?,
-        proxy: ScrollViewProxy,
-        viewportHeight: CGFloat
-    ) {
-        guard !showFocusMode else { return }
-        guard acceptsKeyboardInput else { return }
-        guard editingCardID == nil else { return }
-        cancelPendingMainColumnFocusWorkItem(for: viewportKey)
-        cancelPendingMainColumnFocusVerificationWorkItem(for: viewportKey)
-        guard shouldAutoAlignMainColumn(cards: cards, activeID: activeCardID) else { return }
-        let authority = beginMainVerticalScrollAuthority(
-            viewportKey: viewportKey,
-            kind: .columnNavigation,
-            targetCardID: activeCardID
-        )
-        bounceDebugLog(
-            "navigationSettle level=\(level) viewportKey=\(viewportKey) " +
-            "active=\(debugCardIDString(activeCardID)) " +
-            "offset=\(debugCGFloat(mainColumnViewportOffsetByKey[viewportKey] ?? 0)) " +
-            "visible=\(debugMainColumnVisibleCardSummary(viewportKey: viewportKey, cards: cards, viewportHeight: viewportHeight, offsetY: mainColumnViewportOffsetByKey[viewportKey] ?? 0))"
-        )
-        scrollToFocus(
-            in: cards,
-            level: level,
-            parent: parent,
-            proxy: proxy,
-            viewportHeight: viewportHeight,
-            animated: false,
-            reason: "navigationSettle",
-            authority: authority
-        )
-    }
-
-    func scheduleMainColumnActiveCardFocus(
-        viewportKey: String,
-        expectedActiveID: UUID?,
-        cards: [SceneCard],
-        level: Int,
-        parent: SceneCard?,
-        proxy: ScrollViewProxy,
-        viewportHeight: CGFloat,
-        keepVisibleOnly: Bool,
-        editingRevealEdge: MainEditingViewportRevealEdge?,
-        forceAlignment: Bool,
-        animated: Bool,
-        focusDelayOverride: TimeInterval? = nil,
-        intentID: Int? = nil,
-        authority: MainVerticalScrollAuthority? = nil
-    ) {
-        cancelPendingMainColumnFocusWorkItem(for: viewportKey)
-        bounceDebugLog(
-            "scheduleMainColumnActiveCardFocus level=\(level) viewportKey=\(viewportKey) " +
-            "expected=\(debugCardIDString(expectedActiveID)) parent=\(debugCardToken(parent)) " +
-            "cards=\(cards.count) force=\(forceAlignment) animated=\(animated) " +
-            "delay=\(debugCGFloat(focusDelayOverride ?? (animated ? 0.01 : 0.0))) \(debugFocusStateSummary())"
-        )
-        let focusDelay: TimeInterval = focusDelayOverride ?? (animated ? 0.01 : 0.0)
-        let workItem = DispatchWorkItem {
-            defer { mainColumnPendingFocusWorkItemByKey[viewportKey] = nil }
-            bounceDebugLog(
-                "executeMainColumnActiveCardFocus level=\(level) viewportKey=\(viewportKey) " +
-                "expected=\(debugCardIDString(expectedActiveID)) current=\(debugCardIDString(activeCardID)) " +
-                "\(debugFocusStateSummary())"
-            )
-            if let intentID,
-               !mainCanvasScrollCoordinator.isIntentCurrent(intentID, for: viewportKey) {
-                bounceDebugLog(
-                    "activeCardFocus staleIntent level=\(level) viewportKey=\(viewportKey) intent=\(intentID)"
-                )
-                return
-            }
-            guard isMainVerticalScrollAuthorityCurrent(authority, viewportKey: viewportKey) else {
-                bounceDebugLog(
-                    "activeCardFocus staleAuthority level=\(level) viewportKey=\(viewportKey)"
-                )
-                return
-            }
-            guard activeCardID == expectedActiveID else {
-                bounceDebugLog(
-                    "activeCardFocus stale level=\(level) viewportKey=\(viewportKey) " +
-                    "expected=\(expectedActiveID?.uuidString ?? "nil") current=\(activeCardID?.uuidString ?? "nil")"
-                )
-                return
-            }
-            scrollToFocus(
-                in: cards,
-                level: level,
-                parent: parent,
-                proxy: proxy,
-                viewportHeight: viewportHeight,
-                keepVisibleOnly: keepVisibleOnly,
-                editingRevealEdge: editingRevealEdge,
-                forceAlignment: forceAlignment,
-                animated: animated,
-                reason: "activeCardChange",
-                authority: authority
-            )
-        }
-        mainColumnPendingFocusWorkItemByKey[viewportKey] = workItem
-        if focusDelay <= 0 {
-            DispatchQueue.main.async(execute: workItem)
-        } else {
-            DispatchQueue.main.asyncAfter(deadline: .now() + focusDelay, execute: workItem)
-        }
-    }
-
     func requestMainBottomRevealIfNeeded(
         currentLevel: [SceneCard],
         currentIndex: Int,
@@ -2795,12 +1580,8 @@ extension ScenarioWriterView {
         guard currentIndex == currentLevel.count - 1 else { return false }
         guard activeCardID == card.id else { return false }
         bounceDebugLog("requestMainBottomRevealIfNeeded target=\(debugCardToken(card)) levelCount=\(currentLevel.count)")
-        if shouldUseMainWorkspaceSurface {
-            pendingMainEditingViewportKeepVisibleCardID = card.id
-            pendingMainEditingViewportRevealEdge = .bottom
-        }
-        mainBottomRevealCardID = card.id
-        mainBottomRevealTick += 1
+        pendingMainEditingViewportKeepVisibleCardID = card.id
+        pendingMainEditingViewportRevealEdge = .bottom
         return true
     }
 
@@ -2809,7 +1590,7 @@ extension ScenarioWriterView {
         guard let textView = NSApp.keyWindow?.firstResponder as? NSTextView,
               textView.string == card.content,
               let liveBodyHeight = sharedLiveTextViewBodyHeight(textView) else { return nil }
-        return ceil(liveBodyHeight + 48)
+        return ceil(liveBodyHeight + MainEditorLayoutMetrics.mainEditorVerticalInsets)
     }
 
     func resolvedMainCardHeightCacheKey(
@@ -2880,7 +1661,7 @@ extension ScenarioWriterView {
             )
             let record = MainCardHeightRecord(
                 key: recordKey,
-                height: ceil(editorBodyHeight + 48)
+                height: ceil(editorBodyHeight + MainEditorLayoutMetrics.mainEditorVerticalInsets)
             )
             storeMainCardHeightRecord(record)
             return record
@@ -2903,7 +1684,7 @@ extension ScenarioWriterView {
         )
         let record = MainCardHeightRecord(
             key: recordKey,
-            height: ceil(displayBodyHeight + (MainEditorLayoutMetrics.mainCardContentPadding * 2))
+            height: ceil(displayBodyHeight + MainEditorLayoutMetrics.mainEditorVerticalInsets)
         )
         storeMainCardHeightRecord(record)
         return record
@@ -3587,87 +2368,10 @@ extension ScenarioWriterView {
         scenario.allLevels
     }
 
-    func scrollToColumnIfNeeded(
-        targetCardID: UUID,
-        proxy: ScrollViewProxy,
-        availableWidth: CGFloat,
-        force: Bool = false,
-        animated: Bool = true
-    ) {
-        if !acceptsKeyboardInput && !force { return }
-        guard let targetLevel = displayedMainCardLocationByID(targetCardID)?.level else { return }
-        indexBoardRestoreTrace(
-            "main_canvas_scroll_to_column_if_needed",
-            "target=\(debugRestoreUUID(targetCardID)) targetLevel=\(targetLevel) force=\(force) animated=\(animated) " +
-            "lastScrolledLevel=\(lastScrolledLevel) mode=\(mainCanvasHorizontalScrollMode.rawValue)"
-        )
-        let resolvedAvailableWidth = max(1, availableWidth)
-        let scrollMode = mainCanvasHorizontalScrollMode
-        let performScroll: (Int) -> Void = { level in
-            if performMainCanvasHorizontalScroll(
-                level: level,
-                availableWidth: resolvedAvailableWidth,
-                animated: animated
-            ) {
-                return
-            }
-
-            let hAnchor = resolvedMainCanvasHorizontalAnchor(availableWidth: resolvedAvailableWidth)
-            if animated {
-                MainCanvasNavigationDiagnostics.shared.beginScrollAnimation(
-                    ownerKey: mainCanvasDiagnosticsOwnerKey,
-                    axis: "horizontal",
-                    engine: "proxy",
-                    animated: true,
-                    target: "level:\(level)",
-                    expectedDuration: 0.24
-                )
-                withAnimation(quickEaseAnimation) {
-                    proxy.scrollTo(level, anchor: hAnchor)
-                }
-            } else {
-                MainCanvasNavigationDiagnostics.shared.beginScrollAnimation(
-                    ownerKey: mainCanvasDiagnosticsOwnerKey,
-                    axis: "horizontal",
-                    engine: "proxy",
-                    animated: false,
-                    target: "level:\(level)",
-                    expectedDuration: 0
-                )
-                performWithoutAnimation {
-                    proxy.scrollTo(level, anchor: hAnchor)
-                }
-            }
-        }
-        switch scrollMode {
-        case .oneStep:
-            let desiredLevel = targetLevel
-            if force || lastScrolledLevel != desiredLevel {
-                lastScrolledLevel = desiredLevel
-                performScroll(desiredLevel)
-            }
-        case .twoStep:
-            if force {
-                lastScrolledLevel = max(0, targetLevel - 1)
-                performScroll(lastScrolledLevel)
-                return
-            }
-            if lastScrolledLevel < 0 {
-                lastScrolledLevel = max(0, targetLevel - 1)
-                performScroll(lastScrolledLevel)
-                return
-            }
-            if targetLevel < lastScrolledLevel {
-                lastScrolledLevel = targetLevel
-                performScroll(lastScrolledLevel)
-            } else if targetLevel > lastScrolledLevel + 1 {
-                lastScrolledLevel = targetLevel - 1
-                performScroll(lastScrolledLevel)
-            }
-        }
-    }
-
     func resolvedMainCanvasHorizontalAnchor(availableWidth: CGFloat) -> UnitPoint {
+        if shouldUseMainWorkspaceSurface {
+            return UnitPoint(x: 0.5, y: 0.4)
+        }
         let resolvedAvailableWidth = max(1, availableWidth)
         switch mainCanvasHorizontalScrollMode {
         case .oneStep:
@@ -3683,6 +2387,11 @@ extension ScenarioWriterView {
         availableWidth: CGFloat,
         visibleWidth: CGFloat
     ) -> CGFloat {
+        if shouldUseMainWorkspaceSurface {
+            let leadingInset = availableWidth / 2
+            let targetMinX = leadingInset + (CGFloat(level) * columnWidth)
+            return targetMinX + 0.5 * (columnWidth - visibleWidth)
+        }
         let anchor = resolvedMainCanvasHorizontalAnchor(availableWidth: availableWidth)
         let leadingInset = availableWidth / 2
         let targetMinX = leadingInset + (CGFloat(level) * columnWidth)
@@ -3946,19 +2655,6 @@ extension ScenarioWriterView {
             ),
             durationMilliseconds: 0
         )
-    }
-
-    func recordMainWorkspaceActiveHistory(previousActiveID: UUID?, nextActiveID: UUID?) {
-        guard !showFocusMode else { return }
-        guard !showHistoryBar else { return }
-        guard !isIndexBoardActive else { return }
-        let updated = MainWorkspaceDocRuntime.updatedActiveHistory(
-            mainWorkspaceActiveHistory,
-            previousActiveID: previousActiveID,
-            nextActiveID: nextActiveID
-        )
-        guard updated != mainWorkspaceActiveHistory else { return }
-        mainWorkspaceActiveHistory = updated
     }
 
     func changeActiveCard(
@@ -4263,8 +2959,6 @@ extension ScenarioWriterView {
     func pushCardDeleteUndoState(prevState: ScenarioState, inFocusMode: Bool) {
         if inFocusMode {
             pushFocusUndoState(prevState, actionName: "카드 삭제")
-        } else {
-            pushUndoState(prevState, actionName: "카드 삭제")
         }
     }
 
@@ -4278,20 +2972,19 @@ extension ScenarioWriterView {
         newCardPrevState: ScenarioState?
     ) {
         let contentChanged = startContent != card.content
-        if !isApplyingUndo {
-            if !inFocusMode {
-                if wasNewCard, let prev = newCardPrevState {
-                    pushUndoState(prev, actionName: "카드 추가")
-                } else if let prev = startState, contentChanged {
-                    pushUndoState(prev, actionName: "텍스트 편집")
-                }
-            }
-        }
         recordLinkedCardEditIfNeeded(editedCardID: id, contentChanged: contentChanged)
         if inFocusMode {
             focusLastCommittedContentByCard[id] = card.content
+            persistCardMutation()
+            return
         }
-        persistCardMutation()
+
+        let shouldCommitToHistory = wasNewCard || contentChanged
+        if shouldCommitToHistory {
+            persistCardMutation(forceSnapshot: true)
+        } else {
+            saveWriterChanges()
+        }
     }
 
     func recordLinkedCardEditIfNeeded(editedCardID: UUID, contentChanged: Bool) {
@@ -4489,8 +3182,6 @@ extension ScenarioWriterView {
             if showFocusMode {
                 finalizeFocusTypingCoalescing(reason: "fountain-import")
                 focusModeEditorCardID = nil
-            } else {
-                finalizeMainTypingCoalescing(reason: "fountain-import")
             }
             resetEditingTransientState()
         } else if editingCardID != nil {
@@ -5949,8 +4640,6 @@ extension ScenarioWriterView {
         isMainViewFocused = true
         if showFocusMode {
             pushFocusUndoState(prevState, actionName: "카드 삭제")
-        } else {
-            pushUndoState(prevState, actionName: "카드 삭제")
         }
     }
 

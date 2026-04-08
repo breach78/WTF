@@ -127,11 +127,16 @@ enum FocusModeLayoutMetrics {
 enum MainEditorLayoutMetrics {
     static let mainCardContentPadding: CGFloat = 24
     static let mainEditorLineFragmentPadding: CGFloat = 5
+    static let mainEditorVerticalPadding: CGFloat = 24
     static var mainEditorHorizontalPadding: CGFloat {
         max(0, mainCardContentPadding - mainEditorLineFragmentPadding)
     }
     static var mainEditorEffectiveInset: CGFloat {
         mainEditorHorizontalPadding + mainEditorLineFragmentPadding
+    }
+
+    static var mainEditorVerticalInsets: CGFloat {
+        mainEditorVerticalPadding * 2
     }
 }
 
@@ -1043,11 +1048,9 @@ final class MainCanvasViewState: ObservableObject {
     @Published var pendingRestoreRequest: RestoreRequest? = nil
     @Published var suppressAutoScrollOnce: Bool = false
     @Published var suppressHorizontalAutoScroll: Bool = false
-    @Published var mainWorkspaceScrollPlan: MainWorkspaceScrollPlan? = nil
     @Published var maxLevelCount: Int = 0
 
     private var restoreRequestSequence: Int = 0
-    private var mainWorkspaceScrollPlanSequence: Int = 0
 
     func scheduleRestoreRequest(
         targetCardID: UUID,
@@ -1063,13 +1066,6 @@ final class MainCanvasViewState: ObservableObject {
             forceSemantic: forceSemantic,
             reason: reason
         )
-    }
-
-    func publishMainWorkspaceScrollPlan(_ plan: MainWorkspaceScrollPlan) {
-        var nextPlan = plan
-        mainWorkspaceScrollPlanSequence &+= 1
-        nextPlan.generation = mainWorkspaceScrollPlanSequence
-        mainWorkspaceScrollPlan = nextPlan
     }
 }
 
@@ -2639,13 +2635,6 @@ struct FocusModeCardRootHeightKey: PreferenceKey {
 }
 
 struct FocusModeCardFramePreferenceKey: PreferenceKey {
-    static var defaultValue: [UUID: CGRect] = [:]
-    static func reduce(value: inout [UUID: CGRect], nextValue: () -> [UUID: CGRect]) {
-        value.merge(nextValue(), uniquingKeysWith: { _, new in new })
-    }
-}
-
-struct MainColumnCardFramePreferenceKey: PreferenceKey {
     static var defaultValue: [UUID: CGRect] = [:]
     static func reduce(value: inout [UUID: CGRect], nextValue: () -> [UUID: CGRect]) {
         value.merge(nextValue(), uniquingKeysWith: { _, new in new })

@@ -1,23 +1,23 @@
 {
-  "/Users/three/app_build/wa/wa/ReferenceWindow.swift" : {
-    "const-values" : "/Users/three/app_build/wa/.deriveddata/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/ReferenceWindow.swiftconstvalues",
-    "dependencies" : "/Users/three/app_build/wa/.deriveddata/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/ReferenceWindow.d",
-    "diagnostics" : "/Users/three/app_build/wa/.deriveddata/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/ReferenceWindow.dia",
-    "object" : "/Users/three/app_build/wa/.deriveddata/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/ReferenceWindow.o",
-    "swift-dependencies" : "/Users/three/app_build/wa/.deriveddata/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/ReferenceWindow.swiftdeps"
+  "/Users/three/app_build/wa/wa/WriterHistoryView.swift" : {
+    "const-values" : "/Users/three/app_build/wa/.deriveddata/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterHistoryView.swiftconstvalues",
+    "dependencies" : "/Users/three/app_build/wa/.deriveddata/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterHistoryView.d",
+    "diagnostics" : "/Users/three/app_build/wa/.deriveddata/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterHistoryView.dia",
+    "object" : "/Users/three/app_build/wa/.deriveddata/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterHistoryView.o",
+    "swift-dependencies" : "/Users/three/app_build/wa/.deriveddata/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterHistoryView.swiftdeps"
   },
-  "/Users/three/app_build/wa/wa/ScriptPDFExport.swift" : {
-    "const-values" : "/Users/three/app_build/wa/.deriveddata/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/ScriptPDFExport.swiftconstvalues",
-    "dependencies" : "/Users/three/app_build/wa/.deriveddata/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/ScriptPDFExport.d",
-    "diagnostics" : "/Users/three/app_build/wa/.deriveddata/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/ScriptPDFExport.dia",
-    "object" : "/Users/three/app_build/wa/.deriveddata/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/ScriptPDFExport.o",
-    "swift-dependencies" : "/Users/three/app_build/wa/.deriveddata/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/ScriptPDFExport.swiftdeps"
+  "/Users/three/app_build/wa/wa/WriterIndexBoardScaffolding.swift" : {
+    "const-values" : "/Users/three/app_build/wa/.deriveddata/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterIndexBoardScaffolding.swiftconstvalues",
+    "dependencies" : "/Users/three/app_build/wa/.deriveddata/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterIndexBoardScaffolding.d",
+    "diagnostics" : "/Users/three/app_build/wa/.deriveddata/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterIndexBoardScaffolding.dia",
+    "object" : "/Users/three/app_build/wa/.deriveddata/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterIndexBoardScaffolding.o",
+    "swift-dependencies" : "/Users/three/app_build/wa/.deriveddata/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterIndexBoardScaffolding.swiftdeps"
   },
-  "/Users/three/app_build/wa/wa/SettingsView.swift" : {
-    "const-values" : "/Users/three/app_build/wa/.deriveddata/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/SettingsView.swiftconstvalues",
-    "dependencies" : "/Users/three/app_build/wa/.deriveddata/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/SettingsView.d",
-    "diagnostics" : "/Users/three/app_build/wa/.deriveddata/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/SettingsView.dia",
-    "object" : "/Users/three/app_build/wa/.deriveddata/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/SettingsView.o",
-    "swift-dependencies" : "/Users/three/app_build/wa/.deriveddata/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/SettingsView.swiftdeps"
+  "/Users/three/app_build/wa/wa/WriterKeyboardHandlers.swift" : {
+    "const-values" : "/Users/three/app_build/wa/.deriveddata/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterKeyboardHandlers.swiftconstvalues",
+    "dependencies" : "/Users/three/app_build/wa/.deriveddata/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterKeyboardHandlers.d",
+    "diagnostics" : "/Users/three/app_build/wa/.deriveddata/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterKeyboardHandlers.dia",
+    "object" : "/Users/three/app_build/wa/.deriveddata/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterKeyboardHandlers.o",
+    "swift-dependencies" : "/Users/three/app_build/wa/.deriveddata/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/WriterKeyboardHandlers.swiftdeps"
   }
 }

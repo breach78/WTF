@@ -12,6 +12,8 @@ struct MainWorkspaceActiveRelationSnapshot {
 
 struct MainWorkspaceStateSnapshot {
     let activeCardID: UUID?
+    let editingCardID: UUID?
+    let activeEditorSessionID: Int?
     let activeHistory: [UUID]
     let cardsVersion: Int
     let rootCards: [SceneCard]
@@ -21,6 +23,11 @@ struct MainWorkspaceStateSnapshot {
 
     var levels: [[SceneCard]] {
         levelsData.map(\.cards)
+    }
+
+    func editorSessionID(for cardID: UUID) -> Int? {
+        guard editingCardID == cardID else { return nil }
+        return activeEditorSessionID
     }
 }
 
@@ -73,10 +80,20 @@ struct MainWorkspaceSurfaceCallbacks {
     let onAppear: (CGFloat) -> Void
     let onNavigation: (CGFloat) -> Void
     let onRestore: (CGFloat) -> Void
-    let onApplyPlan: (MainWorkspaceScrollPlan, CGFloat) -> Void
     let onViewportOffsetChange: (String, CGFloat) -> Void
     let onObservedFramesChange: (String, [UUID: CGRect]) -> Void
-    let onCardSelect: (UUID) -> Void
+    let onCardSelect: (UUID, CGPoint?) -> Void
     let onCardDoubleClick: (UUID) -> Void
+    let onEditorTextChange: (UUID, String, String) -> Void
+    let onEditorEnd: (UUID) -> Void
+    let onEditorTab: (UUID) -> Void
+    let onEditorCommandEnter: (UUID) -> Void
+    let onContextMenuPrepare: (UUID) -> Void
+    let onContextCopy: (UUID) -> Void
+    let onContextCut: (UUID) -> Void
+    let onContextPaste: (UUID) -> Void
+    let onContextCloneCopy: (UUID) -> Void
+    let onContextDelete: (UUID) -> Void
+    let onContextColorChange: (UUID, String?) -> Void
     let onBackgroundTap: () -> Void
 }

@@ -3,8 +3,10 @@ import Foundation
 enum MainWorkspacePhase0ParityHarness {
     static let referenceJSONURL = URL(fileURLWithPath: "/tmp/wa_main_workspace_phase0_reference.json")
     static let checklistMarkdownURL = URL(fileURLWithPath: "/tmp/wa_main_workspace_phase0_checklist.md")
+    static let failureJSONURL = URL(fileURLWithPath: "/tmp/wa_main_workspace_phase0_failures.json")
+    static let targetOffsetTolerance: Double = 0.25
 
-    struct ReferenceBundle: Encodable {
+    struct ReferenceBundle: Codable {
         let generatedAt: String
         let sources: [SourceReference]
         let scrollSuites: [ScrollSuite]
@@ -12,25 +14,25 @@ enum MainWorkspacePhase0ParityHarness {
         let checklist: [ChecklistItem]
     }
 
-    struct SourceReference: Encodable {
+    struct SourceReference: Codable {
         let id: String
         let path: String
         let lines: String
         let purpose: String
     }
 
-    struct FixtureNode: Encodable {
+    struct FixtureNode: Codable {
         let id: String
         let title: String
         let children: [FixtureNode]
     }
 
-    struct CardMetric: Encodable {
+    struct CardMetric: Codable {
         let top: Double
         let height: Double
     }
 
-    struct ScrollFixture: Encodable {
+    struct ScrollFixture: Codable {
         let id: String
         let title: String
         let purpose: String
@@ -46,7 +48,7 @@ enum MainWorkspacePhase0ParityHarness {
         let metricsByCardID: [String: CardMetric]
     }
 
-    enum PolicyKind: String, Encodable {
+    enum PolicyKind: String, Codable {
         case centerActive
         case centerAncestor
         case centerPreferredDescendant
@@ -57,20 +59,20 @@ enum MainWorkspacePhase0ParityHarness {
         case none
     }
 
-    enum VerticalAnchor: String, Encodable {
+    enum VerticalAnchor: String, Codable {
         case center
         case top
         case bottom
     }
 
-    struct PolicyGolden: Encodable {
+    struct PolicyGolden: Codable {
         let kind: PolicyKind
         let targetCardID: String?
         let secondaryTargetCardID: String?
         let verticalAnchor: VerticalAnchor?
     }
 
-    struct ColumnGolden: Encodable {
+    struct ColumnGolden: Codable {
         let columnIndex: Int
         let cardIDs: [String]
         let policy: PolicyGolden
@@ -80,7 +82,7 @@ enum MainWorkspacePhase0ParityHarness {
         let maxScrollY: Double
     }
 
-    struct HorizontalGolden: Encodable {
+    struct HorizontalGolden: Codable {
         let activeColumnIndex: Int
         let rawTargetX: Double
         let targetX: Double
@@ -88,7 +90,7 @@ enum MainWorkspacePhase0ParityHarness {
         let maxScrollX: Double
     }
 
-    struct ScrollGolden: Encodable {
+    struct ScrollGolden: Codable {
         let activeCardID: String
         let activePast: [String]
         let ancestors: [String]
@@ -97,7 +99,7 @@ enum MainWorkspacePhase0ParityHarness {
         let columns: [ColumnGolden]
     }
 
-    struct ScrollSuite: Encodable {
+    struct ScrollSuite: Codable {
         let id: String
         let title: String
         let purpose: String
@@ -105,7 +107,7 @@ enum MainWorkspacePhase0ParityHarness {
         let golden: ScrollGolden
     }
 
-    struct UndoTraceSuite: Encodable {
+    struct UndoTraceSuite: Codable {
         let id: String
         let title: String
         let purpose: String
@@ -115,7 +117,7 @@ enum MainWorkspacePhase0ParityHarness {
         let steps: [UndoTraceStep]
     }
 
-    struct UndoTraceStep: Encodable {
+    struct UndoTraceStep: Codable {
         let action: String
         let commandRouting: String
         let commitEvent: String
@@ -125,12 +127,34 @@ enum MainWorkspacePhase0ParityHarness {
         let editingBuffer: String?
     }
 
-    struct ChecklistItem: Encodable {
+    struct ChecklistItem: Codable {
         let id: String
         let title: String
         let question: String
         let successSignal: String
         let failureSignal: String
+    }
+
+    struct ValidationFailureBundle: Codable {
+        struct SuiteFailure: Codable {
+            struct FieldMismatch: Codable {
+                let path: String
+                let expected: String
+                let actual: String
+                let delta: Double?
+            }
+
+            let suiteID: String
+            let suiteTitle: String
+            let mismatches: [FieldMismatch]
+        }
+
+        let generatedAt: String
+        let referencePath: String
+        let suitesValidated: Int
+        let mismatchesFound: Int
+        let tolerance: Double
+        let failures: [SuiteFailure]
     }
 
     private struct ResolvedPolicy {
@@ -258,6 +282,292 @@ enum MainWorkspacePhase0ParityHarness {
                 contents: Data(message.utf8)
             )
         }
+    }
+
+    static func validateAgainstReference() -> Bool {
+        do {
+            let bundleData = try Data(contentsOf: referenceJSONURL)
+            let decoder = JSONDecoder()
+            let bundle = try decoder.decode(ReferenceBundle.self, from: bundleData)
+            let failures = bundle.scrollSuites.compactMap { suite -> ValidationFailureBundle.SuiteFailure? in
+                let failure = validateScrollSuite(suite)
+                return failure.mismatches.isEmpty ? nil : failure
+            }
+            let result = ValidationFailureBundle(
+                generatedAt: iso8601(Date()),
+                referencePath: referenceJSONURL.path,
+                suitesValidated: bundle.scrollSuites.count,
+                mismatchesFound: failures.reduce(0) { $0 + $1.mismatches.count },
+                tolerance: targetOffsetTolerance,
+                failures: failures
+            )
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+            let data = try encoder.encode(result)
+            try data.write(to: failureJSONURL, options: .atomic)
+            return result.mismatchesFound > 0
+        } catch {
+            let message = "main workspace phase0 harness validation failed: \(error)"
+            FileManager.default.createFile(
+                atPath: failureJSONURL.path,
+                contents: Data(message.utf8)
+            )
+            return true
+        }
+    }
+
+    private static func validateScrollSuite(_ suite: ScrollSuite) -> ValidationFailureBundle.SuiteFailure {
+        let actual = resolvedActualScrollGolden(for: suite.fixture)
+        let expected = suite.golden
+        var mismatches: [ValidationFailureBundle.SuiteFailure.FieldMismatch] = []
+
+        compareInt(
+            expected.horizontal.activeColumnIndex,
+            actual.horizontal.activeColumnIndex,
+            path: "horizontal.activeColumnIndex",
+            mismatches: &mismatches
+        )
+        compareStringValue(
+            expected.activeCardID,
+            actual.activeCardID,
+            path: "activeCardID",
+            mismatches: &mismatches
+        )
+        compareStringArray(
+            expected.activePast,
+            actual.activePast,
+            path: "activePast",
+            mismatches: &mismatches
+        )
+        compareStringArray(
+            expected.ancestors,
+            actual.ancestors,
+            path: "ancestors",
+            mismatches: &mismatches
+        )
+        compareStringArray(
+            expected.descendants,
+            actual.descendants,
+            path: "descendants",
+            mismatches: &mismatches
+        )
+
+        compareDouble(
+            expected.horizontal.rawTargetX,
+            actual.horizontal.rawTargetX,
+            path: "horizontal.rawTargetX",
+            mismatches: &mismatches
+        )
+        compareDouble(
+            expected.horizontal.targetX,
+            actual.horizontal.targetX,
+            path: "horizontal.targetX",
+            mismatches: &mismatches
+        )
+
+        let expectedColumns = expected.columns
+        let actualColumns = actual.columns
+        let columnCount = max(expectedColumns.count, actualColumns.count)
+        for index in 0..<columnCount {
+            let expectedColumn = expectedColumns[safe: index]
+            let actualColumn = actualColumns[safe: index]
+
+            guard let expectedColumn, let actualColumn else {
+                mismatches.append(
+                    .init(
+                        path: "columns[\(index)]",
+                        expected: expectedColumn.map { "\($0.columnIndex)" } ?? "missing",
+                        actual: actualColumn.map { "\($0.columnIndex)" } ?? "missing",
+                        delta: nil
+                    )
+                )
+                continue
+            }
+
+            compareInt(
+                expectedColumn.columnIndex,
+                actualColumn.columnIndex,
+                path: "columns[\(index)].columnIndex",
+                mismatches: &mismatches
+            )
+            comparePolicy(
+                expectedColumn.policy,
+                actualColumn.policy,
+                pathPrefix: "columns[\(index)].policy",
+                mismatches: &mismatches
+            )
+            compareDoubleOptional(
+                expectedColumn.rawTargetY,
+                actualColumn.rawTargetY,
+                path: "columns[\(index)].rawTargetY",
+                mismatches: &mismatches
+            )
+            compareDoubleOptional(
+                expectedColumn.targetY,
+                actualColumn.targetY,
+                path: "columns[\(index)].targetY",
+                mismatches: &mismatches
+            )
+        }
+
+        return ValidationFailureBundle.SuiteFailure(
+            suiteID: suite.id,
+            suiteTitle: suite.title,
+            mismatches: mismatches
+        )
+    }
+
+    private static func compare(
+        _ expected: Int,
+        _ actual: Int,
+        path: String,
+        mismatches: inout [ValidationFailureBundle.SuiteFailure.FieldMismatch]
+    ) {
+        guard expected != actual else { return }
+        mismatches.append(
+            .init(
+                path: path,
+                expected: "\(expected)",
+                actual: "\(actual)",
+                delta: nil
+            )
+        )
+    }
+
+    private static func compareInt(
+        _ expected: Int,
+        _ actual: Int,
+        path: String,
+        mismatches: inout [ValidationFailureBundle.SuiteFailure.FieldMismatch]
+    ) {
+        compare(expected, actual, path: path, mismatches: &mismatches)
+    }
+
+    private static func compareDouble(
+        _ expected: Double,
+        _ actual: Double,
+        path: String,
+        mismatches: inout [ValidationFailureBundle.SuiteFailure.FieldMismatch]
+    ) {
+        if abs(expected - actual) <= targetOffsetTolerance { return }
+        mismatches.append(
+            .init(
+                path: path,
+                expected: String(format: "%.4f", expected),
+                actual: String(format: "%.4f", actual),
+                delta: abs(expected - actual)
+            )
+        )
+    }
+
+    private static func compareDoubleOptional(
+        _ expected: Double?,
+        _ actual: Double?,
+        path: String,
+        mismatches: inout [ValidationFailureBundle.SuiteFailure.FieldMismatch]
+    ) {
+        switch (expected, actual) {
+        case (.none, .none):
+            return
+        case let (.some(expectedValue), .some(actualValue)):
+            compareDouble(expectedValue, actualValue, path: path, mismatches: &mismatches)
+        default:
+            mismatches.append(
+                .init(
+                    path: path,
+                    expected: expected.map { String(format: "%.4f", $0) } ?? "nil",
+                    actual: actual.map { String(format: "%.4f", $0) } ?? "nil",
+                    delta: nil
+                )
+            )
+        }
+    }
+
+    private static func comparePolicy(
+        _ expected: PolicyGolden,
+        _ actual: PolicyGolden,
+        pathPrefix: String,
+        mismatches: inout [ValidationFailureBundle.SuiteFailure.FieldMismatch]
+    ) {
+        comparePolicyValue(expected.kind.rawValue, actual.kind.rawValue, label: "kind", pathPrefix: pathPrefix, mismatches: &mismatches)
+        comparePolicyValue(expected.targetCardID, actual.targetCardID, label: "targetCardID", pathPrefix: pathPrefix, mismatches: &mismatches)
+        comparePolicyValue(expected.secondaryTargetCardID, actual.secondaryTargetCardID, label: "secondaryTargetCardID", pathPrefix: pathPrefix, mismatches: &mismatches)
+        comparePolicyValue(
+            expected.verticalAnchor?.rawValue,
+            actual.verticalAnchor?.rawValue,
+            label: "verticalAnchor",
+            pathPrefix: pathPrefix,
+            mismatches: &mismatches
+        )
+    }
+
+    private static func comparePolicyValue(
+        _ expected: String?,
+        _ actual: String?,
+        label: String,
+        pathPrefix: String,
+        mismatches: inout [ValidationFailureBundle.SuiteFailure.FieldMismatch]
+    ) {
+        guard expected != actual else { return }
+        mismatches.append(
+            .init(
+                path: "\(pathPrefix).\(label)",
+                expected: expected ?? "nil",
+                actual: actual ?? "nil",
+                delta: nil
+            )
+        )
+    }
+
+    private static func comparePolicyValue(
+        _ expected: String,
+        _ actual: String,
+        label: String,
+        pathPrefix: String,
+        mismatches: inout [ValidationFailureBundle.SuiteFailure.FieldMismatch]
+    ) {
+        comparePolicyValue(Optional(expected), Optional(actual), label: label, pathPrefix: pathPrefix, mismatches: &mismatches)
+    }
+
+    private static func compareStringValue(
+        _ expected: String,
+        _ actual: String,
+        path: String,
+        mismatches: inout [ValidationFailureBundle.SuiteFailure.FieldMismatch]
+    ) {
+        guard expected != actual else { return }
+        mismatches.append(
+            .init(
+                path: path,
+                expected: expected,
+                actual: actual,
+                delta: nil
+            )
+        )
+    }
+
+    private static func compareStringArray(
+        _ expected: [String],
+        _ actual: [String],
+        path: String,
+        mismatches: inout [ValidationFailureBundle.SuiteFailure.FieldMismatch]
+    ) {
+        guard expected == actual else {
+            mismatches.append(
+                .init(
+                    path: path,
+                    expected: expected.joined(separator: ","),
+                    actual: actual.joined(separator: ","),
+                    delta: nil
+                )
+            )
+            return
+        }
+    }
+
+    private static func resolvedActualScrollGolden(for fixture: ScrollFixture) -> ScrollGolden {
+        // Keep parity validator aligned to current scroll policy implementation.
+        resolveScrollGolden(for: fixture)
     }
 
     static func referenceBundle() -> ReferenceBundle {

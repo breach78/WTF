@@ -441,7 +441,7 @@ extension ScenarioWriterView {
         guard !showFocusMode else { return }
         guard editingCardID == cardID else { return }
         markEditingSessionTextMutation()
-        handleMainTypingContentChange(cardID: cardID, oldValue: oldValue, newValue: newValue)
+        mainLastCommittedContentByCard[cardID] = newValue
         applyMainEditorLineSpacingIfNeeded()
         if let textView = NSApp.keyWindow?.firstResponder as? NSTextView,
            textView.window?.identifier?.rawValue != ReferenceWindowConstants.windowID,

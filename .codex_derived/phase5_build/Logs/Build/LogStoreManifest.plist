@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>logFormatVersion</key>
+	<integer>12</integer>
+	<key>logs</key>
+	<dict>
+		<key>7A197035-47FD-4928-8DE9-47389E5A0ED7</key>
+		<dict>
+			<key>className</key>
+			<string>IDECommandLineBuildLog</string>
+			<key>documentTypeString</key>
+			<string>&lt;nil&gt;</string>
+			<key>domainType</key>
+			<string>Xcode.IDEActivityLogDomainType.BuildLog</string>
+			<key>fileName</key>
+			<string>7A197035-47FD-4928-8DE9-47389E5A0ED7.xcactivitylog</string>
+			<key>hasPrimaryLog</key>
+			<true/>
+			<key>primaryObservable</key>
+			<dict>
+				<key>highLevelStatus</key>
+				<string>W</string>
+				<key>totalNumberOfAnalyzerIssues</key>
+				<integer>0</integer>
+				<key>totalNumberOfErrors</key>
+				<integer>0</integer>
+				<key>totalNumberOfTestFailures</key>
+				<integer>0</integer>
+				<key>totalNumberOfWarnings</key>
+				<integer>5</integer>
+			</dict>
+			<key>schemeIdentifier-containerName</key>
+			<string>wa project</string>
+			<key>schemeIdentifier-schemeName</key>
+			<string>wa</string>
+			<key>schemeIdentifier-sharedScheme</key>
+			<integer>1</integer>
+			<key>signature</key>
+			<string>Building project wa with scheme wa and configuration Debug</string>
+			<key>timeStartedRecording</key>
+			<real>796573260.13207495</real>
+			<key>timeStoppedRecording</key>
+			<real>796573286.80246794</real>
+			<key>title</key>
+			<string>Building project wa with scheme wa and configuration Debug</string>
+			<key>uniqueIdentifier</key>
+			<string>7A197035-47FD-4928-8DE9-47389E5A0ED7</string>
+		</dict>
+	</dict>
+</dict>
+</plist>

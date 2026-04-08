@@ -587,6 +587,10 @@ struct waApp: App {
             MainWorkspacePhase0ParityHarness.writeReferenceArtifacts()
             exit(0)
         }
+        if ProcessInfo.processInfo.environment["WA_RUN_MAIN_WORKSPACE_PHASE0_HARNESS"] == "2" {
+            let hasFailure = MainWorkspacePhase0ParityHarness.validateAgainstReference()
+            exit(hasFailure ? 1 : 0)
+        }
         if ProcessInfo.processInfo.environment["WA_RUN_GROUP_ACTIVATION_HARNESS"] == "1" {
             IndexBoardGroupActivationHarness.run()
             exit(0)
