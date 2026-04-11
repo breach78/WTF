@@ -119,6 +119,12 @@ extension BoardProject {
             return []
         }
 
+        let affectedRows = Set(
+            liveCards
+                .filter { ids.contains($0.id) }
+                .map(\.slot.row)
+        )
+        let rowSegments = capturedRowSegments(rows: affectedRows)
         let timestamp = BWRTimestamp.now()
         var deletedIDs: Set<UUID> = []
         for index in cards.indices {
@@ -131,6 +137,7 @@ extension BoardProject {
             deletedIDs.insert(cards[index].id)
         }
 
+        compactCapturedRowSegments(rowSegments, removing: deletedIDs, timestamp: timestamp)
         sortCards()
         return deletedIDs
     }
@@ -141,20 +148,19 @@ extension BoardProject {
             return nil
         }
 
+        let timestamp = BWRTimestamp.now()
         let restoredID = cards[index].id
         let originalSlot = cards[index].slot
-        let destination: BoardSlot
-        if liveCards.contains(where: { $0.slot == originalSlot }) {
-            destination = firstAvailableSlot(preferred: originalSlot) ?? originalSlot
-        } else {
-            destination = originalSlot
-        }
-
-        cards[index].slot = destination
         cards[index].deleted = false
-        cards[index].touch()
+        cards[index].touch(at: timestamp)
+        _ = insertHorizontalSequence(
+            [restoredID],
+            at: originalSlot,
+            excluding: [restoredID],
+            timestamp: timestamp
+        )
         sortCards()
-        return (restoredID, destination)
+        return (restoredID, originalSlot)
     }
 
     @discardableResult

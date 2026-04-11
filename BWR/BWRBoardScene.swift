@@ -291,13 +291,11 @@ struct BWRWorkspaceView: View {
     }
 
     private func applyDrag(_ session: BoardDragSession) {
-        withAnimation(.spring(response: 0.34, dampingFraction: 0.85)) {
-            _ = BoardDragController.apply(
-                project: &document.project,
-                interaction: &interaction,
-                session: session
-            )
-        }
+        _ = BoardDragController.apply(
+            project: &document.project,
+            interaction: &interaction,
+            session: session
+        )
     }
 
     private func cyclePalette(for cardID: UUID) {
