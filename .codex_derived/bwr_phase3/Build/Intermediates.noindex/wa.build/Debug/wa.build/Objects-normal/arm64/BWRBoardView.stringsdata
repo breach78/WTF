@@ -1,0 +1,88 @@
+{
+  "source": "/Users/three/app_build/wa/BWR/BWRBoardView.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "New card",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 313
+        }
+      },
+      {
+        "comment": "",
+        "key": "Search",
+        "location": {
+          "startingColumn": 23,
+          "startingLine": 405
+        }
+      },
+      {
+        "comment": "",
+        "key": "Board shortcuts",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 474
+        }
+      },
+      {
+        "comment": "",
+        "key": "Single click selects a card or slot.",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 477
+        }
+      },
+      {
+        "comment": "",
+        "key": "The dark slot is the keyboard cursor anchor.",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 479
+        }
+      },
+      {
+        "comment": "",
+        "key": "The dotted slot follows hover and stays separate from selection.",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 481
+        }
+      },
+      {
+        "comment": "",
+        "key": "Double-click a card to edit markdown inline.",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 483
+        }
+      },
+      {
+        "comment": "",
+        "key": "Double-click an empty slot to create a new card there.",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 485
+        }
+      },
+      {
+        "comment": "",
+        "key": "Drag cards between slots. Dropping on a filled slot swaps them.",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 487
+        }
+      },
+      {
+        "comment": "",
+        "key": "Long-press a card to cycle its paper color.",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 489
+        }
+      }
+    ]
+  },
+  "version": 1
+}

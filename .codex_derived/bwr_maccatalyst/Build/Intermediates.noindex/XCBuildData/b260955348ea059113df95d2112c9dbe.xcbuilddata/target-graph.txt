@@ -1,0 +1,2 @@
+Target dependency graph (1 target)
+Target 'wa' in project 'wa' (no dependencies)

@@ -1,0 +1,23 @@
+{
+  "/Users/three/app_build/wa/BWR/BWRBoardInteraction.swift" : {
+    "const-values" : "/Users/three/app_build/wa/.codex_derived/bwr_phase6/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/BWRBoardInteraction.swiftconstvalues",
+    "dependencies" : "/Users/three/app_build/wa/.codex_derived/bwr_phase6/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/BWRBoardInteraction.d",
+    "diagnostics" : "/Users/three/app_build/wa/.codex_derived/bwr_phase6/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/BWRBoardInteraction.dia",
+    "object" : "/Users/three/app_build/wa/.codex_derived/bwr_phase6/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/BWRBoardInteraction.o",
+    "swift-dependencies" : "/Users/three/app_build/wa/.codex_derived/bwr_phase6/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/BWRBoardInteraction.swiftdeps"
+  },
+  "/Users/three/app_build/wa/BWR/BWRBoardLayoutMetrics.swift" : {
+    "const-values" : "/Users/three/app_build/wa/.codex_derived/bwr_phase6/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/BWRBoardLayoutMetrics.swiftconstvalues",
+    "dependencies" : "/Users/three/app_build/wa/.codex_derived/bwr_phase6/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/BWRBoardLayoutMetrics.d",
+    "diagnostics" : "/Users/three/app_build/wa/.codex_derived/bwr_phase6/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/BWRBoardLayoutMetrics.dia",
+    "object" : "/Users/three/app_build/wa/.codex_derived/bwr_phase6/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/BWRBoardLayoutMetrics.o",
+    "swift-dependencies" : "/Users/three/app_build/wa/.codex_derived/bwr_phase6/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/BWRBoardLayoutMetrics.swiftdeps"
+  },
+  "/Users/three/app_build/wa/BWR/BWRBoardScene.swift" : {
+    "const-values" : "/Users/three/app_build/wa/.codex_derived/bwr_phase6/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/BWRBoardScene.swiftconstvalues",
+    "dependencies" : "/Users/three/app_build/wa/.codex_derived/bwr_phase6/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/BWRBoardScene.d",
+    "diagnostics" : "/Users/three/app_build/wa/.codex_derived/bwr_phase6/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/BWRBoardScene.dia",
+    "object" : "/Users/three/app_build/wa/.codex_derived/bwr_phase6/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/BWRBoardScene.o",
+    "swift-dependencies" : "/Users/three/app_build/wa/.codex_derived/bwr_phase6/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/BWRBoardScene.swiftdeps"
+  }
+}

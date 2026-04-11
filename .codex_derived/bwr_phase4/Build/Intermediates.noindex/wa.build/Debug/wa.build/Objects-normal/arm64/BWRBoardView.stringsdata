@@ -1,0 +1,112 @@
+{
+  "source": "/Users/three/app_build/wa/BWR/BWRBoardView.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "New card",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 320
+        }
+      },
+      {
+        "comment": "",
+        "key": "Search",
+        "location": {
+          "startingColumn": 23,
+          "startingLine": 414
+        }
+      },
+      {
+        "comment": "",
+        "key": "Board shortcuts",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 483
+        }
+      },
+      {
+        "comment": "",
+        "key": "Single click selects a card or slot.",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 486
+        }
+      },
+      {
+        "comment": "",
+        "key": "The dark slot is the keyboard cursor anchor.",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 488
+        }
+      },
+      {
+        "comment": "",
+        "key": "The dotted slot follows hover and stays separate from selection.",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 490
+        }
+      },
+      {
+        "comment": "",
+        "key": "Press Return on the cursor slot to edit a card or create one.",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 492
+        }
+      },
+      {
+        "comment": "",
+        "key": "Press Tab or Shift-Tab to save and continue editing next or previous slots.",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 494
+        }
+      },
+      {
+        "comment": "",
+        "key": "Use Arrow keys to move the cursor, and Option-Arrow to move the selected card.",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 496
+        }
+      },
+      {
+        "comment": "",
+        "key": "Double-click a card to edit markdown inline.",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 498
+        }
+      },
+      {
+        "comment": "",
+        "key": "Double-click an empty slot to create a new card there.",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 500
+        }
+      },
+      {
+        "comment": "",
+        "key": "Drag cards between slots. Dropping on a filled slot swaps them.",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 502
+        }
+      },
+      {
+        "comment": "",
+        "key": "Long-press a card to cycle its paper color.",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 504
+        }
+      }
+    ]
+  },
+  "version": 1
+}

@@ -13,6 +13,23 @@ extension Notification.Name {
     static let waRequestSplitPaneFocus = Notification.Name("wa.requestSplitPaneFocus")
 }
 
+enum BWRSpikeLabConstants {
+    static let windowID = "bwr-spike-lab"
+}
+
+private struct BWRSpikeLabCommands: Commands {
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some Commands {
+        CommandGroup(after: .windowArrangement) {
+            Button("BWR Spike Lab") {
+                openWindow(id: BWRSpikeLabConstants.windowID)
+            }
+            .keyboardShortcut("9", modifiers: [.command, .option])
+        }
+    }
+}
+
 extension UTType {
     static var waWorkspace: UTType {
         UTType(filenameExtension: "wtf") ?? UTType(exportedAs: "com.wa.workspace", conformingTo: .package)
@@ -553,7 +570,6 @@ private struct MainWindowSizePersistenceAccessor: NSViewRepresentable {
     }
 }
 
-@main
 struct waApp: App {
     @AppStorage("fontSize") private var fontSize: Double = 14.0
     @AppStorage("mainWorkspaceZoomScale") private var mainWorkspaceZoomScale: Double = 1.0
@@ -579,8 +595,10 @@ struct waApp: App {
     @StateObject private var indexBoardRuntime = IndexBoardRuntime.shared
     @State private var didHideReferenceWindowOnLaunch: Bool = false
     @State private var storeSetupRequestID: Int = 0
+    private let launchIntoBWRSpikeLab: Bool
 
     init() {
+        launchIntoBWRSpikeLab = ProcessInfo.processInfo.environment["WA_OPEN_BWR_M0_SPIKE_LAB"] == "1"
         UserDefaults.standard.set(false, forKey: "TSMLanguageIndicatorEnabled")
 #if DEBUG
         if ProcessInfo.processInfo.environment["WA_RUN_MAIN_WORKSPACE_PHASE0_HARNESS"] == "1" {
@@ -595,68 +613,82 @@ struct waApp: App {
             IndexBoardGroupActivationHarness.run()
             exit(0)
         }
+        if ProcessInfo.processInfo.environment["WA_RUN_BWR_M0_HARNESS"] == "1" {
+            let success = BWRPhase0Harness.runAll()
+            exit(success ? 0 : 1)
+        }
 #endif
     }
     
     var body: some Scene {
         WindowGroup {
-            ZStack {
-                Color(nsColor: appWindowState.focusModeWindowBackgroundActive ? .black : resolvedWindowBackgroundColor)
-                    .ignoresSafeArea()
-                Group {
-                    if let store = store {
-                        // 스토어가 준비되면 메인 뷰 표시
-                        MainContainerView()
-                            .environmentObject(store)
-                            .environmentObject(appWindowState)
-                            .environmentObject(referenceCardStore)
-                    } else {
-                        // 컨테이너가 없으면(최초 실행 시) 설정 화면 표시
-                        storageSetupView
+            Group {
+                if launchIntoBWRSpikeLab {
+                    BWRSpikeLabView()
+                } else {
+                    ZStack {
+                        Color(nsColor: appWindowState.focusModeWindowBackgroundActive ? .black : resolvedWindowBackgroundColor)
+                            .ignoresSafeArea()
+                        Group {
+                            if let store = store {
+                                // 스토어가 준비되면 메인 뷰 표시
+                                MainContainerView()
+                                    .environmentObject(store)
+                                    .environmentObject(appWindowState)
+                                    .environmentObject(referenceCardStore)
+                            } else {
+                                // 컨테이너가 없으면(최초 실행 시) 설정 화면 표시
+                                storageSetupView
+                            }
+                        }
+                    }
+                    .background(MainWindowTitleHider())
+                    .background(MainWindowSizePersistenceAccessor())
+                    .onAppear {
+                        applyApplicationAppearance()
+                        if !didResetForV2 {
+                            store?.flushPendingSaves()
+                            storageBookmark = nil
+                            store = nil
+                            didResetForV2 = true
+                        }
+                        if forceWorkspaceReset {
+                            store?.flushPendingSaves()
+                            storageBookmark = nil
+                            store = nil
+                            forceWorkspaceReset = false
+                        }
+                        initializeAutoBackupSettingsIfNeeded()
+                        setupStore()
+                        preloadSoftBoundaryFeedbackSound()
+                        appWindowState.focusModeWindowBackgroundActive = false
+                        hideReferenceWindowOnLaunchOnce()
+                    }
+                    .onChange(of: appearance) { _, _ in
+                        applyApplicationAppearance()
+                    }
+                    .onChange(of: forceWorkspaceReset) { _, newValue in
+                        if newValue {
+                            store?.flushPendingSaves()
+                            storageBookmark = nil
+                            store = nil
+                            forceWorkspaceReset = false
+                        }
+                    }
+                    .onChange(of: storageBookmark) { _, _ in
+                        setupStore()
+                    }
+                    .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
+                        handleApplicationWillTerminate()
                     }
                 }
             }
-            .background(MainWindowTitleHider())
-            .background(MainWindowSizePersistenceAccessor())
-            .onAppear {
-                applyApplicationAppearance()
-                if !didResetForV2 {
-                    store?.flushPendingSaves()
-                    storageBookmark = nil
-                    store = nil
-                    didResetForV2 = true
-                }
-                if forceWorkspaceReset {
-                    store?.flushPendingSaves()
-                    storageBookmark = nil
-                    store = nil
-                    forceWorkspaceReset = false
-                }
-                initializeAutoBackupSettingsIfNeeded()
-                setupStore()
-                preloadSoftBoundaryFeedbackSound()
-                appWindowState.focusModeWindowBackgroundActive = false
-                hideReferenceWindowOnLaunchOnce()
-            }
-            .onChange(of: appearance) { _, _ in
-                applyApplicationAppearance()
-            }
-            .onChange(of: forceWorkspaceReset) { _, newValue in
-                if newValue {
-                    store?.flushPendingSaves()
-                    storageBookmark = nil
-                    store = nil
-                    forceWorkspaceReset = false
-                }
-            }
-            .onChange(of: storageBookmark) { _, _ in
-                setupStore()
-            }
-            .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
-                handleApplicationWillTerminate()
-            }
         }
         .windowStyle(.hiddenTitleBar)
+        Window("BWR Spike Lab", id: BWRSpikeLabConstants.windowID) {
+            BWRSpikeLabView()
+        }
+        .windowResizability(.contentSize)
         Window("레퍼런스 카드", id: ReferenceWindowConstants.windowID) {
             Group {
                 if let store = store {
@@ -762,6 +794,9 @@ struct waApp: App {
                     }
                 }
             }
+        }
+        .commands {
+            BWRSpikeLabCommands()
         }
         
         Settings {

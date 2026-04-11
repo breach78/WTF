@@ -1,0 +1,89 @@
+{
+  "" : {
+    "diagnostics" : "/Users/three/app_build/wa/.codex_derived/bwr_ios/Build/Intermediates.noindex/wa.build/Debug-iphoneos/wa.build/Objects-normal/arm64/wa-primary.dia",
+    "emit-module-dependencies" : "/Users/three/app_build/wa/.codex_derived/bwr_ios/Build/Intermediates.noindex/wa.build/Debug-iphoneos/wa.build/Objects-normal/arm64/wa-primary-emit-module.d",
+    "emit-module-diagnostics" : "/Users/three/app_build/wa/.codex_derived/bwr_ios/Build/Intermediates.noindex/wa.build/Debug-iphoneos/wa.build/Objects-normal/arm64/wa-primary-emit-module.dia",
+    "pch" : "/Users/three/app_build/wa/.codex_derived/bwr_ios/Build/Intermediates.noindex/wa.build/Debug-iphoneos/wa.build/Objects-normal/arm64/wa-primary-Bridging-header.pch",
+    "swift-dependencies" : "/Users/three/app_build/wa/.codex_derived/bwr_ios/Build/Intermediates.noindex/wa.build/Debug-iphoneos/wa.build/Objects-normal/arm64/wa-primary.swiftdeps"
+  },
+  "/Users/three/app_build/wa/.codex_derived/bwr_ios/Build/Intermediates.noindex/wa.build/Debug-iphoneos/wa.build/DerivedSources/GeneratedAssetSymbols.swift" : {
+    "const-values" : "/Users/three/app_build/wa/.codex_derived/bwr_ios/Build/Intermediates.noindex/wa.build/Debug-iphoneos/wa.build/Objects-normal/arm64/GeneratedAssetSymbols.swiftconstvalues",
+    "dependencies" : "/Users/three/app_build/wa/.codex_derived/bwr_ios/Build/Intermediates.noindex/wa.build/Debug-iphoneos/wa.build/Objects-normal/arm64/GeneratedAssetSymbols.d",
+    "diagnostics" : "/Users/three/app_build/wa/.codex_derived/bwr_ios/Build/Intermediates.noindex/wa.build/Debug-iphoneos/wa.build/Objects-normal/arm64/GeneratedAssetSymbols.dia",
+    "index-unit-output-path" : "/wa.build/Debug-iphoneos/wa.build/Objects-normal/arm64/GeneratedAssetSymbols.o",
+    "llvm-bc" : "/Users/three/app_build/wa/.codex_derived/bwr_ios/Build/Intermediates.noindex/wa.build/Debug-iphoneos/wa.build/Objects-normal/arm64/GeneratedAssetSymbols.bc",
+    "object" : "/Users/three/app_build/wa/.codex_derived/bwr_ios/Build/Intermediates.noindex/wa.build/Debug-iphoneos/wa.build/Objects-normal/arm64/GeneratedAssetSymbols.o",
+    "swift-dependencies" : "/Users/three/app_build/wa/.codex_derived/bwr_ios/Build/Intermediates.noindex/wa.build/Debug-iphoneos/wa.build/Objects-normal/arm64/GeneratedAssetSymbols.swiftdeps",
+    "swiftmodule" : "/Users/three/app_build/wa/.codex_derived/bwr_ios/Build/Intermediates.noindex/wa.build/Debug-iphoneos/wa.build/Objects-normal/arm64/GeneratedAssetSymbols~partial.swiftmodule"
+  },
+  "/Users/three/app_build/wa/BWR/BWRApp.swift" : {
+    "const-values" : "/Users/three/app_build/wa/.codex_derived/bwr_ios/Build/Intermediates.noindex/wa.build/Debug-iphoneos/wa.build/Objects-normal/arm64/BWRApp.swiftconstvalues",
+    "dependencies" : "/Users/three/app_build/wa/.codex_derived/bwr_ios/Build/Intermediates.noindex/wa.build/Debug-iphoneos/wa.build/Objects-normal/arm64/BWRApp.d",
+    "diagnostics" : "/Users/three/app_build/wa/.codex_derived/bwr_ios/Build/Intermediates.noindex/wa.build/Debug-iphoneos/wa.build/Objects-normal/arm64/BWRApp.dia",
+    "index-unit-output-path" : "/wa.build/Debug-iphoneos/wa.build/Objects-normal/arm64/BWRApp.o",
+    "llvm-bc" : "/Users/three/app_build/wa/.codex_derived/bwr_ios/Build/Intermediates.noindex/wa.build/Debug-iphoneos/wa.build/Objects-normal/arm64/BWRApp.bc",
+    "object" : "/Users/three/app_build/wa/.codex_derived/bwr_ios/Build/Intermediates.noindex/wa.build/Debug-iphoneos/wa.build/Objects-normal/arm64/BWRApp.o",
+    "swift-dependencies" : "/Users/three/app_build/wa/.codex_derived/bwr_ios/Build/Intermediates.noindex/wa.build/Debug-iphoneos/wa.build/Objects-normal/arm64/BWRApp.swiftdeps",
+    "swiftmodule" : "/Users/three/app_build/wa/.codex_derived/bwr_ios/Build/Intermediates.noindex/wa.build/Debug-iphoneos/wa.build/Objects-normal/arm64/BWRApp~partial.swiftmodule"
+  },
+  "/Users/three/app_build/wa/BWR/BWRBoardScene.swift" : {
+    "const-values" : "/Users/three/app_build/wa/.codex_derived/bwr_ios/Build/Intermediates.noindex/wa.build/Debug-iphoneos/wa.build/Objects-normal/arm64/BWRBoardScene.swiftconstvalues",
+    "dependencies" : "/Users/three/app_build/wa/.codex_derived/bwr_ios/Build/Intermediates.noindex/wa.build/Debug-iphoneos/wa.build/Objects-normal/arm64/BWRBoardScene.d",
+    "diagnostics" : "/Users/three/app_build/wa/.codex_derived/bwr_ios/Build/Intermediates.noindex/wa.build/Debug-iphoneos/wa.build/Objects-normal/arm64/BWRBoardScene.dia",
+    "index-unit-output-path" : "/wa.build/Debug-iphoneos/wa.build/Objects-normal/arm64/BWRBoardScene.o",
+    "llvm-bc" : "/Users/three/app_build/wa/.codex_derived/bwr_ios/Build/Intermediates.noindex/wa.build/Debug-iphoneos/wa.build/Objects-normal/arm64/BWRBoardScene.bc",
+    "object" : "/Users/three/app_build/wa/.codex_derived/bwr_ios/Build/Intermediates.noindex/wa.build/Debug-iphoneos/wa.build/Objects-normal/arm64/BWRBoardScene.o",
+    "swift-dependencies" : "/Users/three/app_build/wa/.codex_derived/bwr_ios/Build/Intermediates.noindex/wa.build/Debug-iphoneos/wa.build/Objects-normal/arm64/BWRBoardScene.swiftdeps",
+    "swiftmodule" : "/Users/three/app_build/wa/.codex_derived/bwr_ios/Build/Intermediates.noindex/wa.build/Debug-iphoneos/wa.build/Objects-normal/arm64/BWRBoardScene~partial.swiftmodule"
+  },
+  "/Users/three/app_build/wa/BWR/BWRBoardView.swift" : {
+    "const-values" : "/Users/three/app_build/wa/.codex_derived/bwr_ios/Build/Intermediates.noindex/wa.build/Debug-iphoneos/wa.build/Objects-normal/arm64/BWRBoardView.swiftconstvalues",
+    "dependencies" : "/Users/three/app_build/wa/.codex_derived/bwr_ios/Build/Intermediates.noindex/wa.build/Debug-iphoneos/wa.build/Objects-normal/arm64/BWRBoardView.d",
+    "diagnostics" : "/Users/three/app_build/wa/.codex_derived/bwr_ios/Build/Intermediates.noindex/wa.build/Debug-iphoneos/wa.build/Objects-normal/arm64/BWRBoardView.dia",
+    "index-unit-output-path" : "/wa.build/Debug-iphoneos/wa.build/Objects-normal/arm64/BWRBoardView.o",
+    "llvm-bc" : "/Users/three/app_build/wa/.codex_derived/bwr_ios/Build/Intermediates.noindex/wa.build/Debug-iphoneos/wa.build/Objects-normal/arm64/BWRBoardView.bc",
+    "object" : "/Users/three/app_build/wa/.codex_derived/bwr_ios/Build/Intermediates.noindex/wa.build/Debug-iphoneos/wa.build/Objects-normal/arm64/BWRBoardView.o",
+    "swift-dependencies" : "/Users/three/app_build/wa/.codex_derived/bwr_ios/Build/Intermediates.noindex/wa.build/Debug-iphoneos/wa.build/Objects-normal/arm64/BWRBoardView.swiftdeps",
+    "swiftmodule" : "/Users/three/app_build/wa/.codex_derived/bwr_ios/Build/Intermediates.noindex/wa.build/Debug-iphoneos/wa.build/Objects-normal/arm64/BWRBoardView~partial.swiftmodule"
+  },
+  "/Users/three/app_build/wa/BWR/BWRDocument.swift" : {
+    "const-values" : "/Users/three/app_build/wa/.codex_derived/bwr_ios/Build/Intermediates.noindex/wa.build/Debug-iphoneos/wa.build/Objects-normal/arm64/BWRDocument.swiftconstvalues",
+    "dependencies" : "/Users/three/app_build/wa/.codex_derived/bwr_ios/Build/Intermediates.noindex/wa.build/Debug-iphoneos/wa.build/Objects-normal/arm64/BWRDocument.d",
+    "diagnostics" : "/Users/three/app_build/wa/.codex_derived/bwr_ios/Build/Intermediates.noindex/wa.build/Debug-iphoneos/wa.build/Objects-normal/arm64/BWRDocument.dia",
+    "index-unit-output-path" : "/wa.build/Debug-iphoneos/wa.build/Objects-normal/arm64/BWRDocument.o",
+    "llvm-bc" : "/Users/three/app_build/wa/.codex_derived/bwr_ios/Build/Intermediates.noindex/wa.build/Debug-iphoneos/wa.build/Objects-normal/arm64/BWRDocument.bc",
+    "object" : "/Users/three/app_build/wa/.codex_derived/bwr_ios/Build/Intermediates.noindex/wa.build/Debug-iphoneos/wa.build/Objects-normal/arm64/BWRDocument.o",
+    "swift-dependencies" : "/Users/three/app_build/wa/.codex_derived/bwr_ios/Build/Intermediates.noindex/wa.build/Debug-iphoneos/wa.build/Objects-normal/arm64/BWRDocument.swiftdeps",
+    "swiftmodule" : "/Users/three/app_build/wa/.codex_derived/bwr_ios/Build/Intermediates.noindex/wa.build/Debug-iphoneos/wa.build/Objects-normal/arm64/BWRDocument~partial.swiftmodule"
+  },
+  "/Users/three/app_build/wa/BWR/BWRLaunchView.swift" : {
+    "const-values" : "/Users/three/app_build/wa/.codex_derived/bwr_ios/Build/Intermediates.noindex/wa.build/Debug-iphoneos/wa.build/Objects-normal/arm64/BWRLaunchView.swiftconstvalues",
+    "dependencies" : "/Users/three/app_build/wa/.codex_derived/bwr_ios/Build/Intermediates.noindex/wa.build/Debug-iphoneos/wa.build/Objects-normal/arm64/BWRLaunchView.d",
+    "diagnostics" : "/Users/three/app_build/wa/.codex_derived/bwr_ios/Build/Intermediates.noindex/wa.build/Debug-iphoneos/wa.build/Objects-normal/arm64/BWRLaunchView.dia",
+    "index-unit-output-path" : "/wa.build/Debug-iphoneos/wa.build/Objects-normal/arm64/BWRLaunchView.o",
+    "llvm-bc" : "/Users/three/app_build/wa/.codex_derived/bwr_ios/Build/Intermediates.noindex/wa.build/Debug-iphoneos/wa.build/Objects-normal/arm64/BWRLaunchView.bc",
+    "object" : "/Users/three/app_build/wa/.codex_derived/bwr_ios/Build/Intermediates.noindex/wa.build/Debug-iphoneos/wa.build/Objects-normal/arm64/BWRLaunchView.o",
+    "swift-dependencies" : "/Users/three/app_build/wa/.codex_derived/bwr_ios/Build/Intermediates.noindex/wa.build/Debug-iphoneos/wa.build/Objects-normal/arm64/BWRLaunchView.swiftdeps",
+    "swiftmodule" : "/Users/three/app_build/wa/.codex_derived/bwr_ios/Build/Intermediates.noindex/wa.build/Debug-iphoneos/wa.build/Objects-normal/arm64/BWRLaunchView~partial.swiftmodule"
+  },
+  "/Users/three/app_build/wa/BWR/BWRModels.swift" : {
+    "const-values" : "/Users/three/app_build/wa/.codex_derived/bwr_ios/Build/Intermediates.noindex/wa.build/Debug-iphoneos/wa.build/Objects-normal/arm64/BWRModels.swiftconstvalues",
+    "dependencies" : "/Users/three/app_build/wa/.codex_derived/bwr_ios/Build/Intermediates.noindex/wa.build/Debug-iphoneos/wa.build/Objects-normal/arm64/BWRModels.d",
+    "diagnostics" : "/Users/three/app_build/wa/.codex_derived/bwr_ios/Build/Intermediates.noindex/wa.build/Debug-iphoneos/wa.build/Objects-normal/arm64/BWRModels.dia",
+    "index-unit-output-path" : "/wa.build/Debug-iphoneos/wa.build/Objects-normal/arm64/BWRModels.o",
+    "llvm-bc" : "/Users/three/app_build/wa/.codex_derived/bwr_ios/Build/Intermediates.noindex/wa.build/Debug-iphoneos/wa.build/Objects-normal/arm64/BWRModels.bc",
+    "object" : "/Users/three/app_build/wa/.codex_derived/bwr_ios/Build/Intermediates.noindex/wa.build/Debug-iphoneos/wa.build/Objects-normal/arm64/BWRModels.o",
+    "swift-dependencies" : "/Users/three/app_build/wa/.codex_derived/bwr_ios/Build/Intermediates.noindex/wa.build/Debug-iphoneos/wa.build/Objects-normal/arm64/BWRModels.swiftdeps",
+    "swiftmodule" : "/Users/three/app_build/wa/.codex_derived/bwr_ios/Build/Intermediates.noindex/wa.build/Debug-iphoneos/wa.build/Objects-normal/arm64/BWRModels~partial.swiftmodule"
+  },
+  "/Users/three/app_build/wa/BWR/BWRRecentDocumentStore.swift" : {
+    "const-values" : "/Users/three/app_build/wa/.codex_derived/bwr_ios/Build/Intermediates.noindex/wa.build/Debug-iphoneos/wa.build/Objects-normal/arm64/BWRRecentDocumentStore.swiftconstvalues",
+    "dependencies" : "/Users/three/app_build/wa/.codex_derived/bwr_ios/Build/Intermediates.noindex/wa.build/Debug-iphoneos/wa.build/Objects-normal/arm64/BWRRecentDocumentStore.d",
+    "diagnostics" : "/Users/three/app_build/wa/.codex_derived/bwr_ios/Build/Intermediates.noindex/wa.build/Debug-iphoneos/wa.build/Objects-normal/arm64/BWRRecentDocumentStore.dia",
+    "index-unit-output-path" : "/wa.build/Debug-iphoneos/wa.build/Objects-normal/arm64/BWRRecentDocumentStore.o",
+    "llvm-bc" : "/Users/three/app_build/wa/.codex_derived/bwr_ios/Build/Intermediates.noindex/wa.build/Debug-iphoneos/wa.build/Objects-normal/arm64/BWRRecentDocumentStore.bc",
+    "object" : "/Users/three/app_build/wa/.codex_derived/bwr_ios/Build/Intermediates.noindex/wa.build/Debug-iphoneos/wa.build/Objects-normal/arm64/BWRRecentDocumentStore.o",
+    "swift-dependencies" : "/Users/three/app_build/wa/.codex_derived/bwr_ios/Build/Intermediates.noindex/wa.build/Debug-iphoneos/wa.build/Objects-normal/arm64/BWRRecentDocumentStore.swiftdeps",
+    "swiftmodule" : "/Users/three/app_build/wa/.codex_derived/bwr_ios/Build/Intermediates.noindex/wa.build/Debug-iphoneos/wa.build/Objects-normal/arm64/BWRRecentDocumentStore~partial.swiftmodule"
+  }
+}

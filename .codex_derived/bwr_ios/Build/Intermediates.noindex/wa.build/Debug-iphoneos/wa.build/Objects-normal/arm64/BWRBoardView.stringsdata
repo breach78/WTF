@@ -1,0 +1,72 @@
+{
+  "source": "/Users/three/app_build/wa/BWR/BWRBoardView.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "New card",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 269
+        }
+      },
+      {
+        "comment": "",
+        "key": "Search",
+        "location": {
+          "startingColumn": 23,
+          "startingLine": 361
+        }
+      },
+      {
+        "comment": "",
+        "key": "Board shortcuts",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 430
+        }
+      },
+      {
+        "comment": "",
+        "key": "Single click selects a card or slot.",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 433
+        }
+      },
+      {
+        "comment": "",
+        "key": "Double-click a card to edit markdown inline.",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 435
+        }
+      },
+      {
+        "comment": "",
+        "key": "Double-click an empty slot to create a new card there.",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 437
+        }
+      },
+      {
+        "comment": "",
+        "key": "Drag cards between slots. Dropping on a filled slot swaps them.",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 439
+        }
+      },
+      {
+        "comment": "",
+        "key": "Long-press a card to cycle its paper color.",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 441
+        }
+      }
+    ]
+  },
+  "version": 1
+}

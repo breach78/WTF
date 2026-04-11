@@ -1,0 +1,56 @@
+{
+  "source": "/Users/three/app_build/wa/BWR/BWRLaunchView.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "Board Writer",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 72
+        }
+      },
+      {
+        "comment": "",
+        "key": "Open the last board automatically, or start a fresh one.",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 76
+        }
+      },
+      {
+        "comment": "",
+        "key": "Opening your previous board…",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 86
+        }
+      },
+      {
+        "comment": "",
+        "key": "Creating…",
+        "location": {
+          "startingColumn": 46,
+          "startingLine": 99
+        }
+      },
+      {
+        "comment": "",
+        "key": "New Board",
+        "location": {
+          "startingColumn": 62,
+          "startingLine": 99
+        }
+      },
+      {
+        "comment": "",
+        "key": "Open Board…",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 105
+        }
+      }
+    ]
+  },
+  "version": 1
+}

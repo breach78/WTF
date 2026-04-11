@@ -1,0 +1,168 @@
+{
+  "source": "/Users/three/app_build/wa/BWR/BWRBoardScene.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "Couldn’t Import Asset",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 230
+        }
+      },
+      {
+        "comment": "",
+        "key": "Cycle card size",
+        "location": {
+          "startingColumn": 27,
+          "startingLine": 114
+        }
+      },
+      {
+        "comment": "",
+        "key": "Cycle board tone",
+        "location": {
+          "startingColumn": 27,
+          "startingLine": 119
+        }
+      },
+      {
+        "comment": "",
+        "key": "Toggle slot guides",
+        "location": {
+          "startingColumn": 27,
+          "startingLine": 128
+        }
+      },
+      {
+        "comment": "",
+        "key": "Create card",
+        "location": {
+          "startingColumn": 27,
+          "startingLine": 133
+        }
+      },
+      {
+        "comment": "",
+        "key": "Go to current search result",
+        "location": {
+          "startingColumn": 27,
+          "startingLine": 139
+        }
+      },
+      {
+        "comment": "",
+        "key": "Restore latest deleted card",
+        "location": {
+          "startingColumn": 27,
+          "startingLine": 145
+        }
+      },
+      {
+        "comment": "",
+        "key": "Soft delete selected card",
+        "location": {
+          "startingColumn": 27,
+          "startingLine": 151
+        }
+      },
+      {
+        "comment": "",
+        "key": "Attach or remove an image asset",
+        "location": {
+          "startingColumn": 27,
+          "startingLine": 164
+        }
+      },
+      {
+        "comment": "",
+        "key": "Insert or delete rows and columns",
+        "location": {
+          "startingColumn": 27,
+          "startingLine": 187
+        }
+      },
+      {
+        "comment": "",
+        "key": "Edit selected card inline",
+        "location": {
+          "startingColumn": 27,
+          "startingLine": 195
+        }
+      },
+      {
+        "comment": "",
+        "key": "Attach Image",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 154
+        }
+      },
+      {
+        "comment": "",
+        "key": "Remove Asset",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 159
+        }
+      },
+      {
+        "comment": "",
+        "key": "Insert Row Before",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 167
+        }
+      },
+      {
+        "comment": "",
+        "key": "Insert Row After",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 170
+        }
+      },
+      {
+        "comment": "",
+        "key": "Delete Current Row",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 173
+        }
+      },
+      {
+        "comment": "",
+        "key": "Insert Column Before",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 177
+        }
+      },
+      {
+        "comment": "",
+        "key": "Insert Column After",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 180
+        }
+      },
+      {
+        "comment": "",
+        "key": "Delete Current Column",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 183
+        }
+      },
+      {
+        "comment": "",
+        "key": "OK",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 238
+        }
+      }
+    ]
+  },
+  "version": 1
+}

@@ -1,0 +1,16 @@
+{
+  "source": "/Users/three/app_build/wa/BWR/BWRApp.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "BWR",
+        "location": {
+          "startingColumn": 21,
+          "startingLine": 34
+        }
+      }
+    ]
+  },
+  "version": 1
+}

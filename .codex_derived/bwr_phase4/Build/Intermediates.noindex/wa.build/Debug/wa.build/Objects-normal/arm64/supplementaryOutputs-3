@@ -1,0 +1,23 @@
+{
+  "/Users/three/app_build/wa/BWR/BWRBoardView.swift" : {
+    "const-values" : "/Users/three/app_build/wa/.codex_derived/bwr_phase4/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/BWRBoardView.swiftconstvalues",
+    "dependencies" : "/Users/three/app_build/wa/.codex_derived/bwr_phase4/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/BWRBoardView.d",
+    "diagnostics" : "/Users/three/app_build/wa/.codex_derived/bwr_phase4/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/BWRBoardView.dia",
+    "object" : "/Users/three/app_build/wa/.codex_derived/bwr_phase4/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/BWRBoardView.o",
+    "swift-dependencies" : "/Users/three/app_build/wa/.codex_derived/bwr_phase4/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/BWRBoardView.swiftdeps"
+  },
+  "/Users/three/app_build/wa/BWR/BWRDocument.swift" : {
+    "const-values" : "/Users/three/app_build/wa/.codex_derived/bwr_phase4/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/BWRDocument.swiftconstvalues",
+    "dependencies" : "/Users/three/app_build/wa/.codex_derived/bwr_phase4/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/BWRDocument.d",
+    "diagnostics" : "/Users/three/app_build/wa/.codex_derived/bwr_phase4/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/BWRDocument.dia",
+    "object" : "/Users/three/app_build/wa/.codex_derived/bwr_phase4/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/BWRDocument.o",
+    "swift-dependencies" : "/Users/three/app_build/wa/.codex_derived/bwr_phase4/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/BWRDocument.swiftdeps"
+  },
+  "/Users/three/app_build/wa/BWR/BWRDocumentThumbnailRenderer.swift" : {
+    "const-values" : "/Users/three/app_build/wa/.codex_derived/bwr_phase4/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/BWRDocumentThumbnailRenderer.swiftconstvalues",
+    "dependencies" : "/Users/three/app_build/wa/.codex_derived/bwr_phase4/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/BWRDocumentThumbnailRenderer.d",
+    "diagnostics" : "/Users/three/app_build/wa/.codex_derived/bwr_phase4/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/BWRDocumentThumbnailRenderer.dia",
+    "object" : "/Users/three/app_build/wa/.codex_derived/bwr_phase4/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/BWRDocumentThumbnailRenderer.o",
+    "swift-dependencies" : "/Users/three/app_build/wa/.codex_derived/bwr_phase4/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/BWRDocumentThumbnailRenderer.swiftdeps"
+  }
+}

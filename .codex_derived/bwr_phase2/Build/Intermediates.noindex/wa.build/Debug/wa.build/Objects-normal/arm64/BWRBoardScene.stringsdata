@@ -1,0 +1,56 @@
+{
+  "source": "/Users/three/app_build/wa/BWR/BWRBoardScene.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "Cycle card size",
+        "location": {
+          "startingColumn": 27,
+          "startingLine": 63
+        }
+      },
+      {
+        "comment": "",
+        "key": "Cycle board tone",
+        "location": {
+          "startingColumn": 27,
+          "startingLine": 68
+        }
+      },
+      {
+        "comment": "",
+        "key": "Toggle slot guides",
+        "location": {
+          "startingColumn": 27,
+          "startingLine": 77
+        }
+      },
+      {
+        "comment": "",
+        "key": "Create card",
+        "location": {
+          "startingColumn": 27,
+          "startingLine": 82
+        }
+      },
+      {
+        "comment": "",
+        "key": "Delete selected card",
+        "location": {
+          "startingColumn": 27,
+          "startingLine": 88
+        }
+      },
+      {
+        "comment": "",
+        "key": "Edit selected card inline",
+        "location": {
+          "startingColumn": 27,
+          "startingLine": 96
+        }
+      }
+    ]
+  },
+  "version": 1
+}

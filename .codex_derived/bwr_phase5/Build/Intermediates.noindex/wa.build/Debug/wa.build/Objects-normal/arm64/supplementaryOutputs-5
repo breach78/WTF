@@ -1,0 +1,23 @@
+{
+  "/Users/three/app_build/wa/BWR/BWRLaunchView.swift" : {
+    "const-values" : "/Users/three/app_build/wa/.codex_derived/bwr_phase5/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/BWRLaunchView.swiftconstvalues",
+    "dependencies" : "/Users/three/app_build/wa/.codex_derived/bwr_phase5/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/BWRLaunchView.d",
+    "diagnostics" : "/Users/three/app_build/wa/.codex_derived/bwr_phase5/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/BWRLaunchView.dia",
+    "object" : "/Users/three/app_build/wa/.codex_derived/bwr_phase5/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/BWRLaunchView.o",
+    "swift-dependencies" : "/Users/three/app_build/wa/.codex_derived/bwr_phase5/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/BWRLaunchView.swiftdeps"
+  },
+  "/Users/three/app_build/wa/BWR/BWRModels.swift" : {
+    "const-values" : "/Users/three/app_build/wa/.codex_derived/bwr_phase5/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/BWRModels.swiftconstvalues",
+    "dependencies" : "/Users/three/app_build/wa/.codex_derived/bwr_phase5/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/BWRModels.d",
+    "diagnostics" : "/Users/three/app_build/wa/.codex_derived/bwr_phase5/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/BWRModels.dia",
+    "object" : "/Users/three/app_build/wa/.codex_derived/bwr_phase5/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/BWRModels.o",
+    "swift-dependencies" : "/Users/three/app_build/wa/.codex_derived/bwr_phase5/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/BWRModels.swiftdeps"
+  },
+  "/Users/three/app_build/wa/BWR/BWRPhase1Harness.swift" : {
+    "const-values" : "/Users/three/app_build/wa/.codex_derived/bwr_phase5/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/BWRPhase1Harness.swiftconstvalues",
+    "dependencies" : "/Users/three/app_build/wa/.codex_derived/bwr_phase5/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/BWRPhase1Harness.d",
+    "diagnostics" : "/Users/three/app_build/wa/.codex_derived/bwr_phase5/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/BWRPhase1Harness.dia",
+    "object" : "/Users/three/app_build/wa/.codex_derived/bwr_phase5/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/BWRPhase1Harness.o",
+    "swift-dependencies" : "/Users/three/app_build/wa/.codex_derived/bwr_phase5/Build/Intermediates.noindex/wa.build/Debug/wa.build/Objects-normal/arm64/BWRPhase1Harness.swiftdeps"
+  }
+}

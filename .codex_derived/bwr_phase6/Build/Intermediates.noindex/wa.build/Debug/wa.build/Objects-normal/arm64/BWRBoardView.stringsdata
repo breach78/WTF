@@ -1,0 +1,176 @@
+{
+  "source": "/Users/three/app_build/wa/BWR/BWRBoardView.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "New card",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 829
+        }
+      },
+      {
+        "comment": "",
+        "key": "Search",
+        "location": {
+          "startingColumn": 23,
+          "startingLine": 957
+        }
+      },
+      {
+        "comment": "",
+        "key": "Board shortcuts",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 1083
+        }
+      },
+      {
+        "comment": "",
+        "key": "Single click selects a card or slot.",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 1086
+        }
+      },
+      {
+        "comment": "",
+        "key": "The dark slot is the keyboard cursor anchor.",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 1088
+        }
+      },
+      {
+        "comment": "",
+        "key": "The dotted slot follows hover and stays separate from selection.",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 1090
+        }
+      },
+      {
+        "comment": "",
+        "key": "Command-click adds or removes cards from the current selection.",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 1092
+        }
+      },
+      {
+        "comment": "",
+        "key": "Shift-click grows a sequence selection from the anchored card.",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 1094
+        }
+      },
+      {
+        "comment": "",
+        "key": "Drag on empty space to marquee-select cards or slots.",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 1096
+        }
+      },
+      {
+        "comment": "",
+        "key": "Press Return on the cursor slot to edit a card or create one.",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 1098
+        }
+      },
+      {
+        "comment": "",
+        "key": "Press Tab or Shift-Tab to save and continue editing next or previous slots.",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 1100
+        }
+      },
+      {
+        "comment": "",
+        "key": "Use Arrow keys to move the cursor, and Option-Arrow to move the selected card.",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 1102
+        }
+      },
+      {
+        "comment": "",
+        "key": "Press Escape to cancel inline editing, then transient gestures, then selection.",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 1104
+        }
+      },
+      {
+        "comment": "",
+        "key": "Restore brings back the latest soft-deleted card near its original slot.",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 1106
+        }
+      },
+      {
+        "comment": "",
+        "key": "Search Enter or the location button jumps to the current logical match, and the chevrons move through results.",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 1108
+        }
+      },
+      {
+        "comment": "",
+        "key": "Structure menu inserts or deletes rows and columns around the current slot.",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 1110
+        }
+      },
+      {
+        "comment": "",
+        "key": "Attach Image links an image asset to the presented layer and saves it into the package.",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 1112
+        }
+      },
+      {
+        "comment": "",
+        "key": "Double-click a card to edit markdown inline.",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 1114
+        }
+      },
+      {
+        "comment": "",
+        "key": "Double-click an empty slot to create a new card there.",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 1116
+        }
+      },
+      {
+        "comment": "",
+        "key": "Single-card drags swap, sequence drags insert, and cluster drags stay rigid.",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 1118
+        }
+      },
+      {
+        "comment": "",
+        "key": "Long-press a card to cycle its paper color.",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 1120
+        }
+      }
+    ]
+  },
+  "version": 1
+}

@@ -29,17 +29,17 @@
 		<dict>
 			<key>CFBundleTypeExtensions</key>
 			<array>
-				<string>wtf</string>
+				<string>bwr</string>
 			</array>
 			<key>CFBundleTypeName</key>
-			<string>wa Workspace</string>
+			<string>Board Writer Project</string>
 			<key>CFBundleTypeRole</key>
 			<string>Editor</string>
 			<key>LSHandlerRank</key>
 			<string>Owner</string>
 			<key>LSItemContentTypes</key>
 			<array>
-				<string>com.wa.workspace</string>
+				<string>com.boardwriter.bwr</string>
 			</array>
 			<key>LSTypeIsPackage</key>
 			<true/>
@@ -53,14 +53,14 @@
 				<string>com.apple.package</string>
 			</array>
 			<key>UTTypeDescription</key>
-			<string>wa Workspace</string>
+			<string>Board Writer Project</string>
 			<key>UTTypeIdentifier</key>
-			<string>com.wa.workspace</string>
+			<string>com.boardwriter.bwr</string>
 			<key>UTTypeTagSpecification</key>
 			<dict>
 				<key>public.filename-extension</key>
 				<array>
-					<string>wtf</string>
+					<string>bwr</string>
 				</array>
 			</dict>
 		</dict>
