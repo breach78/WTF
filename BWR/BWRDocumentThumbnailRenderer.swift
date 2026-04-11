@@ -109,8 +109,8 @@ enum BWRDocumentThumbnailRenderer {
 
     private static func cardFrame(for slot: BoardSlot) -> CGRect {
         CGRect(
-            x: CGFloat(slot.column) * (BWRBoardLayoutMetrics.cardSize.width + BWRBoardLayoutMetrics.gridSpacing),
-            y: CGFloat(slot.row) * (BWRBoardLayoutMetrics.cardSize.height + BWRBoardLayoutMetrics.gridSpacing),
+            x: CGFloat(slot.column) * (BWRBoardLayoutMetrics.cardSize.width + BWRBoardLayoutMetrics.horizontalGridSpacing),
+            y: CGFloat(slot.row) * (BWRBoardLayoutMetrics.cardSize.height + BWRBoardLayoutMetrics.verticalGridSpacing),
             width: BWRBoardLayoutMetrics.cardSize.width,
             height: BWRBoardLayoutMetrics.cardSize.height
         )

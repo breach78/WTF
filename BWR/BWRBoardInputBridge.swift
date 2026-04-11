@@ -1,6 +1,12 @@
 import AppKit
 import SwiftUI
 
+extension NSEvent.ModifierFlags {
+    var bwrCommandModifiers: NSEvent.ModifierFlags {
+        intersection(.deviceIndependentFlagsMask).subtracting([.numericPad, .function])
+    }
+}
+
 struct BWRBoardKeyboardMonitor: NSViewRepresentable {
     let isEnabled: Bool
     let onKeyEvent: (NSEvent) -> Bool
@@ -62,20 +68,41 @@ final class BWRBoardKeyboardMonitorView: NSView {
     }
 
     private func shouldHandle(_ event: NSEvent) -> Bool {
-        guard
-            isEnabled,
-            let window,
-            window.isKeyWindow,
-            let onKeyEvent
-        else {
+        guard isEnabled else {
+            BWRBoardDebugLogger.log("key", "ignored disabled \(BWRBoardDebugLogger.describe(event: event))")
             return false
         }
 
-        if window.firstResponder is NSTextView {
+        guard let window else {
+            BWRBoardDebugLogger.log("key", "ignored no-window \(BWRBoardDebugLogger.describe(event: event))")
             return false
         }
 
-        return onKeyEvent(event)
+        guard window.isKeyWindow else {
+            BWRBoardDebugLogger.log("key", "ignored not-key-window \(BWRBoardDebugLogger.describe(event: event))")
+            return false
+        }
+
+        guard let onKeyEvent else {
+            BWRBoardDebugLogger.log("key", "ignored no-handler \(BWRBoardDebugLogger.describe(event: event))")
+            return false
+        }
+
+        let responder = window.firstResponder
+        if responder is NSTextView {
+            BWRBoardDebugLogger.log(
+                "key",
+                "blocked text-responder=\(BWRBoardDebugLogger.describe(responder: responder)) \(BWRBoardDebugLogger.describe(event: event))"
+            )
+            return false
+        }
+
+        let handled = onKeyEvent(event)
+        BWRBoardDebugLogger.log(
+            "key",
+            "handled=\(handled) responder=\(BWRBoardDebugLogger.describe(responder: responder)) \(BWRBoardDebugLogger.describe(event: event))"
+        )
+        return handled
     }
 }
 
@@ -182,7 +209,7 @@ private final class BWRInlineTextView: NSTextView {
     }
 
     override func keyDown(with event: NSEvent) {
-        let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        let modifiers = event.modifierFlags.bwrCommandModifiers
         let hasOnlyShiftModifier = modifiers == [.shift]
         let hasNoModifiers = modifiers.isEmpty
 

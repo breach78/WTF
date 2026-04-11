@@ -90,15 +90,16 @@ struct BWRBoardCanvasView: View {
         BoardCanvasLayout(
             visibleBounds: visibleBounds,
             slotSize: slotSize,
-            spacing: BWRBoardLayoutMetrics.gridSpacing,
+            horizontalSpacing: BWRBoardLayoutMetrics.horizontalGridSpacing,
+            verticalSpacing: BWRBoardLayoutMetrics.verticalGridSpacing,
             padding: BWRBoardLayoutMetrics.outerPadding
         )
     }
 
     private var slotStep: CGSize {
         CGSize(
-            width: slotSize.width + BWRBoardLayoutMetrics.gridSpacing,
-            height: slotSize.height + BWRBoardLayoutMetrics.gridSpacing
+            width: slotSize.width + BWRBoardLayoutMetrics.horizontalGridSpacing,
+            height: slotSize.height + BWRBoardLayoutMetrics.verticalGridSpacing
         )
     }
 
@@ -116,9 +117,9 @@ struct BWRBoardCanvasView: View {
     var body: some View {
         ScrollView([.horizontal, .vertical]) {
             ZStack(alignment: .topLeading) {
-                VStack(alignment: .leading, spacing: BWRBoardLayoutMetrics.gridSpacing) {
+                VStack(alignment: .leading, spacing: BWRBoardLayoutMetrics.verticalGridSpacing) {
                     ForEach(visibleBounds.rows, id: \.self) { row in
-                        HStack(spacing: BWRBoardLayoutMetrics.gridSpacing) {
+                        HStack(spacing: BWRBoardLayoutMetrics.horizontalGridSpacing) {
                             ForEach(visibleBounds.columns, id: \.self) { column in
                                 slotCell(for: BoardSlot(row: row, column: column))
                             }
@@ -166,30 +167,75 @@ struct BWRBoardCanvasView: View {
             }
         }
         .onTapGesture {
+            focusBoardKeyboard()
             if interaction.editingCardID != nil {
                 onCommitEditing()
             }
         }
         .onAppear {
             syncTransientGestureState()
+            BWRBoardDebugLogger.log(
+                "canvas",
+                "appear bounds=\(BWRBoardDebugLogger.describe(bounds: visibleBounds)) cursor=\(BWRBoardDebugLogger.describe(slot: interaction.keyboardCursorSlot)) selection=\(BWRBoardDebugLogger.describe(selection: interaction.selection))"
+            )
         }
         .onChange(of: transientGestureStateValue) { _, newValue in
             transientGestureState = newValue
+            BWRBoardDebugLogger.log(
+                "gesture",
+                "transient=\(BWRBoardDebugLogger.describe(gesture: newValue)) dragSession=\(BWRBoardDebugLogger.describe(dragSession: dragSession))"
+            )
         }
         .onChange(of: gestureCancellationToken) { _, _ in
             cancelTransientGesture()
+        }
+        .onChange(of: interaction.keyboardCursorSlot) { oldValue, newValue in
+            BWRBoardDebugLogger.log(
+                "cursor",
+                "\(BWRBoardDebugLogger.describe(slot: oldValue)) -> \(BWRBoardDebugLogger.describe(slot: newValue))"
+            )
+        }
+        .onChange(of: interaction.selection) { oldValue, newValue in
+            BWRBoardDebugLogger.log(
+                "selection",
+                "\(BWRBoardDebugLogger.describe(selection: oldValue)) -> \(BWRBoardDebugLogger.describe(selection: newValue))"
+            )
+        }
+        .onChange(of: interaction.hoverSlot) { oldValue, newValue in
+            BWRBoardDebugLogger.log(
+                "hover",
+                "\(BWRBoardDebugLogger.describe(slot: oldValue)) -> \(BWRBoardDebugLogger.describe(slot: newValue))"
+            )
+        }
+        .onChange(of: interaction.editingCardID) { oldValue, newValue in
+            BWRBoardDebugLogger.log(
+                "editing",
+                "\(oldValue?.uuidString.prefix(6) ?? "nil") -> \(newValue?.uuidString.prefix(6) ?? "nil")"
+            )
+        }
+        .onChange(of: visibleBounds) { oldValue, newValue in
+            BWRBoardDebugLogger.log(
+                "bounds",
+                "\(BWRBoardDebugLogger.describe(bounds: oldValue)) -> \(BWRBoardDebugLogger.describe(bounds: newValue)) hover=\(BWRBoardDebugLogger.describe(slot: interaction.hoverSlot)) cursor=\(BWRBoardDebugLogger.describe(slot: interaction.keyboardCursorSlot))"
+            )
+        }
+        .onChange(of: dragSession) { oldValue, newValue in
+            BWRBoardDebugLogger.log(
+                "drag",
+                "\(BWRBoardDebugLogger.describe(dragSession: oldValue)) -> \(BWRBoardDebugLogger.describe(dragSession: newValue))"
+            )
         }
     }
 
     private var boardWidth: CGFloat {
         let totalCardWidth = CGFloat(visibleBounds.columnCount) * slotSize.width
-        let totalSpacing = CGFloat(max(visibleBounds.columnCount - 1, 0)) * BWRBoardLayoutMetrics.gridSpacing
+        let totalSpacing = CGFloat(max(visibleBounds.columnCount - 1, 0)) * BWRBoardLayoutMetrics.horizontalGridSpacing
         return totalCardWidth + totalSpacing + BWRBoardLayoutMetrics.outerPadding.leading + BWRBoardLayoutMetrics.outerPadding.trailing
     }
 
     private var boardHeight: CGFloat {
         let totalCardHeight = CGFloat(visibleBounds.rowCount) * slotSize.height
-        let totalSpacing = CGFloat(max(visibleBounds.rowCount - 1, 0)) * BWRBoardLayoutMetrics.gridSpacing
+        let totalSpacing = CGFloat(max(visibleBounds.rowCount - 1, 0)) * BWRBoardLayoutMetrics.verticalGridSpacing
         return totalCardHeight + totalSpacing + BWRBoardLayoutMetrics.outerPadding.top + BWRBoardLayoutMetrics.outerPadding.bottom
     }
 
@@ -271,17 +317,17 @@ struct BWRBoardCanvasView: View {
     @ViewBuilder
     private func dragDestinationBlock(at slot: BoardSlot, isHead: Bool, isSingle: Bool) -> some View {
         let rect = boardLayout.rect(for: slot)
-        let underlayInset = BWRBoardLayoutMetrics.selectionUnderlayInset
-        RoundedRectangle(cornerRadius: BWRBoardLayoutMetrics.cardCorner + underlayInset, style: .continuous)
+        let emphasisSize = BWRBoardLayoutMetrics.slotEmphasisSize(for: rect.size)
+        RoundedRectangle(cornerRadius: BWRBoardLayoutMetrics.slotEmphasisCorner, style: .continuous)
             .fill(Color(hex: 0x655F56).opacity(isSingle ? 0.78 : 0.72))
             .overlay(
-                RoundedRectangle(cornerRadius: BWRBoardLayoutMetrics.cardCorner + underlayInset, style: .continuous)
+                RoundedRectangle(cornerRadius: BWRBoardLayoutMetrics.slotEmphasisCorner, style: .continuous)
                     .strokeBorder(
                         Color.white.opacity(isHead ? 0.24 : 0.14),
                         lineWidth: isHead ? 1.6 : 1
                     )
             )
-            .frame(width: rect.width + (underlayInset * 2), height: rect.height + (underlayInset * 2))
+            .frame(width: emphasisSize.width, height: emphasisSize.height)
             .position(x: rect.midX, y: rect.midY)
             .shadow(color: Color.black.opacity(isHead ? 0.18 : 0.12), radius: 18, x: 0, y: 10)
     }
@@ -351,6 +397,11 @@ struct BWRBoardCanvasView: View {
     }
 
     private func handleCardTap(_ card: BoardPresentedCard) {
+        focusBoardKeyboard()
+        BWRBoardDebugLogger.log(
+            "tap",
+            "card slot=\(BWRBoardDebugLogger.describe(slot: card.slot)) card=\(card.id.uuidString.prefix(6)) modifiers=\(currentModifiers)"
+        )
         interaction.editingCardID = nil
         let modifiers = currentModifiers
 
@@ -373,9 +424,19 @@ struct BWRBoardCanvasView: View {
     }
 
     private func handleEmptyTap(_ slot: BoardSlot) {
+        focusBoardKeyboard()
+        BWRBoardDebugLogger.log("tap", "empty slot=\(BWRBoardDebugLogger.describe(slot: slot))")
         interaction.editingCardID = nil
         interaction.keyboardCursorSlot = slot
         interaction.selectEmptySlot(slot)
+    }
+
+    private func focusBoardKeyboard() {
+        NSApp.keyWindow?.makeFirstResponder(nil)
+        BWRBoardDebugLogger.log(
+            "focus",
+            "firstResponder=\(BWRBoardDebugLogger.describe(responder: NSApp.keyWindow?.firstResponder))"
+        )
     }
 
     private func handleBoardDragChanged(_ value: DragGesture.Value) {
@@ -420,6 +481,10 @@ struct BWRBoardCanvasView: View {
 
     private func handleBoardDragEnded(_ value: DragGesture.Value) {
         defer {
+            BWRBoardDebugLogger.log(
+                "drag",
+                "end offset=\(BWRBoardDebugLogger.describe(dragSession: dragSession)) translation=(\(Int(dragTranslation.width)),\(Int(dragTranslation.height)))"
+            )
             dragSession = nil
             dragTranslation = .zero
             marqueeRect = nil
@@ -455,6 +520,10 @@ struct BWRBoardCanvasView: View {
 
     private func beginPointerGesture(at point: CGPoint) {
         guard let slot = boardLayout.slot(at: point) else {
+            BWRBoardDebugLogger.log(
+                "pointer",
+                "outside-grid point=(\(Int(point.x)),\(Int(point.y))) nearest=\(BWRBoardDebugLogger.describe(slot: boardLayout.nearestSlot(to: point)))"
+            )
             marqueeStartSlot = boardLayout.nearestSlot(to: point)
             marqueeRect = CGRect(origin: point, size: .zero)
             return
@@ -462,6 +531,10 @@ struct BWRBoardCanvasView: View {
 
         interaction.hoverSlot = nil
         if let card = project.card(at: slot) {
+            BWRBoardDebugLogger.log(
+                "pointer",
+                "drag-start slot=\(BWRBoardDebugLogger.describe(slot: slot)) card=\(card.id.uuidString.prefix(6))"
+            )
             if !interaction.selectedCardIDs.contains(card.id) {
                 interaction.selectCard(card.id, at: slot)
             }
@@ -474,6 +547,7 @@ struct BWRBoardCanvasView: View {
             return
         }
 
+        BWRBoardDebugLogger.log("pointer", "marquee-start slot=\(BWRBoardDebugLogger.describe(slot: slot))")
         marqueeStartSlot = slot
         marqueeRect = CGRect(origin: point, size: .zero)
     }
@@ -494,7 +568,7 @@ struct BWRBoardCanvasView: View {
     }
 
     private var currentModifiers: NSEvent.ModifierFlags {
-        NSEvent.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        NSEvent.modifierFlags.bwrCommandModifiers
     }
 
     private func syncTransientGestureState() {
@@ -534,14 +608,21 @@ private struct BWRSlotCellView: View {
     let onCancelEditing: () -> Void
     let onAdvanceEditing: (Bool) -> Void
 
-    private var showsCardSelection: Bool {
-        card != nil && isSelected
+    private var showsFocusedSlot: Bool {
+        isKeyboardCursor || isSelected
+    }
+
+    private var showsCardFocus: Bool {
+        card != nil && showsFocusedSlot
+    }
+
+    private var slotEmphasisSize: CGSize {
+        BWRBoardLayoutMetrics.slotEmphasisSize(for: slotSize)
     }
 
     var body: some View {
         ZStack {
-            keyboardCursorBackdrop
-            selectionUnderlay
+            slotEmphasisBackdrop
 
             if let card {
                 BWRCardSurfaceView(
@@ -581,34 +662,25 @@ private struct BWRSlotCellView: View {
     }
 
     @ViewBuilder
-    private var keyboardCursorBackdrop: some View {
-        let shouldShowCursor = isKeyboardCursor && !showsCardSelection
-        RoundedRectangle(cornerRadius: BWRBoardLayoutMetrics.cardCorner + 8, style: .continuous)
-            .fill(shouldShowCursor ? Color(hex: 0x655F56).opacity(0.78) : .clear)
-            .frame(width: slotSize.width + 16, height: slotSize.height + 16)
-            .shadow(
-                color: shouldShowCursor ? Color.black.opacity(0.16) : .clear,
-                radius: shouldShowCursor ? 16 : 0,
-                x: 0,
-                y: 8
-            )
-    }
-
-    @ViewBuilder
-    private var selectionUnderlay: some View {
-        let shouldShow = showsCardSelection
-        let fillColor = Color(hex: 0x4C8DE7).opacity(isDragSource ? 0.9 : 0.82)
-        let underlayInset = BWRBoardLayoutMetrics.selectionUnderlayInset
-        RoundedRectangle(cornerRadius: BWRBoardLayoutMetrics.cardCorner, style: .continuous)
+    private var slotEmphasisBackdrop: some View {
+        let shouldShow = showsFocusedSlot
+        let showsEmptyFocus = card == nil && showsFocusedSlot
+        let fillColor = showsCardFocus
+            ? Color(hex: 0x4C8DE7).opacity(isDragSource ? 0.9 : 0.82)
+            : Color(hex: 0x655F56).opacity(0.78)
+        let shadowColor = showsCardFocus
+            ? Color(hex: 0x4C8DE7).opacity(isDragSource ? 0.28 : 0.18)
+            : Color.black.opacity(0.16)
+        let shadowRadius: CGFloat = showsCardFocus ? 18 : 16
+        let shadowYOffset: CGFloat = isDragSource ? 6 : 8
+        RoundedRectangle(cornerRadius: BWRBoardLayoutMetrics.slotEmphasisCorner, style: .continuous)
             .fill(shouldShow ? fillColor : .clear)
-            .frame(width: slotSize.width + (underlayInset * 2), height: slotSize.height + (underlayInset * 2))
+            .frame(width: slotEmphasisSize.width, height: slotEmphasisSize.height)
             .shadow(
-                color: shouldShow
-                    ? Color(hex: 0x4C8DE7).opacity(isDragSource ? 0.28 : 0.18)
-                    : .clear,
-                radius: shouldShow ? 18 : 0,
+                color: shouldShow ? shadowColor : .clear,
+                radius: shouldShow ? shadowRadius : 0,
                 x: 0,
-                y: isDragSource ? 6 : 8
+                y: showsEmptyFocus ? 8 : shadowYOffset
             )
     }
 
