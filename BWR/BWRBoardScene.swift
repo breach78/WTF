@@ -512,10 +512,15 @@ struct BWRWorkspaceView: View {
     }
 
     private func handleBoardKeyEvent(_ event: NSEvent) -> Bool {
-        let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        let modifiers = event.modifierFlags.bwrCommandModifiers
         let plain = modifiers.isEmpty
         let shifted = modifiers == [.shift]
         let optioned = modifiers == [.option]
+
+        BWRBoardDebugLogger.log(
+            "key-route",
+            "incoming \(BWRBoardDebugLogger.describe(event: event)) plain=\(plain) shift=\(shifted) option=\(optioned)"
+        )
 
         switch event.keyCode {
         case 53:
@@ -578,10 +583,18 @@ struct BWRWorkspaceView: View {
 
     private func performArrowCommand(rows: Int, columns: Int, movesCard: Bool, plain: Bool) {
         guard movesCard || plain else {
+            BWRBoardDebugLogger.log(
+                "arrow",
+                "ignored rows=\(rows) columns=\(columns) plain=\(plain) movesCard=\(movesCard)"
+            )
             return
         }
 
         withAnimation(.easeInOut(duration: 0.18)) {
+            BWRBoardDebugLogger.log(
+                "arrow",
+                "apply rows=\(rows) columns=\(columns) movesCard=\(movesCard) cursor=\(BWRBoardDebugLogger.describe(slot: interaction.keyboardCursorSlot)) selection=\(BWRBoardDebugLogger.describe(selection: interaction.selection))"
+            )
             if movesCard {
                 BoardKeyboardController.moveSelectedCard(
                     project: &document.project,

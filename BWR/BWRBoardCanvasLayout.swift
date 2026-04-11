@@ -5,12 +5,13 @@ import SwiftUI
 struct BoardCanvasLayout {
     let visibleBounds: BoardVisibleBounds
     let slotSize: CGSize
-    let spacing: CGFloat
+    let horizontalSpacing: CGFloat
+    let verticalSpacing: CGFloat
     let padding: EdgeInsets
 
     func rect(for slot: BoardSlot) -> CGRect {
-        let x = padding.leading + CGFloat(slot.column - visibleBounds.minColumn) * (slotSize.width + spacing)
-        let y = padding.top + CGFloat(slot.row - visibleBounds.minRow) * (slotSize.height + spacing)
+        let x = padding.leading + CGFloat(slot.column - visibleBounds.minColumn) * (slotSize.width + horizontalSpacing)
+        let y = padding.top + CGFloat(slot.row - visibleBounds.minRow) * (slotSize.height + verticalSpacing)
         return CGRect(x: x, y: y, width: slotSize.width, height: slotSize.height)
     }
 
@@ -21,8 +22,8 @@ struct BoardCanvasLayout {
             return nil
         }
 
-        let stepX = slotSize.width + spacing
-        let stepY = slotSize.height + spacing
+        let stepX = slotSize.width + horizontalSpacing
+        let stepY = slotSize.height + verticalSpacing
         let columnOffset = Int(floor(contentX / stepX))
         let rowOffset = Int(floor(contentY / stepY))
         guard visibleBounds.columns.indices.contains(columnOffset), visibleBounds.rows.indices.contains(rowOffset) else {
@@ -48,8 +49,8 @@ struct BoardCanvasLayout {
             return nil
         }
 
-        let stepX = slotSize.width + spacing
-        let stepY = slotSize.height + spacing
+        let stepX = slotSize.width + horizontalSpacing
+        let stepY = slotSize.height + verticalSpacing
         let maxX = CGFloat(max(visibleBounds.columnCount - 1, 0)) * stepX
         let maxY = CGFloat(max(visibleBounds.rowCount - 1, 0)) * stepY
         let clampedX = min(max(contentX, 0), maxX)

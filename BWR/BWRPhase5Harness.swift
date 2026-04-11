@@ -59,7 +59,8 @@ enum BWRPhase5Harness {
         let layout = BoardCanvasLayout(
             visibleBounds: project.visibleBounds(),
             slotSize: BWRBoardLayoutMetrics.cardSize,
-            spacing: BWRBoardLayoutMetrics.gridSpacing,
+            horizontalSpacing: BWRBoardLayoutMetrics.horizontalGridSpacing,
+            verticalSpacing: BWRBoardLayoutMetrics.verticalGridSpacing,
             padding: BWRBoardLayoutMetrics.outerPadding
         )
 

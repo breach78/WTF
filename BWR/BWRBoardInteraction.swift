@@ -70,9 +70,6 @@ struct BoardInteractionState: Equatable {
         if let keyboardCursorSlot {
             slots.insert(keyboardCursorSlot)
         }
-        if let hoverSlot {
-            slots.insert(hoverSlot)
-        }
         return slots
     }
 
