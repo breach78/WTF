@@ -66,6 +66,9 @@ struct BWRBoardCanvasView: View {
 
     @State private var dragSession: BoardDragSession?
     @State private var dragTranslation: CGSize = .zero
+    @State private var isSettlingDrop = false
+    @State private var frozenDragReflowSlots: [UUID: BoardSlot] = [:]
+    @State private var dropSettleToken = 0
     @State private var marqueeRect: CGRect?
     @State private var marqueeStartSlot: BoardSlot?
     @FocusState private var focusedCardID: UUID?
@@ -83,6 +86,7 @@ struct BWRBoardCanvasView: View {
         if let dragSession {
             extraSlots.formUnion(dragSession.previewSlotSet)
         }
+        extraSlots.formUnion(dragReflowSlots.values)
         return project.visibleBounds(including: extraSlots)
     }
 
@@ -114,6 +118,18 @@ struct BWRBoardCanvasView: View {
         dragSession != nil && (abs(dragTranslation.width) > 0.5 || abs(dragTranslation.height) > 0.5)
     }
 
+    private var computedDragReflowSlots: [UUID: BoardSlot] {
+        guard let dragSession, isActivelyDragging else {
+            return [:]
+        }
+
+        return BoardDragController.previewReflowSlots(project: project, session: dragSession)
+    }
+
+    private var dragReflowSlots: [UUID: BoardSlot] {
+        isSettlingDrop ? frozenDragReflowSlots : computedDragReflowSlots
+    }
+
     var body: some View {
         ScrollView([.horizontal, .vertical]) {
             ZStack(alignment: .topLeading) {
@@ -129,6 +145,7 @@ struct BWRBoardCanvasView: View {
                 .padding(BWRBoardLayoutMetrics.outerPadding)
 
                 dragDestinationOverlay
+                dragReflowOverlay
                 dragPreviewOverlay
                 marqueeOverlay
             }
@@ -246,12 +263,14 @@ struct BWRBoardCanvasView: View {
             slot: slot,
             card: card,
             slotSize: slotSize,
+            isSettlingDrop: isSettlingDrop,
             isSelected: isSelected(slot: slot, card: card),
             isKeyboardCursor: interaction.keyboardCursorSlot == slot,
             isHovered: interaction.hoverSlot == slot,
             isEditing: interaction.editingCardID == card?.id,
             isSearchMatch: card.map { searchMatches.contains($0.id) } ?? false,
             isDragSource: card.map { activeDragCardIDs.contains($0.id) } ?? false,
+            isPreviewRelocated: card.map { overlayPreviewCardIDs.contains($0.id) } ?? false,
             showsSlotGuides: showsSlotGuides,
             noteBinding: { card in
                 noteBinding(card.id)
@@ -297,9 +316,16 @@ struct BWRBoardCanvasView: View {
         return dragSession.selectedCardIDs
     }
 
+    private var overlayPreviewCardIDs: Set<UUID> {
+        guard isActivelyDragging else {
+            return []
+        }
+        return Set(project.liveCards.map(\.id)).subtracting(activeDragCardIDs)
+    }
+
     private var dragDestinationOverlay: some View {
         ZStack {
-            if let dragSession, !dragSession.previewOffset.isZero {
+            if let dragSession, !dragSession.previewOffset.isZero, !isSettlingDrop {
                 ForEach(project.sortedCardIDs(dragSession.selectedCardIDs), id: \.self) { cardID in
                     if let previewSlot = dragSession.previewSlots[cardID] {
                         dragDestinationBlock(
@@ -312,6 +338,7 @@ struct BWRBoardCanvasView: View {
             }
         }
         .allowsHitTesting(false)
+        .animation(.interactiveSpring(response: 0.18, dampingFraction: 0.88), value: dragSession?.previewOffset ?? .zero)
     }
 
     @ViewBuilder
@@ -339,6 +366,7 @@ struct BWRBoardCanvasView: View {
                     if let sourceSlot = dragSession.originSlots[cardID],
                        let card = project.presentedCard(id: cardID) {
                         let rect = boardLayout.rect(for: sourceSlot)
+                        let liftShadow = dragPreviewLiftShadow(for: cardID, in: dragSession)
                         BWRCardSurfaceView(
                             card: card,
                             noteBinding: nil,
@@ -359,16 +387,64 @@ struct BWRBoardCanvasView: View {
                             y: rect.midY + dragTranslation.height
                         )
                         .shadow(
-                            color: Color.black.opacity(cardID == dragSession.pattern.headCardID ? 0.2 : 0.14),
-                            radius: cardID == dragSession.pattern.headCardID ? 22 : 16,
+                            color: liftShadow.color,
+                            radius: liftShadow.radius,
                             x: 0,
-                            y: 14
+                            y: liftShadow.y
                         )
                     }
                 }
             }
         }
         .allowsHitTesting(false)
+    }
+
+    private func dragPreviewLiftShadow(for cardID: UUID, in session: BoardDragSession) -> (color: Color, radius: CGFloat, y: CGFloat) {
+        guard !isSettlingDrop else {
+            return (.clear, 0, 0)
+        }
+
+        let isHead = cardID == session.pattern.headCardID
+        return (
+            Color.black.opacity(isHead ? 0.2 : 0.14),
+            isHead ? 22 : 16,
+            14
+        )
+    }
+
+    private var dragReflowOverlay: some View {
+        ZStack {
+            ForEach(project.sortedCardIDs(overlayPreviewCardIDs), id: \.self) { cardID in
+                if let card = project.presentedCard(id: cardID) {
+                    let sourceRect = boardLayout.rect(for: card.slot)
+                    let previewSlot = dragReflowSlots[cardID] ?? card.slot
+                    let previewRect = boardLayout.rect(for: previewSlot)
+                    BWRCardSurfaceView(
+                        card: card,
+                        noteBinding: nil,
+                        isEditing: false,
+                        isSearchMatch: false,
+                        asset: assetForCard(cardID),
+                        focusedCardID: $dragPreviewFocusID,
+                        onSelect: {},
+                        onOpenForEditing: {},
+                        onCycleTint: {},
+                        onCommitEditing: {},
+                        onCancelEditing: {},
+                        onAdvanceEditing: { _ in }
+                    )
+                    .frame(width: slotSize.width, height: slotSize.height)
+                    .position(x: sourceRect.midX, y: sourceRect.midY)
+                    .offset(
+                        x: previewRect.midX - sourceRect.midX,
+                        y: previewRect.midY - sourceRect.midY
+                    )
+                    .transition(.identity)
+                }
+            }
+        }
+        .allowsHitTesting(false)
+        .animation(.interactiveSpring(response: 0.18, dampingFraction: 0.88), value: dragReflowSlots)
     }
 
     private var marqueeOverlay: some View {
@@ -480,27 +556,22 @@ struct BWRBoardCanvasView: View {
     }
 
     private func handleBoardDragEnded(_ value: DragGesture.Value) {
-        defer {
-            BWRBoardDebugLogger.log(
-                "drag",
-                "end offset=\(BWRBoardDebugLogger.describe(dragSession: dragSession)) translation=(\(Int(dragTranslation.width)),\(Int(dragTranslation.height)))"
-            )
-            dragSession = nil
-            dragTranslation = .zero
-            marqueeRect = nil
-            marqueeStartSlot = nil
-        }
-
         guard interaction.editingCardID == nil else {
+            resetTransientPointerState()
             return
         }
 
         if let dragSession, !dragSession.previewOffset.isZero {
-            onApplyDrag(dragSession)
+            BWRBoardDebugLogger.log(
+                "drag",
+                "end offset=\(BWRBoardDebugLogger.describe(dragSession: self.dragSession)) translation=(\(Int(dragTranslation.width)),\(Int(dragTranslation.height)))"
+            )
+            beginDropSettling(for: dragSession)
             return
         }
 
         guard let marqueeStartSlot else {
+            resetTransientPointerState()
             return
         }
 
@@ -516,9 +587,11 @@ struct BWRBoardCanvasView: View {
             rect: rect
         )
         applyMarqueeSelection(selection, marqueeStartSlot: marqueeStartSlot)
+        resetTransientPointerState()
     }
 
     private func beginPointerGesture(at point: CGPoint) {
+        clearDropSettling()
         guard let slot = boardLayout.slot(at: point) else {
             BWRBoardDebugLogger.log(
                 "pointer",
@@ -576,6 +649,43 @@ struct BWRBoardCanvasView: View {
     }
 
     private func cancelTransientGesture() {
+        clearDropSettling()
+        resetTransientPointerState()
+    }
+
+    private func beginDropSettling(for session: BoardDragSession) {
+        let snappedTranslation = CGSize(
+            width: CGFloat(session.previewOffset.columns) * slotStep.width,
+            height: CGFloat(session.previewOffset.rows) * slotStep.height
+        )
+        frozenDragReflowSlots = computedDragReflowSlots
+        isSettlingDrop = true
+        dropSettleToken += 1
+        let currentToken = dropSettleToken
+
+        withAnimation(.interactiveSpring(response: 0.16, dampingFraction: 0.9)) {
+            dragTranslation = snappedTranslation
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
+            guard currentToken == dropSettleToken else {
+                return
+            }
+            withAnimation(nil) {
+                onApplyDrag(session)
+                clearDropSettling()
+                resetTransientPointerState()
+            }
+        }
+    }
+
+    private func clearDropSettling() {
+        dropSettleToken += 1
+        isSettlingDrop = false
+        frozenDragReflowSlots = [:]
+    }
+
+    private func resetTransientPointerState() {
         dragSession = nil
         dragTranslation = .zero
         marqueeRect = nil
@@ -588,12 +698,14 @@ private struct BWRSlotCellView: View {
     let slot: BoardSlot
     let card: BoardPresentedCard?
     let slotSize: CGSize
+    let isSettlingDrop: Bool
     let isSelected: Bool
     let isKeyboardCursor: Bool
     let isHovered: Bool
     let isEditing: Bool
     let isSearchMatch: Bool
     let isDragSource: Bool
+    let isPreviewRelocated: Bool
     let showsSlotGuides: Bool
     let noteBinding: (BoardPresentedCard) -> Binding<String>?
     let asset: BoardAsset?
@@ -618,6 +730,10 @@ private struct BWRSlotCellView: View {
 
     private var slotEmphasisSize: CGSize {
         BWRBoardLayoutMetrics.slotEmphasisSize(for: slotSize)
+    }
+
+    private var hidesCardSurfaceForDragOverlay: Bool {
+        isDragSource || isPreviewRelocated
     }
 
     var body: some View {
@@ -646,7 +762,8 @@ private struct BWRSlotCellView: View {
                     onAdvanceEditing: onAdvanceEditing
                 )
                 .frame(width: slotSize.width, height: slotSize.height)
-                .opacity(isDragSource ? 0 : 1)
+                .opacity(hidesCardSurfaceForDragOverlay ? 0 : 1)
+                .allowsHitTesting(!hidesCardSurfaceForDragOverlay)
             } else {
                 emptySlotSurface
             }

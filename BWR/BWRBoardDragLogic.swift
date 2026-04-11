@@ -125,7 +125,11 @@ enum BoardDragController {
             let columns = ordered.compactMap { project.presentedCard(id: $0)?.slot.column }
             let contiguous = zip(columns, columns.dropFirst()).allSatisfy { $1 - $0 == 1 }
             if contiguous {
-                return .sequence(axis: .horizontal, headCardID: headCardID, orderedCardIDs: ordered)
+                return .sequence(
+                    axis: .horizontal,
+                    headCardID: ordered.first ?? headCardID,
+                    orderedCardIDs: ordered
+                )
             }
         }
 
@@ -142,7 +146,11 @@ enum BoardDragController {
             let rows = ordered.compactMap { project.presentedCard(id: $0)?.slot.row }
             let contiguous = zip(rows, rows.dropFirst()).allSatisfy { $1 - $0 == 1 }
             if contiguous {
-                return .sequence(axis: .vertical, headCardID: headCardID, orderedCardIDs: ordered)
+                return .sequence(
+                    axis: .vertical,
+                    headCardID: ordered.first ?? headCardID,
+                    orderedCardIDs: ordered
+                )
             }
         }
 
@@ -189,6 +197,38 @@ enum BoardDragController {
         }
     }
 
+    static func previewReflowSlots(
+        project: BoardProject,
+        session: BoardDragSession
+    ) -> [UUID: BoardSlot] {
+        switch session.pattern {
+        case .single(let headCardID):
+            guard let destination = session.previewSlots[headCardID] else {
+                return [:]
+            }
+            return previewRowSequenceSlots(
+                project: project,
+                movingCardIDs: [headCardID],
+                destination: destination
+            )
+        case .sequence(let axis, _, let orderedCardIDs):
+            guard
+                axis == .horizontal,
+                let leftmostCardID = orderedCardIDs.first,
+                let destination = session.previewSlots[leftmostCardID]
+            else {
+                return [:]
+            }
+            return previewRowSequenceSlots(
+                project: project,
+                movingCardIDs: orderedCardIDs,
+                destination: destination
+            )
+        case .cluster:
+            return [:]
+        }
+    }
+
     private static func applyCluster(
         project: inout BoardProject,
         interaction: inout BoardInteractionState,
@@ -230,6 +270,29 @@ enum BoardDragController {
         previewSlots: [UUID: BoardSlot],
         delta: BoardSlotDelta
     ) -> Bool {
+        if axis == .horizontal {
+            guard
+                let leftmostCardID = orderedCardIDs.first,
+                let destination = previewSlots[leftmostCardID]
+            else {
+                return false
+            }
+
+            let placements = project.moveHorizontalSequence(
+                cardIDs: orderedCardIDs,
+                to: destination
+            )
+            guard let anchorSlot = placements?[leftmostCardID] else {
+                return false
+            }
+
+            interaction.selectCards(Set(orderedCardIDs), anchorSlot: anchorSlot)
+            interaction.keyboardCursorSlot = anchorSlot
+            _ = headCardID
+            _ = delta
+            return true
+        }
+
         let destinations = orderedCardIDs.compactMap { previewSlots[$0] }
         guard !destinations.isEmpty else {
             return false
@@ -333,6 +396,31 @@ enum BoardDragController {
         project.setCardSlot(id: otherCardID, to: nextSlot, timestamp: timestamp)
         occupancy.removeValue(forKey: slot)
         occupancy[nextSlot] = otherCardID
+    }
+
+    private static func previewRowSequenceSlots(
+        project: BoardProject,
+        movingCardIDs: [UUID],
+        destination: BoardSlot
+    ) -> [UUID: BoardSlot] {
+        var previewProject = project
+        guard previewProject.moveHorizontalSequence(cardIDs: movingCardIDs, to: destination) != nil else {
+            return [:]
+        }
+
+        let movingCardSet = Set(movingCardIDs)
+        let originalSlots = Dictionary(uniqueKeysWithValues: project.liveCards.map { ($0.id, $0.slot) })
+        return Dictionary(uniqueKeysWithValues: previewProject.liveCards.compactMap { card in
+            guard
+                !movingCardSet.contains(card.id),
+                let originalSlot = originalSlots[card.id],
+                originalSlot != card.slot
+            else {
+                return nil
+            }
+
+            return (card.id, card.slot)
+        })
     }
 }
 

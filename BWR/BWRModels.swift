@@ -28,6 +28,12 @@ struct BoardContainerMetadata: Hashable {
     }
 }
 
+struct BoardRowSegment {
+    let row: Int
+    let startColumn: Int
+    let orderedCardIDs: [UUID]
+}
+
 struct BoardProject: Equatable {
     var canvas: BoardCanvas
     var cards: [BoardCardInstance]
@@ -97,9 +103,12 @@ struct BoardProject: Equatable {
 
         let anchorSlots = Set(liveCards.map(\.slot)).union(preferred.map { [$0] } ?? [])
         for expansion in 0...24 {
-            let bounds = canvas.visibleBounds(
-                for: anchorSlots,
-                extraPadding: expansion
+            let bounds = BoardVisibleBounds(
+                slots: anchorSlots,
+                padding: expansion,
+                minimumColumns: canvas.minimumColumns,
+                minimumRows: canvas.minimumRows,
+                expansionBias: .balanced
             )
             if let candidate = bounds.orderedSlots(startingAt: preferred).first(where: { !occupied.contains($0) }) {
                 return candidate
@@ -140,24 +149,15 @@ struct BoardProject: Equatable {
     }
 
     mutating func moveCard(id: UUID, to destination: BoardSlot) {
-        guard let sourceIndex = cards.firstIndex(where: { $0.id == id && !$0.deleted }) else {
+        guard let sourceSlot = presentedCard(id: id)?.slot else {
             return
         }
 
-        if cards[sourceIndex].slot == destination {
+        if sourceSlot == destination {
             return
         }
 
-        let now = BWRTimestamp.now()
-        if let destinationIndex = cards.firstIndex(where: { $0.slot == destination && !$0.deleted }) {
-            let sourceSlot = cards[sourceIndex].slot
-            cards[destinationIndex].slot = sourceSlot
-            cards[destinationIndex].touch(at: now)
-        }
-
-        cards[sourceIndex].slot = destination
-        cards[sourceIndex].touch(at: now)
-        sortCards()
+        _ = moveHorizontalSequence(cardIDs: [id], to: destination)
     }
 
     mutating func updatePresentedMarkdown(id: UUID, markdown: String) {
@@ -301,6 +301,160 @@ struct BoardProject: Equatable {
             .init(slot: .init(row: 6, column: 1), markdown: "The final movement should feel lighter, not louder.")
         ]
     )
+}
+
+extension BoardProject {
+    @discardableResult
+    mutating func moveHorizontalSequence(
+        cardIDs orderedCardIDs: [UUID],
+        to destination: BoardSlot
+    ) -> [UUID: BoardSlot]? {
+        guard !orderedCardIDs.isEmpty else {
+            return nil
+        }
+
+        let movingIDs = Set(orderedCardIDs)
+        let movingCards = orderedCardIDs.compactMap { presentedCard(id: $0) }
+        guard movingCards.count == orderedCardIDs.count else {
+            return nil
+        }
+
+        let timestamp = BWRTimestamp.now()
+        let sourceRows = Set(movingCards.map(\.slot.row))
+        let sourceSegments = capturedRowSegments(rows: sourceRows)
+        compactCapturedRowSegments(sourceSegments, removing: movingIDs, timestamp: timestamp)
+        let placements = insertHorizontalSequence(
+            orderedCardIDs,
+            at: destination,
+            excluding: movingIDs,
+            timestamp: timestamp
+        )
+        sortCards()
+        return placements
+    }
+
+    func capturedRowSegments(rows: Set<Int>) -> [BoardRowSegment] {
+        rows.sorted().flatMap { row in
+            let rowCards = liveCards
+                .filter { $0.slot.row == row }
+                .sorted { $0.slot.column < $1.slot.column }
+            guard !rowCards.isEmpty else {
+                return [BoardRowSegment]()
+            }
+
+            var segments: [BoardRowSegment] = []
+            var currentCards: [BoardCardInstance] = []
+
+            func flushCurrentCards() {
+                guard let first = currentCards.first else {
+                    return
+                }
+                segments.append(
+                    BoardRowSegment(
+                        row: row,
+                        startColumn: first.slot.column,
+                        orderedCardIDs: currentCards.map(\.id)
+                    )
+                )
+                currentCards.removeAll(keepingCapacity: true)
+            }
+
+            for card in rowCards {
+                if let previous = currentCards.last, previous.slot.column + 1 != card.slot.column {
+                    flushCurrentCards()
+                }
+                currentCards.append(card)
+            }
+            flushCurrentCards()
+            return segments
+        }
+    }
+
+    mutating func compactCapturedRowSegments(
+        _ segments: [BoardRowSegment],
+        removing removedIDs: Set<UUID>,
+        timestamp: Date
+    ) {
+        for segment in segments {
+            let survivingIDs = segment.orderedCardIDs.filter { id in
+                !removedIDs.contains(id) && presentedCard(id: id) != nil
+            }
+
+            for (offset, cardID) in survivingIDs.enumerated() {
+                setCardSlot(
+                    id: cardID,
+                    to: BoardSlot(row: segment.row, column: segment.startColumn + offset),
+                    timestamp: timestamp
+                )
+            }
+        }
+    }
+
+    private func rowCards(
+        in row: Int,
+        excluding excludedIDs: Set<UUID>
+    ) -> [BoardPresentedCard] {
+        liveCards
+            .filter { $0.slot.row == row && !excludedIDs.contains($0.id) }
+            .compactMap(presentedCard(for:))
+            .sorted { $0.slot.column < $1.slot.column }
+    }
+
+    private func contiguousSuffixCards(
+        in row: Int,
+        startingAtOrAfter column: Int,
+        excluding excludedIDs: Set<UUID>
+    ) -> [BoardPresentedCard] {
+        let cards = rowCards(in: row, excluding: excludedIDs)
+        guard let firstIndex = cards.firstIndex(where: { $0.slot.column >= column }) else {
+            return []
+        }
+
+        var suffix = [cards[firstIndex]]
+        var expectedColumn = cards[firstIndex].slot.column + 1
+        for card in cards.dropFirst(firstIndex + 1) {
+            guard card.slot.column == expectedColumn else {
+                break
+            }
+            suffix.append(card)
+            expectedColumn += 1
+        }
+        return suffix
+    }
+
+    mutating func insertHorizontalSequence(
+        _ orderedCardIDs: [UUID],
+        at destination: BoardSlot,
+        excluding excludedIDs: Set<UUID>,
+        timestamp: Date
+    ) -> [UUID: BoardSlot] {
+        let suffix = contiguousSuffixCards(
+            in: destination.row,
+            startingAtOrAfter: destination.column,
+            excluding: excludedIDs
+        )
+        if let suffixStartColumn = suffix.first?.slot.column {
+            let requiredStartColumn = destination.column + orderedCardIDs.count
+            let shift = max(0, requiredStartColumn - suffixStartColumn)
+            if shift > 0 {
+                for card in suffix.reversed() {
+                    setCardSlot(
+                        id: card.id,
+                        to: card.slot.offsetBy(columns: shift),
+                        timestamp: timestamp
+                    )
+                }
+            }
+        }
+
+        var placements: [UUID: BoardSlot] = [:]
+        for (offset, cardID) in orderedCardIDs.enumerated() {
+            let slot = BoardSlot(row: destination.row, column: destination.column + offset)
+            setCardSlot(id: cardID, to: slot, timestamp: timestamp)
+            placements[cardID] = slot
+        }
+        return placements
+    }
 }
 
 struct BoardSingleLayerSeed {
@@ -494,18 +648,27 @@ struct BoardPresentedCard: Identifiable, Equatable, Hashable {
 }
 
 struct BoardCanvas: Hashable {
-    var viewportPadding: Int
+    var topViewportPadding: Int
+    var bottomViewportPadding: Int
+    var leadingViewportPadding: Int
+    var trailingViewportPadding: Int
     var minimumColumns: Int
     var minimumRows: Int
 
     static let `default` = BoardCanvas()
 
     init(
-        viewportPadding: Int = 1,
+        topViewportPadding: Int = 0,
+        bottomViewportPadding: Int = 3,
+        leadingViewportPadding: Int = 0,
+        trailingViewportPadding: Int = 3,
         minimumColumns: Int = 3,
         minimumRows: Int = 3
     ) {
-        self.viewportPadding = viewportPadding
+        self.topViewportPadding = topViewportPadding
+        self.bottomViewportPadding = bottomViewportPadding
+        self.leadingViewportPadding = leadingViewportPadding
+        self.trailingViewportPadding = trailingViewportPadding
         self.minimumColumns = minimumColumns
         self.minimumRows = minimumRows
     }
@@ -517,9 +680,13 @@ struct BoardCanvas: Hashable {
     ) -> BoardVisibleBounds {
         BoardVisibleBounds(
             slots: occupiedSlots.union(extraSlots),
-            padding: viewportPadding + extraPadding,
+            topPadding: topViewportPadding,
+            bottomPadding: bottomViewportPadding + extraPadding,
+            leadingPadding: leadingViewportPadding,
+            trailingPadding: trailingViewportPadding + extraPadding,
             minimumColumns: minimumColumns,
-            minimumRows: minimumRows
+            minimumRows: minimumRows,
+            expansionBias: .preserveMinimumEdge
         )
     }
 }

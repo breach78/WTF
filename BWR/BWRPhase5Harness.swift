@@ -6,7 +6,10 @@ enum BWRPhase5Harness {
         let results = [
             multiSelectAndSequenceHeadCheck(),
             marqueeSelectionCheck(),
+            multiCardFootprintPreviewCheck(),
+            sequencePreviewReflowCheck(),
             sequenceSmartDragCheck(),
+            singleCardRowSequenceCheck(),
             clusterDragCheck()
         ]
 
@@ -23,14 +26,12 @@ enum BWRPhase5Harness {
         let project = sequenceProject()
         var interaction = BoardInteractionState()
 
-        interaction.selectCard(ids.a, at: BoardSlot(row: 0, column: 0))
-        interaction.toggleCard(ids.c, at: BoardSlot(row: 0, column: 2))
+        interaction.selectCard(ids.c, at: BoardSlot(row: 0, column: 2))
+        interaction.toggleCard(ids.a, at: BoardSlot(row: 0, column: 0))
+        interaction.toggleCard(ids.b, at: BoardSlot(row: 0, column: 1))
         let togglePass =
-            interaction.selectedCardIDs == Set([ids.a, ids.c]) &&
-            interaction.selectionAnchorSlot == BoardSlot(row: 0, column: 0)
-
-        let range = project.cardIDsBetween(BoardSlot(row: 0, column: 0), and: BoardSlot(row: 0, column: 2))
-        interaction.selectCards(range, anchorSlot: interaction.selectionAnchorSlot)
+            interaction.selectedCardIDs == Set([ids.a, ids.b, ids.c]) &&
+            interaction.selectionAnchorSlot == BoardSlot(row: 0, column: 2)
         let session = BoardDragController.makeSession(project: project, interaction: interaction, startingFrom: ids.b)
 
         let sequencePass: Bool
@@ -48,7 +49,7 @@ enum BWRPhase5Harness {
             title: "Multi Select And Sequence Head",
             success: success,
             detail: success
-                ? "command-style toggle keeps the first card anchored and sequence classification preserves that head"
+                ? "horizontal sequences always use the leftmost card as the head even when selection started elsewhere"
                 : "togglePass=\(togglePass) anchor=\(String(describing: interaction.selectionAnchorSlot)) pattern=\(session.pattern)"
         )
     }
@@ -101,7 +102,7 @@ enum BWRPhase5Harness {
             project.presentedCard(id: ids.a)?.slot == BoardSlot(row: 0, column: 1) &&
             project.presentedCard(id: ids.b)?.slot == BoardSlot(row: 0, column: 2) &&
             project.presentedCard(id: ids.c)?.slot == BoardSlot(row: 0, column: 3) &&
-            project.presentedCard(id: ids.blocker)?.slot == BoardSlot(row: 0, column: 4) &&
+            project.presentedCard(id: ids.blocker)?.slot == BoardSlot(row: 0, column: 0) &&
             interaction.selectionAnchorSlot == BoardSlot(row: 0, column: 1) &&
             project.selectedCardID(for: interaction) == ids.a
         let slotSummary = project.liveCards
@@ -112,8 +113,89 @@ enum BWRPhase5Harness {
             title: "Sequence Smart Drag",
             success: success,
             detail: success
-                ? "sequence drags insert into occupied runs and keep the original head as the anchored card"
+                ? "sequence drags remove the block from its old row, compact the suffix left, and reinsert at the drop column"
                 : "applied=\(applied) slots=\(slotSummary) anchor=\(String(describing: interaction.selectionAnchorSlot))"
+        )
+    }
+
+    private static func sequencePreviewReflowCheck() -> Phase5HarnessResult {
+        let ids = SequenceFixture.ids
+        let project = sequenceProject()
+        var interaction = BoardInteractionState()
+        interaction.selectCard(ids.b, at: BoardSlot(row: 0, column: 1))
+
+        var session = BoardDragController.makeSession(project: project, interaction: interaction, startingFrom: ids.b)
+        session.previewOffset = BoardSlotDelta(rows: 1, columns: 1)
+        let previewSlots = BoardDragController.previewReflowSlots(project: project, session: session)
+
+        let success =
+            previewSlots[ids.c] == BoardSlot(row: 0, column: 1) &&
+            previewSlots[ids.blocker] == BoardSlot(row: 0, column: 2) &&
+            previewSlots[ids.a] == nil &&
+            previewSlots[ids.b] == nil
+
+        return Phase5HarnessResult(
+            title: "Sequence Preview Reflow",
+            success: success,
+            detail: success
+                ? "drag preview computes the source-row compaction before drop so surrounding cards can animate live"
+                : "previewSlots=\(previewSlots)"
+        )
+    }
+
+    private static func multiCardFootprintPreviewCheck() -> Phase5HarnessResult {
+        let ids = MultiCardPreviewFixture.ids
+        let project = multiCardPreviewProject()
+        var interaction = BoardInteractionState()
+        interaction.selectCards(Set([ids.a, ids.b, ids.c]), anchorSlot: BoardSlot(row: 0, column: 0))
+
+        var session = BoardDragController.makeSession(project: project, interaction: interaction, startingFrom: ids.b)
+        session.previewOffset = BoardSlotDelta(rows: 1, columns: 1)
+        let previewSlots = BoardDragController.previewReflowSlots(project: project, session: session)
+
+        let success =
+            previewSlots[ids.rowOneA] == BoardSlot(row: 1, column: 4) &&
+            previewSlots[ids.rowOneB] == BoardSlot(row: 1, column: 5) &&
+            previewSlots[ids.rowOneC] == BoardSlot(row: 1, column: 6)
+
+        return Phase5HarnessResult(
+            title: "Multi Card Footprint Preview",
+            success: success,
+            detail: success
+                ? "horizontal multi-card drags open the destination row by the full width of the dragged block"
+                : "previewSlots=\(previewSlots)"
+        )
+    }
+
+    private static func singleCardRowSequenceCheck() -> Phase5HarnessResult {
+        let ids = SequenceFixture.ids
+        var project = sequenceProject()
+        var interaction = BoardInteractionState()
+        interaction.selectCard(ids.b, at: BoardSlot(row: 0, column: 1))
+
+        var session = BoardDragController.makeSession(project: project, interaction: interaction, startingFrom: ids.b)
+        session.previewOffset = BoardSlotDelta(rows: 1, columns: 1)
+        let applied = BoardDragController.apply(project: &project, interaction: &interaction, session: session)
+
+        let success =
+            applied &&
+            project.presentedCard(id: ids.a)?.slot == BoardSlot(row: 0, column: 0) &&
+            project.presentedCard(id: ids.c)?.slot == BoardSlot(row: 0, column: 1) &&
+            project.presentedCard(id: ids.blocker)?.slot == BoardSlot(row: 0, column: 2) &&
+            project.presentedCard(id: ids.b)?.slot == BoardSlot(row: 1, column: 2) &&
+            interaction.selectionAnchorSlot == BoardSlot(row: 1, column: 2) &&
+            interaction.selectedCardID == ids.b
+
+        let slotSummary = project.liveCards
+            .map { "\($0.id.uuidString.prefix(4))@\($0.slot.row),\($0.slot.column)" }
+            .joined(separator: ", ")
+
+        return Phase5HarnessResult(
+            title: "Single Card Row Sequence",
+            success: success,
+            detail: success
+                ? "removing one card out of a row compacts the cards to its right before the card is inserted elsewhere"
+                : "applied=\(applied) slots=\(slotSummary) selection=\(String(describing: interaction.selectionAnchorSlot))"
         )
     }
 
@@ -170,6 +252,19 @@ enum BWRPhase5Harness {
             ]
         )
     }
+
+    private static func multiCardPreviewProject() -> BoardProject {
+        BoardProject.singleLayer(
+            seeds: [
+                .init(cardID: MultiCardPreviewFixture.ids.a, contentID: MultiCardPreviewFixture.contentA, layerID: MultiCardPreviewFixture.layerA, slot: BoardSlot(row: 0, column: 0), markdown: "A"),
+                .init(cardID: MultiCardPreviewFixture.ids.b, contentID: MultiCardPreviewFixture.contentB, layerID: MultiCardPreviewFixture.layerB, slot: BoardSlot(row: 0, column: 1), markdown: "B"),
+                .init(cardID: MultiCardPreviewFixture.ids.c, contentID: MultiCardPreviewFixture.contentC, layerID: MultiCardPreviewFixture.layerC, slot: BoardSlot(row: 0, column: 2), markdown: "C"),
+                .init(cardID: MultiCardPreviewFixture.ids.rowOneA, contentID: MultiCardPreviewFixture.contentRowOneA, layerID: MultiCardPreviewFixture.layerRowOneA, slot: BoardSlot(row: 1, column: 1), markdown: "R1A"),
+                .init(cardID: MultiCardPreviewFixture.ids.rowOneB, contentID: MultiCardPreviewFixture.contentRowOneB, layerID: MultiCardPreviewFixture.layerRowOneB, slot: BoardSlot(row: 1, column: 2), markdown: "R1B"),
+                .init(cardID: MultiCardPreviewFixture.ids.rowOneC, contentID: MultiCardPreviewFixture.contentRowOneC, layerID: MultiCardPreviewFixture.layerRowOneC, slot: BoardSlot(row: 1, column: 3), markdown: "R1C")
+            ]
+        )
+    }
 }
 
 private struct Phase5HarnessResult {
@@ -209,4 +304,29 @@ private enum ClusterFixture {
     static let layerHead = UUID(uuidString: "60000000-0000-0000-0000-000000000001")!
     static let layerTail = UUID(uuidString: "60000000-0000-0000-0000-000000000002")!
     static let layerBlocker = UUID(uuidString: "60000000-0000-0000-0000-000000000003")!
+}
+
+private enum MultiCardPreviewFixture {
+    static let ids = (
+        a: UUID(uuidString: "70000000-0000-0000-0000-000000000001")!,
+        b: UUID(uuidString: "70000000-0000-0000-0000-000000000002")!,
+        c: UUID(uuidString: "70000000-0000-0000-0000-000000000003")!,
+        rowOneA: UUID(uuidString: "70000000-0000-0000-0000-000000000004")!,
+        rowOneB: UUID(uuidString: "70000000-0000-0000-0000-000000000005")!,
+        rowOneC: UUID(uuidString: "70000000-0000-0000-0000-000000000006")!
+    )
+
+    static let contentA = UUID(uuidString: "80000000-0000-0000-0000-000000000001")!
+    static let contentB = UUID(uuidString: "80000000-0000-0000-0000-000000000002")!
+    static let contentC = UUID(uuidString: "80000000-0000-0000-0000-000000000003")!
+    static let contentRowOneA = UUID(uuidString: "80000000-0000-0000-0000-000000000004")!
+    static let contentRowOneB = UUID(uuidString: "80000000-0000-0000-0000-000000000005")!
+    static let contentRowOneC = UUID(uuidString: "80000000-0000-0000-0000-000000000006")!
+
+    static let layerA = UUID(uuidString: "90000000-0000-0000-0000-000000000001")!
+    static let layerB = UUID(uuidString: "90000000-0000-0000-0000-000000000002")!
+    static let layerC = UUID(uuidString: "90000000-0000-0000-0000-000000000003")!
+    static let layerRowOneA = UUID(uuidString: "90000000-0000-0000-0000-000000000004")!
+    static let layerRowOneB = UUID(uuidString: "90000000-0000-0000-0000-000000000005")!
+    static let layerRowOneC = UUID(uuidString: "90000000-0000-0000-0000-000000000006")!
 }

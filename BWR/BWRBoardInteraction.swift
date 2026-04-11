@@ -266,22 +266,37 @@ struct BoardVisibleBounds: Equatable {
     let minColumn: Int
     let maxColumn: Int
 
+    enum ExpansionBias {
+        case balanced
+        case preserveMinimumEdge
+    }
+
     init(
         slots: some Sequence<BoardSlot>,
         padding: Int = 1,
+        topPadding: Int? = nil,
+        bottomPadding: Int? = nil,
+        leadingPadding: Int? = nil,
+        trailingPadding: Int? = nil,
         minimumColumns: Int = 3,
-        minimumRows: Int = 3
+        minimumRows: Int = 3,
+        expansionBias: ExpansionBias = .balanced
     ) {
         let collected = Array(slots)
         let basis = collected.isEmpty ? [BoardSlot.origin] : collected
 
-        var minRow = (basis.map(\.row).min() ?? 0) - padding
-        var maxRow = (basis.map(\.row).max() ?? 0) + padding
-        var minColumn = (basis.map(\.column).min() ?? 0) - padding
-        var maxColumn = (basis.map(\.column).max() ?? 0) + padding
+        let resolvedTopPadding = topPadding ?? padding
+        let resolvedBottomPadding = bottomPadding ?? padding
+        let resolvedLeadingPadding = leadingPadding ?? padding
+        let resolvedTrailingPadding = trailingPadding ?? padding
 
-        Self.expand(&minRow, &maxRow, minimumSpan: max(minimumRows, 1))
-        Self.expand(&minColumn, &maxColumn, minimumSpan: max(minimumColumns, 1))
+        var minRow = (basis.map(\.row).min() ?? 0) - resolvedTopPadding
+        var maxRow = (basis.map(\.row).max() ?? 0) + resolvedBottomPadding
+        var minColumn = (basis.map(\.column).min() ?? 0) - resolvedLeadingPadding
+        var maxColumn = (basis.map(\.column).max() ?? 0) + resolvedTrailingPadding
+
+        Self.expand(&minRow, &maxRow, minimumSpan: max(minimumRows, 1), bias: expansionBias)
+        Self.expand(&minColumn, &maxColumn, minimumSpan: max(minimumColumns, 1), bias: expansionBias)
 
         self.minRow = minRow
         self.maxRow = maxRow
@@ -334,16 +349,26 @@ struct BoardVisibleBounds: Equatable {
         return Array(slots[index...]) + Array(slots[..<index])
     }
 
-    private static func expand(_ minValue: inout Int, _ maxValue: inout Int, minimumSpan: Int) {
+    private static func expand(
+        _ minValue: inout Int,
+        _ maxValue: inout Int,
+        minimumSpan: Int,
+        bias: ExpansionBias
+    ) {
         guard minimumSpan > 0 else {
             return
         }
 
         while maxValue - minValue + 1 < minimumSpan {
-            if (maxValue - minValue).isMultiple(of: 2) {
+            switch bias {
+            case .balanced:
+                if (maxValue - minValue).isMultiple(of: 2) {
+                    maxValue += 1
+                } else {
+                    minValue -= 1
+                }
+            case .preserveMinimumEdge:
                 maxValue += 1
-            } else {
-                minValue -= 1
             }
         }
     }

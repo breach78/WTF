@@ -61,32 +61,60 @@ enum BWRPhase6Harness {
     }
 
     private static func softDeleteRestoreCheck() -> Phase6HarnessResult {
-        let firstCardID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
-        var project = BWRHarnessFixtures.singleLayerProject()
+        let ids = (
+            a: UUID(uuidString: "81000000-0000-0000-0000-000000000001")!,
+            b: UUID(uuidString: "81000000-0000-0000-0000-000000000002")!,
+            c: UUID(uuidString: "81000000-0000-0000-0000-000000000003")!
+        )
+        var project = BoardProject.singleLayer(
+            seeds: [
+                .init(
+                    cardID: ids.a,
+                    contentID: UUID(uuidString: "82000000-0000-0000-0000-000000000001")!,
+                    layerID: UUID(uuidString: "83000000-0000-0000-0000-000000000001")!,
+                    slot: BoardSlot(row: 0, column: 0),
+                    markdown: "A"
+                ),
+                .init(
+                    cardID: ids.b,
+                    contentID: UUID(uuidString: "82000000-0000-0000-0000-000000000002")!,
+                    layerID: UUID(uuidString: "83000000-0000-0000-0000-000000000002")!,
+                    slot: BoardSlot(row: 0, column: 1),
+                    markdown: "B"
+                ),
+                .init(
+                    cardID: ids.c,
+                    contentID: UUID(uuidString: "82000000-0000-0000-0000-000000000003")!,
+                    layerID: UUID(uuidString: "83000000-0000-0000-0000-000000000003")!,
+                    slot: BoardSlot(row: 0, column: 2),
+                    markdown: "C"
+                )
+            ]
+        )
 
-        let deletedIDs = project.softDeleteCards(ids: Set([firstCardID]))
-        guard deletedIDs == Set([firstCardID]) else {
+        let deletedIDs = project.softDeleteCards(ids: Set([ids.b]))
+        guard deletedIDs == Set([ids.b]) else {
             return Phase6HarnessResult(title: "Soft Delete Restore", success: false, detail: "soft delete did not tombstone target card")
         }
 
-        guard project.insertCard(at: .origin) != nil else {
-            return Phase6HarnessResult(title: "Soft Delete Restore", success: false, detail: "failed to occupy original slot before restore")
-        }
-
-        let expectedRestoreSlot = project.firstAvailableSlot(preferred: .origin)
+        let postDeleteCompactionPass =
+            project.presentedCard(id: ids.a)?.slot == BoardSlot(row: 0, column: 0) &&
+            project.presentedCard(id: ids.c)?.slot == BoardSlot(row: 0, column: 1)
         let restored = project.restoreLatestDeletedCard()
         let success =
-            restored?.cardID == firstCardID &&
-            restored?.slot == expectedRestoreSlot &&
-            project.presentedCard(id: firstCardID)?.slot == expectedRestoreSlot &&
+            postDeleteCompactionPass &&
+            restored?.cardID == ids.b &&
+            restored?.slot == BoardSlot(row: 0, column: 1) &&
+            project.presentedCard(id: ids.b)?.slot == BoardSlot(row: 0, column: 1) &&
+            project.presentedCard(id: ids.c)?.slot == BoardSlot(row: 0, column: 2) &&
             project.deletedCards.isEmpty
 
         return Phase6HarnessResult(
             title: "Soft Delete Restore",
             success: success,
             detail: success
-                ? "soft-deleted cards restore near their original slot when the tombstone location was reused"
-                : "restored=\(String(describing: restored)) expectedSlot=\(String(describing: expectedRestoreSlot)) deletedCount=\(project.deletedCards.count)"
+                ? "soft delete compacts the row to the left and restore reinserts the tombstoned card at its original column"
+                : "postDeleteCompactionPass=\(postDeleteCompactionPass) restored=\(String(describing: restored)) a=\(String(describing: project.presentedCard(id: ids.a)?.slot)) b=\(String(describing: project.presentedCard(id: ids.b)?.slot)) c=\(String(describing: project.presentedCard(id: ids.c)?.slot)) deletedCount=\(project.deletedCards.count)"
         )
     }
 
