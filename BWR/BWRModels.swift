@@ -101,7 +101,9 @@ struct BoardProject: Equatable {
             return preferred
         }
 
-        let anchorSlots = Set(liveCards.map(\.slot)).union(preferred.map { [$0] } ?? [])
+        let anchorSlots = Set(liveCards.map(\.slot))
+            .union(preferred.map { [$0] } ?? [])
+            .union([.origin])
         for expansion in 0...24 {
             let bounds = BoardVisibleBounds(
                 slots: anchorSlots,
@@ -123,6 +125,7 @@ struct BoardProject: Equatable {
     }
 
     mutating func insertCard(at preferred: BoardSlot?) -> UUID? {
+        let preferred = preferred?.clampedToOrigin()
         guard let slot = firstAvailableSlot(preferred: preferred) else {
             return nil
         }
@@ -149,6 +152,7 @@ struct BoardProject: Equatable {
     }
 
     mutating func moveCard(id: UUID, to destination: BoardSlot) {
+        let destination = destination.clampedToOrigin()
         guard let sourceSlot = presentedCard(id: id)?.slot else {
             return
         }
@@ -214,7 +218,7 @@ struct BoardProject: Equatable {
             return
         }
 
-        cards[index].slot = destination
+        cards[index].slot = destination.clampedToOrigin()
         cards[index].touch(at: timestamp)
     }
 
@@ -678,8 +682,11 @@ struct BoardCanvas: Hashable {
         including extraSlots: Set<BoardSlot> = [],
         extraPadding: Int = 0
     ) -> BoardVisibleBounds {
-        BoardVisibleBounds(
-            slots: occupiedSlots.union(extraSlots),
+        let anchoredSlots = occupiedSlots
+            .union(extraSlots)
+            .union([.origin])
+        return BoardVisibleBounds(
+            slots: anchoredSlots,
             topPadding: topViewportPadding,
             bottomPadding: bottomViewportPadding + extraPadding,
             leadingPadding: leadingViewportPadding,
@@ -701,6 +708,10 @@ struct BoardSlot: Hashable, Comparable, Identifiable {
 
     func offsetBy(rows: Int = 0, columns: Int = 0) -> BoardSlot {
         BoardSlot(row: row + rows, column: column + columns)
+    }
+
+    func clampedToOrigin() -> BoardSlot {
+        BoardSlot(row: max(row, 0), column: max(column, 0))
     }
 
     static func < (lhs: BoardSlot, rhs: BoardSlot) -> Bool {

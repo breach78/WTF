@@ -312,6 +312,15 @@ SWIFT_CLASS("_TtC3BWR27BWRBoardKeyboardMonitorView")
 - (nullable instancetype)initWithCoder:(NSCoder * _Nonnull)coder OBJC_DESIGNATED_INITIALIZER;
 @end
 
+SWIFT_CLASS("_TtC3BWR25BWRBoardScrollMonitorView")
+@interface BWRBoardScrollMonitorView : NSView
+- (void)viewDidMoveToWindow;
+- (void)viewDidMoveToSuperview;
+- (void)removeFromSuperview;
+- (nonnull instancetype)initWithFrame:(NSRect)frameRect OBJC_DESIGNATED_INITIALIZER;
+- (nullable instancetype)initWithCoder:(NSCoder * _Nonnull)coder OBJC_DESIGNATED_INITIALIZER;
+@end
+
 #endif
 #if __has_attribute(external_source_symbol)
 # pragma clang attribute pop

@@ -32,16 +32,17 @@ enum BWRPhase3Harness {
 
         let bounds = project.visibleBounds(including: [BoardSlot(row: 18, column: 34)])
         let success =
-            bounds.rowRange == 18...23 &&
-            bounds.columnRange == 30...37 &&
+            bounds.rowRange == 0...23 &&
+            bounds.columnRange == 0...37 &&
             bounds.contains(BoardSlot(row: 20, column: 30)) &&
+            bounds.contains(.origin) &&
             bounds.contains(BoardSlot(row: 18, column: 34))
 
         return Phase3HarnessResult(
             title: "Sparse Visible Bounds",
             success: success,
             detail: success
-                ? "visible bounds stay anchored at the current top-left content edge while trailing space grows to the right and bottom"
+                ? "visible bounds stay pinned to board origin while trailing space grows to the right and bottom"
                 : "unexpected bounds rows=\(bounds.rowRange) columns=\(bounds.columnRange)"
         )
     }

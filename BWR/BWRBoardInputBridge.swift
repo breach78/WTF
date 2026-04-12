@@ -24,6 +24,26 @@ struct BWRBoardKeyboardMonitor: NSViewRepresentable {
     }
 }
 
+struct BWRBoardScrollMonitor: NSViewRepresentable {
+    let isEnabled: Bool
+    let onScrollEvent: () -> Void
+    let onCommandZoomScroll: (CGFloat) -> Bool
+
+    func makeNSView(context: Context) -> BWRBoardScrollMonitorView {
+        let view = BWRBoardScrollMonitorView()
+        view.isEnabled = isEnabled
+        view.onScrollEvent = onScrollEvent
+        view.onCommandZoomScroll = onCommandZoomScroll
+        return view
+    }
+
+    func updateNSView(_ nsView: BWRBoardScrollMonitorView, context: Context) {
+        nsView.isEnabled = isEnabled
+        nsView.onScrollEvent = onScrollEvent
+        nsView.onCommandZoomScroll = onCommandZoomScroll
+    }
+}
+
 final class BWRBoardKeyboardMonitorView: NSView {
     var isEnabled = true
     var onKeyEvent: ((NSEvent) -> Bool)?
@@ -69,40 +89,96 @@ final class BWRBoardKeyboardMonitorView: NSView {
 
     private func shouldHandle(_ event: NSEvent) -> Bool {
         guard isEnabled else {
-            BWRBoardDebugLogger.log("key", "ignored disabled \(BWRBoardDebugLogger.describe(event: event))")
             return false
         }
 
         guard let window else {
-            BWRBoardDebugLogger.log("key", "ignored no-window \(BWRBoardDebugLogger.describe(event: event))")
             return false
         }
 
         guard window.isKeyWindow else {
-            BWRBoardDebugLogger.log("key", "ignored not-key-window \(BWRBoardDebugLogger.describe(event: event))")
             return false
         }
 
         guard let onKeyEvent else {
-            BWRBoardDebugLogger.log("key", "ignored no-handler \(BWRBoardDebugLogger.describe(event: event))")
             return false
         }
 
-        let responder = window.firstResponder
-        if responder is NSTextView {
-            BWRBoardDebugLogger.log(
-                "key",
-                "blocked text-responder=\(BWRBoardDebugLogger.describe(responder: responder)) \(BWRBoardDebugLogger.describe(event: event))"
-            )
+        if window.firstResponder is NSTextView {
             return false
         }
 
-        let handled = onKeyEvent(event)
-        BWRBoardDebugLogger.log(
-            "key",
-            "handled=\(handled) responder=\(BWRBoardDebugLogger.describe(responder: responder)) \(BWRBoardDebugLogger.describe(event: event))"
-        )
-        return handled
+        return onKeyEvent(event)
+    }
+}
+
+final class BWRBoardScrollMonitorView: NSView {
+    var isEnabled = true
+    var onScrollEvent: (() -> Void)?
+    var onCommandZoomScroll: ((CGFloat) -> Bool)?
+
+    private var monitor: Any?
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        installMonitorIfNeeded()
+    }
+
+    override func removeFromSuperview() {
+        super.removeFromSuperview()
+        removeMonitor()
+    }
+
+    deinit {
+        removeMonitor()
+    }
+
+    private func installMonitorIfNeeded() {
+        guard monitor == nil else {
+            return
+        }
+
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+            guard let self else {
+                return event
+            }
+
+            return self.handle(event) ? nil : event
+        }
+    }
+
+    private func removeMonitor() {
+        guard let monitor else {
+            return
+        }
+
+        NSEvent.removeMonitor(monitor)
+        self.monitor = nil
+    }
+
+    private func handle(_ event: NSEvent) -> Bool {
+        guard isEnabled else {
+            return false
+        }
+
+        guard
+            let window,
+            event.window === window
+        else {
+            return false
+        }
+
+        let frameInWindow = convert(bounds, to: nil)
+        guard frameInWindow.contains(event.locationInWindow) else {
+            return false
+        }
+
+        if event.modifierFlags.bwrCommandModifiers == [.command] {
+            return onCommandZoomScroll?(event.scrollingDeltaY) ?? false
+        }
+
+        onScrollEvent?()
+        return false
     }
 }
 

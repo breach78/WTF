@@ -18,7 +18,7 @@ struct BWRWorkspaceView: View {
     @State private var gestureCancellationToken = 0
     @State private var showsSlotGuides = false
     @State private var canvasTone: BoardCanvasTone = .sand
-    @State private var scaleStep = 1
+    @State private var boardScale: CGFloat = 1.0
     @State private var showsHelp = false
     @State private var showsAssetImporter = false
     @State private var importErrorMessage: String?
@@ -51,7 +51,15 @@ struct BWRWorkspaceView: View {
     }
 
     private var activeScale: CGFloat {
-        scaleValues[scaleStep]
+        boardScale
+    }
+
+    private var scaleRange: ClosedRange<CGFloat> {
+        guard let minimumScale = scaleValues.min(), let maximumScale = scaleValues.max() else {
+            return 1.0...1.0
+        }
+
+        return minimumScale...maximumScale
     }
 
     private var structureReferenceSlot: BoardSlot {
@@ -74,7 +82,8 @@ struct BWRWorkspaceView: View {
                 transientGestureState: $transientGestureState,
                 showsSlotGuides: showsSlotGuides,
                 canvasTone: canvasTone,
-                cardScale: activeScale,
+                cardScale: $boardScale,
+                cardScaleRange: scaleRange,
                 gestureCancellationToken: gestureCancellationToken,
                 noteBinding: noteBinding(for:),
                 assetForCard: { cardID in
@@ -515,11 +524,6 @@ struct BWRWorkspaceView: View {
         let shifted = modifiers == [.shift]
         let optioned = modifiers == [.option]
 
-        BWRBoardDebugLogger.log(
-            "key-route",
-            "incoming \(BWRBoardDebugLogger.describe(event: event)) plain=\(plain) shift=\(shifted) option=\(optioned)"
-        )
-
         switch event.keyCode {
         case 53:
             guard plain else {
@@ -581,18 +585,10 @@ struct BWRWorkspaceView: View {
 
     private func performArrowCommand(rows: Int, columns: Int, movesCard: Bool, plain: Bool) {
         guard movesCard || plain else {
-            BWRBoardDebugLogger.log(
-                "arrow",
-                "ignored rows=\(rows) columns=\(columns) plain=\(plain) movesCard=\(movesCard)"
-            )
             return
         }
 
         withAnimation(.easeInOut(duration: 0.18)) {
-            BWRBoardDebugLogger.log(
-                "arrow",
-                "apply rows=\(rows) columns=\(columns) movesCard=\(movesCard) cursor=\(BWRBoardDebugLogger.describe(slot: interaction.keyboardCursorSlot)) selection=\(BWRBoardDebugLogger.describe(selection: interaction.selection))"
-            )
             if movesCard {
                 BoardKeyboardController.moveSelectedCard(
                     project: &document.project,
@@ -612,7 +608,12 @@ struct BWRWorkspaceView: View {
     }
 
     private func cycleScale() {
-        scaleStep = (scaleStep + 1) % scaleValues.count
+        guard let nextScale = scaleValues.first(where: { $0 > boardScale + 0.01 }) else {
+            boardScale = scaleValues.first ?? 1.0
+            return
+        }
+
+        boardScale = nextScale
     }
 
     private func cycleCanvasTone() {

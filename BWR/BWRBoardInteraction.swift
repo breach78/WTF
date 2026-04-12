@@ -164,7 +164,7 @@ enum BoardKeyboardController {
         columns: Int
     ) {
         let current = cursorSlot(for: project, interaction: &interaction)
-        let destination = current.offsetBy(rows: rows, columns: columns)
+        let destination = current.offsetBy(rows: rows, columns: columns).clampedToOrigin()
         selectSlot(destination, in: project, interaction: &interaction)
     }
 
@@ -210,7 +210,7 @@ enum BoardKeyboardController {
             return
         }
 
-        let destination = selectedCard.slot.offsetBy(rows: rows, columns: columns)
+        let destination = selectedCard.slot.offsetBy(rows: rows, columns: columns).clampedToOrigin()
         project.moveCard(id: selectedCardID, to: destination)
         interaction.keyboardCursorSlot = destination
         interaction.selectCard(selectedCardID, at: destination)

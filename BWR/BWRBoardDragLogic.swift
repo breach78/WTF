@@ -96,6 +96,18 @@ enum BoardDragController {
         return BoardSlotDelta(rows: rows, columns: columns)
     }
 
+    static func clampedPreviewOffset(
+        _ proposed: BoardSlotDelta,
+        originSlots: [UUID: BoardSlot]
+    ) -> BoardSlotDelta {
+        let minimumRow = originSlots.values.map(\.row).min() ?? 0
+        let minimumColumn = originSlots.values.map(\.column).min() ?? 0
+        return BoardSlotDelta(
+            rows: max(proposed.rows, -minimumRow),
+            columns: max(proposed.columns, -minimumColumn)
+        )
+    }
+
     static func classify(
         project: BoardProject,
         headCardID: UUID,
