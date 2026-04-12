@@ -7,7 +7,7 @@
         "key": "New card",
         "location": {
           "startingColumn": 30,
-          "startingLine": 1178
+          "startingLine": 1092
         }
       },
       {
@@ -15,7 +15,7 @@
         "key": "Search",
         "location": {
           "startingColumn": 23,
-          "startingLine": 1306
+          "startingLine": 1230
         }
       },
       {
@@ -23,7 +23,7 @@
         "key": "Board shortcuts",
         "location": {
           "startingColumn": 18,
-          "startingLine": 1432
+          "startingLine": 1356
         }
       },
       {
@@ -31,7 +31,7 @@
         "key": "Single click selects a card or slot.",
         "location": {
           "startingColumn": 18,
-          "startingLine": 1435
+          "startingLine": 1359
         }
       },
       {
@@ -39,7 +39,7 @@
         "key": "The dark slot is the keyboard cursor anchor.",
         "location": {
           "startingColumn": 18,
-          "startingLine": 1437
+          "startingLine": 1361
         }
       },
       {
@@ -47,7 +47,7 @@
         "key": "The dotted slot follows hover and stays separate from selection.",
         "location": {
           "startingColumn": 18,
-          "startingLine": 1439
+          "startingLine": 1363
         }
       },
       {
@@ -55,7 +55,7 @@
         "key": "Command-click adds or removes cards from the current selection.",
         "location": {
           "startingColumn": 18,
-          "startingLine": 1441
+          "startingLine": 1365
         }
       },
       {
@@ -63,7 +63,7 @@
         "key": "Shift-click grows a sequence selection from the anchored card.",
         "location": {
           "startingColumn": 18,
-          "startingLine": 1443
+          "startingLine": 1367
         }
       },
       {
@@ -71,7 +71,7 @@
         "key": "Drag on empty space to marquee-select cards or slots.",
         "location": {
           "startingColumn": 18,
-          "startingLine": 1445
+          "startingLine": 1369
         }
       },
       {
@@ -79,7 +79,7 @@
         "key": "Press Return on the cursor slot to edit a card or create one.",
         "location": {
           "startingColumn": 18,
-          "startingLine": 1447
+          "startingLine": 1371
         }
       },
       {
@@ -87,7 +87,7 @@
         "key": "Press Tab or Shift-Tab to save and continue editing next or previous slots.",
         "location": {
           "startingColumn": 18,
-          "startingLine": 1449
+          "startingLine": 1373
         }
       },
       {
@@ -95,7 +95,7 @@
         "key": "Use Arrow keys to move the cursor, and Option-Arrow to move the selected card.",
         "location": {
           "startingColumn": 18,
-          "startingLine": 1451
+          "startingLine": 1375
         }
       },
       {
@@ -103,7 +103,7 @@
         "key": "Press Escape to cancel inline editing, then transient gestures, then selection.",
         "location": {
           "startingColumn": 18,
-          "startingLine": 1453
+          "startingLine": 1377
         }
       },
       {
@@ -111,7 +111,7 @@
         "key": "Restore brings back the latest soft-deleted card near its original slot.",
         "location": {
           "startingColumn": 18,
-          "startingLine": 1455
+          "startingLine": 1379
         }
       },
       {
@@ -119,7 +119,7 @@
         "key": "Search Enter or the location button jumps to the current logical match, and the chevrons move through results.",
         "location": {
           "startingColumn": 18,
-          "startingLine": 1457
+          "startingLine": 1381
         }
       },
       {
@@ -127,7 +127,7 @@
         "key": "Structure menu inserts or deletes rows and columns around the current slot.",
         "location": {
           "startingColumn": 18,
-          "startingLine": 1459
+          "startingLine": 1383
         }
       },
       {
@@ -135,7 +135,7 @@
         "key": "Attach Image links an image asset to the presented layer and saves it into the package.",
         "location": {
           "startingColumn": 18,
-          "startingLine": 1461
+          "startingLine": 1385
         }
       },
       {
@@ -143,7 +143,7 @@
         "key": "Double-click a card to edit markdown inline.",
         "location": {
           "startingColumn": 18,
-          "startingLine": 1463
+          "startingLine": 1387
         }
       },
       {
@@ -151,7 +151,7 @@
         "key": "Double-click an empty slot to create a new card there.",
         "location": {
           "startingColumn": 18,
-          "startingLine": 1465
+          "startingLine": 1389
         }
       },
       {
@@ -159,7 +159,7 @@
         "key": "Single-card drags swap, sequence drags insert, and cluster drags stay rigid.",
         "location": {
           "startingColumn": 18,
-          "startingLine": 1467
+          "startingLine": 1391
         }
       },
       {
@@ -167,7 +167,7 @@
         "key": "Long-press a card to cycle its paper color.",
         "location": {
           "startingColumn": 18,
-          "startingLine": 1469
+          "startingLine": 1393
         }
       }
     ]

@@ -456,11 +456,6 @@ enum BoardMarqueeController {
             return .cards(cardIDs)
         }
 
-        let emptySlots = Set(
-            layout.visibleBounds.allSlots.filter { slot in
-                project.card(at: slot) == nil && layout.rect(for: slot).intersects(normalized)
-            }
-        )
-        return emptySlots.isEmpty ? .none : .slots(emptySlots)
+        return .none
     }
 }

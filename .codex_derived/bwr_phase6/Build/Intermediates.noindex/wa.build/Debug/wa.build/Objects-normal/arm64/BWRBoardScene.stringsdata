@@ -7,7 +7,7 @@
         "key": "Couldn’t Import Asset",
         "location": {
           "startingColumn": 20,
-          "startingLine": 239
+          "startingLine": 244
         }
       },
       {
@@ -15,7 +15,7 @@
         "key": "Cycle card size",
         "location": {
           "startingColumn": 27,
-          "startingLine": 123
+          "startingLine": 128
         }
       },
       {
@@ -23,7 +23,7 @@
         "key": "Cycle board tone",
         "location": {
           "startingColumn": 27,
-          "startingLine": 128
+          "startingLine": 133
         }
       },
       {
@@ -31,7 +31,7 @@
         "key": "Toggle slot guides",
         "location": {
           "startingColumn": 27,
-          "startingLine": 137
+          "startingLine": 142
         }
       },
       {
@@ -39,7 +39,7 @@
         "key": "Create card",
         "location": {
           "startingColumn": 27,
-          "startingLine": 142
+          "startingLine": 147
         }
       },
       {
@@ -47,7 +47,7 @@
         "key": "Go to current search result",
         "location": {
           "startingColumn": 27,
-          "startingLine": 148
+          "startingLine": 153
         }
       },
       {
@@ -55,7 +55,7 @@
         "key": "Restore latest deleted card",
         "location": {
           "startingColumn": 27,
-          "startingLine": 154
+          "startingLine": 159
         }
       },
       {
@@ -63,7 +63,7 @@
         "key": "Soft delete selected card",
         "location": {
           "startingColumn": 27,
-          "startingLine": 160
+          "startingLine": 165
         }
       },
       {
@@ -71,7 +71,7 @@
         "key": "Attach or remove an image asset",
         "location": {
           "startingColumn": 27,
-          "startingLine": 173
+          "startingLine": 178
         }
       },
       {
@@ -79,7 +79,7 @@
         "key": "Insert or delete rows and columns",
         "location": {
           "startingColumn": 27,
-          "startingLine": 196
+          "startingLine": 201
         }
       },
       {
@@ -87,7 +87,7 @@
         "key": "Edit selected card inline",
         "location": {
           "startingColumn": 27,
-          "startingLine": 204
+          "startingLine": 209
         }
       },
       {
@@ -95,7 +95,7 @@
         "key": "Attach Image",
         "location": {
           "startingColumn": 32,
-          "startingLine": 163
+          "startingLine": 168
         }
       },
       {
@@ -103,7 +103,7 @@
         "key": "Remove Asset",
         "location": {
           "startingColumn": 32,
-          "startingLine": 168
+          "startingLine": 173
         }
       },
       {
@@ -111,7 +111,7 @@
         "key": "Insert Row Before",
         "location": {
           "startingColumn": 32,
-          "startingLine": 176
+          "startingLine": 181
         }
       },
       {
@@ -119,7 +119,7 @@
         "key": "Insert Row After",
         "location": {
           "startingColumn": 32,
-          "startingLine": 179
+          "startingLine": 184
         }
       },
       {
@@ -127,7 +127,7 @@
         "key": "Delete Current Row",
         "location": {
           "startingColumn": 32,
-          "startingLine": 182
+          "startingLine": 187
         }
       },
       {
@@ -135,7 +135,7 @@
         "key": "Insert Column Before",
         "location": {
           "startingColumn": 32,
-          "startingLine": 186
+          "startingLine": 191
         }
       },
       {
@@ -143,7 +143,7 @@
         "key": "Insert Column After",
         "location": {
           "startingColumn": 32,
-          "startingLine": 189
+          "startingLine": 194
         }
       },
       {
@@ -151,7 +151,7 @@
         "key": "Delete Current Column",
         "location": {
           "startingColumn": 32,
-          "startingLine": 192
+          "startingLine": 197
         }
       },
       {
@@ -159,7 +159,7 @@
         "key": "OK",
         "location": {
           "startingColumn": 24,
-          "startingLine": 247
+          "startingLine": 252
         }
       }
     ]

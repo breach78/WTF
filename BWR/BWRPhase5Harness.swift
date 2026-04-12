@@ -76,13 +76,13 @@ enum BWRPhase5Harness {
 
         let success =
             cardSelection.cardIDs == Set([ids.a, ids.b]) &&
-            emptySelection.slots == Set([BoardSlot(row: 1, column: 2)])
+            emptySelection == .none
 
         return Phase5HarnessResult(
             title: "Marquee Selection",
             success: success,
             detail: success
-                ? "marquee selects intersecting cards first and falls back to empty slots when no cards are inside"
+                ? "marquee only selects intersecting cards and ignores empty-slot cursor surfaces"
                 : "cardSelection=\(cardSelection) emptySelection=\(emptySelection)"
         )
     }

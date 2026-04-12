@@ -6,7 +6,7 @@
 	<integer>12</integer>
 	<key>logs</key>
 	<dict>
-		<key>170F7BC1-009E-4A87-B8DD-DFDCA145BCAA</key>
+		<key>8AD230C8-E50E-4485-9E43-E2B9126813EA</key>
 		<dict>
 			<key>className</key>
 			<string>IDECommandLineBuildLog</string>
@@ -15,7 +15,7 @@
 			<key>domainType</key>
 			<string>Xcode.IDEActivityLogDomainType.BuildLog</string>
 			<key>fileName</key>
-			<string>170F7BC1-009E-4A87-B8DD-DFDCA145BCAA.xcactivitylog</string>
+			<string>8AD230C8-E50E-4485-9E43-E2B9126813EA.xcactivitylog</string>
 			<key>hasPrimaryLog</key>
 			<true/>
 			<key>primaryObservable</key>
@@ -40,55 +40,13 @@
 			<key>signature</key>
 			<string>Building project wa with scheme wa and configuration Debug</string>
 			<key>timeStartedRecording</key>
-			<real>797618199.32043397</real>
+			<real>797649103.46263003</real>
 			<key>timeStoppedRecording</key>
-			<real>797618205.96859598</real>
+			<real>797649111.52007306</real>
 			<key>title</key>
 			<string>Building project wa with scheme wa and configuration Debug</string>
 			<key>uniqueIdentifier</key>
-			<string>170F7BC1-009E-4A87-B8DD-DFDCA145BCAA</string>
-		</dict>
-		<key>E9DD9CA2-44F5-44A6-8FFF-1AD5D18A6D55</key>
-		<dict>
-			<key>className</key>
-			<string>IDECommandLineBuildLog</string>
-			<key>documentTypeString</key>
-			<string>&lt;nil&gt;</string>
-			<key>domainType</key>
-			<string>Xcode.IDEActivityLogDomainType.BuildLog</string>
-			<key>fileName</key>
-			<string>E9DD9CA2-44F5-44A6-8FFF-1AD5D18A6D55.xcactivitylog</string>
-			<key>hasPrimaryLog</key>
-			<true/>
-			<key>primaryObservable</key>
-			<dict>
-				<key>highLevelStatus</key>
-				<string>E</string>
-				<key>totalNumberOfAnalyzerIssues</key>
-				<integer>0</integer>
-				<key>totalNumberOfErrors</key>
-				<integer>2</integer>
-				<key>totalNumberOfTestFailures</key>
-				<integer>0</integer>
-				<key>totalNumberOfWarnings</key>
-				<integer>5</integer>
-			</dict>
-			<key>schemeIdentifier-containerName</key>
-			<string>wa project</string>
-			<key>schemeIdentifier-schemeName</key>
-			<string>wa</string>
-			<key>schemeIdentifier-sharedScheme</key>
-			<integer>1</integer>
-			<key>signature</key>
-			<string>Building project wa with scheme wa and configuration Debug</string>
-			<key>timeStartedRecording</key>
-			<real>797618555.53351498</real>
-			<key>timeStoppedRecording</key>
-			<real>797618559.39398396</real>
-			<key>title</key>
-			<string>Building project wa with scheme wa and configuration Debug</string>
-			<key>uniqueIdentifier</key>
-			<string>E9DD9CA2-44F5-44A6-8FFF-1AD5D18A6D55</string>
+			<string>8AD230C8-E50E-4485-9E43-E2B9126813EA</string>
 		</dict>
 	</dict>
 </dict>

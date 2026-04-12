@@ -15,6 +15,8 @@ struct BWRWorkspaceView: View {
     @State private var searchResultIndex = 0
     @State private var interaction = BoardInteractionState()
     @State private var transientGestureState = BoardTransientGestureState()
+    @State private var cursorViewportBounds: BoardVisibleBounds?
+    @State private var keyboardHandle = BWRBoardKeyboardHandle()
     @State private var gestureCancellationToken = 0
     @State private var showsSlotGuides = false
     @State private var canvasTone: BoardCanvasTone = .sand
@@ -24,7 +26,7 @@ struct BWRWorkspaceView: View {
     @State private var importErrorMessage: String?
     @State private var editingSnapshot: BoardEditingSnapshot?
 
-    private let scaleValues: [CGFloat] = [0.94, 1.0, 1.08]
+    private let scaleValues: [CGFloat] = [0.3, 1.0, 2.0]
 
     private var matchingIDs: Set<UUID> {
         document.project.matchingCardIDs(for: searchText)
@@ -80,6 +82,8 @@ struct BWRWorkspaceView: View {
                 searchMatches: matchingIDs,
                 interaction: $interaction,
                 transientGestureState: $transientGestureState,
+                cursorViewportBounds: $cursorViewportBounds,
+                keyboardHandle: keyboardHandle,
                 showsSlotGuides: showsSlotGuides,
                 canvasTone: canvasTone,
                 cardScale: $boardScale,
@@ -101,6 +105,7 @@ struct BWRWorkspaceView: View {
             .background(
                 BWRBoardKeyboardMonitor(
                     isEnabled: interaction.editingCardID == nil,
+                    keyboardHandle: keyboardHandle,
                     onKeyEvent: handleBoardKeyEvent(_:)
                 )
             )
@@ -601,7 +606,8 @@ struct BWRWorkspaceView: View {
                     project: document.project,
                     interaction: &interaction,
                     rows: rows,
-                    columns: columns
+                    columns: columns,
+                    viewportBounds: cursorViewportBounds
                 )
             }
         }

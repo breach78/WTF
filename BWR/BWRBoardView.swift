@@ -50,6 +50,8 @@ struct BWRBoardCanvasView: View {
     let searchMatches: Set<UUID>
     @Binding var interaction: BoardInteractionState
     @Binding var transientGestureState: BoardTransientGestureState
+    @Binding var cursorViewportBounds: BoardVisibleBounds?
+    let keyboardHandle: BWRBoardKeyboardHandle
     let showsSlotGuides: Bool
     let canvasTone: BoardCanvasTone
     @Binding var cardScale: CGFloat
@@ -72,20 +74,16 @@ struct BWRBoardCanvasView: View {
     @State private var dropSettleToken = 0
     @State private var marqueeRect: CGRect?
     @State private var marqueeStartSlot: BoardSlot?
-    @State private var hasPrimedPointerSelection = false
     @State private var isHoverSuppressedByScroll = false
     @State private var hoverResumeToken = 0
     @State private var isInteractionSuppressedByZoom = false
     @State private var zoomResumeToken = 0
-    @State private var magnificationBaseScale: CGFloat?
     @FocusState private var focusedCardID: UUID?
     @FocusState private var dragPreviewFocusID: UUID?
+    @State private var viewportHandle = BWRBoardViewportHandle()
 
     private var slotSize: CGSize {
-        CGSize(
-            width: BWRBoardLayoutMetrics.cardSize.width * cardScale,
-            height: BWRBoardLayoutMetrics.cardSize.height * cardScale
-        )
+        BWRBoardLayoutMetrics.cardSize
     }
 
     private var visibleBounds: BoardVisibleBounds {
@@ -113,6 +111,8 @@ struct BWRBoardCanvasView: View {
             height: slotSize.height + BWRBoardLayoutMetrics.verticalGridSpacing
         )
     }
+
+    private let pointerDragThreshold: CGFloat = 4
 
     private var transientGestureStateValue: BoardTransientGestureState {
         BoardTransientGestureState(
@@ -164,16 +164,36 @@ struct BWRBoardCanvasView: View {
                     alignment: .topLeading
                 )
                 .contentShape(Rectangle())
-                .simultaneousGesture(boardPointerPrimeGesture)
-                .simultaneousGesture(boardDragGesture)
             }
-            .simultaneousGesture(boardMagnificationGesture)
             .scrollIndicators(.hidden)
             .overlay {
-                BWRBoardScrollMonitor(
-                    isEnabled: true,
-                    onScrollEvent: suspendHoverForScroll,
-                    onCommandZoomScroll: handleCommandZoomScroll(_:)
+                ZStack {
+                    BWRBoardPointerMonitor(
+                        isEnabled: interaction.editingCardID == nil,
+                        viewportHandle: viewportHandle,
+                        onHoverChange: handlePointerHoverChange(_:),
+                        onPrimaryDown: handlePointerPrimaryDown(_:),
+                        onPrimaryDragChanged: handlePointerDragChanged(_:),
+                        onPrimaryUp: handlePointerPrimaryUp(_:clickCount:)
+                    )
+                    .allowsHitTesting(false)
+
+                    BWRBoardScrollMonitor(
+                        isEnabled: true,
+                        viewportHandle: viewportHandle,
+                        onScrollEvent: suspendHoverForScroll,
+                        onCommandZoomScroll: handleCommandZoomScroll(_:anchorInViewport:)
+                    )
+                    .allowsHitTesting(false)
+                }
+            }
+            .background {
+                BWRBoardNativeMagnificationBridge(
+                    magnification: $cardScale,
+                    magnificationRange: cardScaleRange,
+                    viewportHandle: viewportHandle,
+                    onWillStartLiveMagnify: beginZoomInteraction,
+                    onDidEndLiveMagnify: endZoomInteractionSoon
                 )
                 .allowsHitTesting(false)
             }
@@ -182,6 +202,7 @@ struct BWRBoardCanvasView: View {
             }
             .onAppear {
                 scrollToCursor(interaction.keyboardCursorSlot, using: proxy)
+                refreshCursorViewportBounds()
             }
         }
         .onHover { isHovering in
@@ -194,9 +215,15 @@ struct BWRBoardCanvasView: View {
                 canvasTone.boardFill
                 Rectangle()
                     .fill(.white.opacity(0.06))
-                    .blur(radius: 90)
-                    .frame(width: 540, height: 300)
-                    .offset(x: -170, y: -160)
+                    .blur(radius: BWRBoardLayoutMetrics.boardGlowBlurRadius)
+                    .frame(
+                        width: BWRBoardLayoutMetrics.boardGlowSize.width,
+                        height: BWRBoardLayoutMetrics.boardGlowSize.height
+                    )
+                    .offset(
+                        x: BWRBoardLayoutMetrics.boardGlowOffset.width,
+                        y: BWRBoardLayoutMetrics.boardGlowOffset.height
+                    )
             }
         }
         .onChange(of: editingCardID) { _, newValue in
@@ -217,32 +244,17 @@ struct BWRBoardCanvasView: View {
         }
         .onAppear {
             syncTransientGestureState()
+            focusBoardKeyboardSoon()
         }
         .onChange(of: transientGestureStateValue) { _, newValue in
             transientGestureState = newValue
         }
+        .onChange(of: visibleBounds) { _, _ in
+            refreshCursorViewportBounds()
+        }
         .onChange(of: gestureCancellationToken) { _, _ in
             cancelTransientGesture()
         }
-    }
-
-    private var boardMagnificationGesture: some Gesture {
-        MagnificationGesture()
-            .onChanged { value in
-                beginZoomInteraction()
-                if magnificationBaseScale == nil {
-                    magnificationBaseScale = cardScale
-                }
-
-                let baseScale = magnificationBaseScale ?? cardScale
-                cardScale = (baseScale * value).clamped(to: cardScaleRange)
-            }
-            .onEnded { value in
-                let baseScale = magnificationBaseScale ?? cardScale
-                cardScale = (baseScale * value).clamped(to: cardScaleRange)
-                magnificationBaseScale = nil
-                endZoomInteractionSoon()
-            }
     }
 
     private func scrollToCursor(_ slot: BoardSlot?, using proxy: ScrollViewProxy) {
@@ -253,6 +265,10 @@ struct BWRBoardCanvasView: View {
         DispatchQueue.main.async {
             withAnimation(.interactiveSpring(response: 0.18, dampingFraction: 0.9)) {
                 proxy.scrollTo(slot.id)
+            }
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) {
+                refreshCursorViewportBounds()
             }
         }
     }
@@ -284,6 +300,7 @@ struct BWRBoardCanvasView: View {
             isSearchMatch: card.map { searchMatches.contains($0.id) } ?? false,
             isDragSource: card.map { activeDragCardIDs.contains($0.id) } ?? false,
             isPreviewRelocated: card.map { overlayPreviewCardIDs.contains($0.id) } ?? false,
+            usesNativePointerBridge: interaction.editingCardID == nil,
             showsSlotGuides: showsSlotGuides,
             noteBinding: { card in
                 noteBinding(card.id)
@@ -323,6 +340,10 @@ struct BWRBoardCanvasView: View {
     }
 
     private func updateHover(_ isHovering: Bool, for slot: BoardSlot) {
+        guard interaction.editingCardID != nil else {
+            return
+        }
+
         guard !isHoverSuppressedByScroll, !isInteractionSuppressedByZoom else {
             if interaction.hoverSlot == slot {
                 interaction.hoverSlot = nil
@@ -333,11 +354,82 @@ struct BWRBoardCanvasView: View {
         interaction.hoverSlot = isHovering ? slot : (interaction.hoverSlot == slot ? nil : interaction.hoverSlot)
     }
 
+    private func handlePointerHoverChange(_ point: CGPoint?) {
+        guard !isHoverSuppressedByScroll, !isInteractionSuppressedByZoom else {
+            interaction.hoverSlot = nil
+            return
+        }
+
+        guard let point, let slot = boardLayout.slot(at: point) else {
+            interaction.hoverSlot = nil
+            return
+        }
+
+        interaction.hoverSlot = slot
+    }
+
+    private func handlePointerPrimaryDown(_ point: CGPoint) {
+        focusBoardKeyboard()
+        interaction.hoverSlot = nil
+        primePointerSelection(at: point)
+    }
+
+    private func handlePointerDragChanged(_ value: BWRBoardPointerDragValue) {
+        handleBoardPointerChanged(
+            startLocation: value.startLocation,
+            location: value.location,
+            translation: value.translation
+        )
+    }
+
+    private func handlePointerPrimaryUp(_ value: BWRBoardPointerDragValue, clickCount: Int) {
+        let moved = value.translation.magnitude >= pointerDragThreshold
+        if dragSession != nil || marqueeStartSlot != nil || moved {
+            handleBoardPointerEnded(
+                startLocation: value.startLocation,
+                location: value.location,
+                translation: value.translation
+            )
+            return
+        }
+
+        handlePointerClick(at: value.location, clickCount: clickCount)
+        resetTransientPointerState()
+    }
+
+    private func handlePointerClick(at point: CGPoint, clickCount: Int) {
+        focusBoardKeyboard()
+
+        guard let slot = boardLayout.slot(at: point) else {
+            return
+        }
+
+        if let card = project.card(at: slot) {
+            handleCardTap(card)
+            if clickCount >= 2 {
+                onOpenCardForEditing(card.id)
+            }
+            return
+        }
+
+        handleEmptyTap(slot)
+        if clickCount >= 2 {
+            onCreateCard(slot)
+        }
+    }
+
     private func suspendHoverForScroll() {
         hoverResumeToken += 1
         let token = hoverResumeToken
+        let needsInitialSuppression = !isHoverSuppressedByScroll
         isHoverSuppressedByScroll = true
-        interaction.hoverSlot = nil
+        if interaction.hoverSlot != nil {
+            interaction.hoverSlot = nil
+        }
+        if needsInitialSuppression {
+            focusBoardKeyboard()
+            refreshCursorViewportBounds()
+        }
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.16) {
             guard hoverResumeToken == token else {
@@ -352,6 +444,7 @@ struct BWRBoardCanvasView: View {
         zoomResumeToken += 1
         isInteractionSuppressedByZoom = true
         interaction.hoverSlot = nil
+        focusBoardKeyboard()
     }
 
     private func endZoomInteractionSoon() {
@@ -364,15 +457,57 @@ struct BWRBoardCanvasView: View {
             }
 
             isInteractionSuppressedByZoom = false
+            refreshCursorViewportBounds()
         }
     }
 
-    private func handleCommandZoomScroll(_ deltaY: CGFloat) -> Bool {
+    private func handleCommandZoomScroll(_ deltaY: CGFloat, anchorInViewport: CGPoint) -> Bool {
         beginZoomInteraction()
         let zoomMultiplier = exp(deltaY * 0.006)
-        cardScale = (cardScale * zoomMultiplier).clamped(to: cardScaleRange)
+        let nextScale = (cardScale * zoomMultiplier).clamped(to: cardScaleRange)
+        if let scrollView = viewportHandle.scrollView {
+            scrollView.setMagnification(nextScale, centeredAt: anchorInViewport)
+        }
+        cardScale = nextScale
+        refreshCursorViewportBounds()
         endZoomInteractionSoon()
         return true
+    }
+
+    private func refreshCursorViewportBounds() {
+        guard let scrollView = viewportHandle.scrollView else {
+            return
+        }
+
+        let visibleRect = scrollView.contentView.bounds
+        let insetPoint: CGFloat = 1
+        let topLeading = CGPoint(
+            x: visibleRect.minX + insetPoint,
+            y: visibleRect.minY + insetPoint
+        )
+        let bottomTrailing = CGPoint(
+            x: max(visibleRect.minX + insetPoint, visibleRect.maxX - insetPoint),
+            y: max(visibleRect.minY + insetPoint, visibleRect.maxY - insetPoint)
+        )
+
+        guard
+            let firstSlot = boardLayout.nearestSlot(to: topLeading),
+            let lastSlot = boardLayout.nearestSlot(to: bottomTrailing)
+        else {
+            cursorViewportBounds = nil
+            return
+        }
+
+        cursorViewportBounds = BoardVisibleBounds(
+            slots: [firstSlot, lastSlot],
+            topPadding: 0,
+            bottomPadding: 0,
+            leadingPadding: 0,
+            trailingPadding: 0,
+            minimumColumns: 1,
+            minimumRows: 1,
+            expansionBias: .preserveMinimumEdge
+        )
     }
 
     private var activeDragCardIDs: Set<UUID> {
@@ -417,12 +552,19 @@ struct BWRBoardCanvasView: View {
                 RoundedRectangle(cornerRadius: BWRBoardLayoutMetrics.slotEmphasisCorner, style: .continuous)
                     .strokeBorder(
                         Color.white.opacity(isHead ? 0.24 : 0.14),
-                        lineWidth: isHead ? 1.6 : 1
+                        lineWidth: isHead
+                            ? BWRBoardLayoutMetrics.dragDestinationHeadStrokeWidth
+                            : BWRBoardLayoutMetrics.dragDestinationStrokeWidth
                     )
             )
             .frame(width: emphasisSize.width, height: emphasisSize.height)
             .position(x: rect.midX, y: rect.midY)
-            .shadow(color: Color.black.opacity(isHead ? 0.18 : 0.12), radius: 18, x: 0, y: 10)
+            .shadow(
+                color: Color.black.opacity(isHead ? 0.18 : 0.12),
+                radius: BWRBoardLayoutMetrics.dragDestinationShadowRadius,
+                x: 0,
+                y: BWRBoardLayoutMetrics.dragDestinationShadowYOffset
+            )
     }
 
     private var dragPreviewOverlay: some View {
@@ -473,8 +615,10 @@ struct BWRBoardCanvasView: View {
         let isHead = cardID == session.pattern.headCardID
         return (
             Color.black.opacity(isHead ? 0.2 : 0.14),
-            isHead ? 22 : 16,
-            14
+            isHead
+                ? BWRBoardLayoutMetrics.dragPreviewHeadShadowRadius
+                : BWRBoardLayoutMetrics.dragPreviewShadowRadius,
+            BWRBoardLayoutMetrics.dragPreviewShadowYOffset
         )
     }
 
@@ -532,30 +676,6 @@ struct BWRBoardCanvasView: View {
         .allowsHitTesting(false)
     }
 
-    private var boardDragGesture: some Gesture {
-        DragGesture(minimumDistance: 4, coordinateSpace: .local)
-            .onChanged(handleBoardDragChanged(_:))
-            .onEnded(handleBoardDragEnded(_:))
-    }
-
-    private var boardPointerPrimeGesture: some Gesture {
-        DragGesture(minimumDistance: 0, coordinateSpace: .local)
-            .onChanged { value in
-                guard !isInteractionSuppressedByZoom else {
-                    return
-                }
-                guard !hasPrimedPointerSelection else {
-                    return
-                }
-
-                hasPrimedPointerSelection = true
-                primePointerSelection(at: value.startLocation)
-            }
-            .onEnded { _ in
-                hasPrimedPointerSelection = false
-            }
-    }
-
     private func handleCardTap(_ card: BoardPresentedCard) {
         focusBoardKeyboard()
         interaction.editingCardID = nil
@@ -587,7 +707,19 @@ struct BWRBoardCanvasView: View {
     }
 
     private func focusBoardKeyboard() {
-        NSApp.keyWindow?.makeFirstResponder(nil)
+        keyboardHandle.focus()
+    }
+
+    private func focusBoardKeyboardSoon() {
+        focusBoardKeyboard()
+
+        DispatchQueue.main.async {
+            focusBoardKeyboard()
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+            focusBoardKeyboard()
+        }
     }
 
     private func primePointerSelection(at point: CGPoint) {
@@ -611,20 +743,28 @@ struct BWRBoardCanvasView: View {
         interaction.selectCard(card.id, at: slot)
     }
 
-    private func handleBoardDragChanged(_ value: DragGesture.Value) {
+    private func handleBoardPointerChanged(
+        startLocation: CGPoint,
+        location: CGPoint,
+        translation: CGSize
+    ) {
         guard interaction.editingCardID == nil, !isInteractionSuppressedByZoom else {
             return
         }
 
+        guard dragSession != nil || marqueeStartSlot != nil || translation.magnitude >= pointerDragThreshold else {
+            return
+        }
+
         if dragSession == nil, marqueeStartSlot == nil {
-            beginPointerGesture(at: value.startLocation)
+            beginPointerGesture(at: startLocation)
         }
 
         if let currentSession = dragSession {
             var updated = currentSession
-            dragTranslation = value.translation
+            dragTranslation = translation
             let proposedOffset = BoardDragController.slotDelta(
-                translation: value.translation,
+                translation: translation,
                 slotStep: slotStep
             )
             updated.previewOffset = BoardDragController.clampedPreviewOffset(
@@ -640,12 +780,12 @@ struct BWRBoardCanvasView: View {
         }
 
         let rect = CGRect(
-            x: min(value.startLocation.x, value.location.x),
-            y: min(value.startLocation.y, value.location.y),
-            width: abs(value.location.x - value.startLocation.x),
-            height: abs(value.location.y - value.startLocation.y)
-        )
-        marqueeRect = rect.standardized
+            x: min(startLocation.x, location.x),
+            y: min(startLocation.y, location.y),
+            width: abs(location.x - startLocation.x),
+            height: abs(location.y - startLocation.y)
+        ).standardized
+        marqueeRect = rect
 
         let selection = BoardMarqueeController.selection(
             project: project,
@@ -655,7 +795,11 @@ struct BWRBoardCanvasView: View {
         applyMarqueeSelection(selection, marqueeStartSlot: marqueeStartSlot)
     }
 
-    private func handleBoardDragEnded(_ value: DragGesture.Value) {
+    private func handleBoardPointerEnded(
+        startLocation: CGPoint,
+        location: CGPoint,
+        translation: CGSize
+    ) {
         guard interaction.editingCardID == nil, !isInteractionSuppressedByZoom else {
             resetTransientPointerState()
             return
@@ -666,17 +810,22 @@ struct BWRBoardCanvasView: View {
             return
         }
 
+        guard dragSession != nil || marqueeStartSlot != nil || translation.magnitude >= pointerDragThreshold else {
+            resetTransientPointerState()
+            return
+        }
+
         guard let marqueeStartSlot else {
             resetTransientPointerState()
             return
         }
 
         let rect = CGRect(
-            x: min(value.startLocation.x, value.location.x),
-            y: min(value.startLocation.y, value.location.y),
-            width: abs(value.location.x - value.startLocation.x),
-            height: abs(value.location.y - value.startLocation.y)
-        )
+            x: min(startLocation.x, location.x),
+            y: min(startLocation.y, location.y),
+            width: abs(location.x - startLocation.x),
+            height: abs(location.y - startLocation.y)
+        ).standardized
         let selection = BoardMarqueeController.selection(
             project: project,
             layout: boardLayout,
@@ -787,6 +936,12 @@ private extension Comparable {
     }
 }
 
+private extension CGSize {
+    var magnitude: CGFloat {
+        sqrt((width * width) + (height * height))
+    }
+}
+
 private struct BWRSlotCellView: View {
     let slot: BoardSlot
     let card: BoardPresentedCard?
@@ -799,6 +954,7 @@ private struct BWRSlotCellView: View {
     let isSearchMatch: Bool
     let isDragSource: Bool
     let isPreviewRelocated: Bool
+    let usesNativePointerBridge: Bool
     let showsSlotGuides: Bool
     let noteBinding: (BoardPresentedCard) -> Binding<String>?
     let asset: BoardAsset?
@@ -865,8 +1021,16 @@ private struct BWRSlotCellView: View {
             slotOutline
         }
         .frame(width: slotSize.width, height: slotSize.height)
-        .contentShape(RoundedRectangle(cornerRadius: BWRBoardLayoutMetrics.cardCorner + 6, style: .continuous))
+        .contentShape(
+            RoundedRectangle(
+                cornerRadius: BWRBoardLayoutMetrics.cardCorner + BWRBoardLayoutMetrics.slotContentShapeCornerBoost,
+                style: .continuous
+            )
+        )
         .onHover { isHovering in
+            guard !usesNativePointerBridge else {
+                return
+            }
             onHoverChange(isHovering)
         }
     }
@@ -881,8 +1045,12 @@ private struct BWRSlotCellView: View {
         let shadowColor = showsCardFocus
             ? Color(hex: 0x4C8DE7).opacity(isDragSource ? 0.28 : 0.18)
             : Color.black.opacity(0.16)
-        let shadowRadius: CGFloat = showsCardFocus ? 18 : 16
-        let shadowYOffset: CGFloat = isDragSource ? 6 : 8
+        let shadowRadius = showsCardFocus
+            ? BWRBoardLayoutMetrics.slotFocusShadowRadius
+            : BWRBoardLayoutMetrics.slotEmptyShadowRadius
+        let shadowYOffset = isDragSource
+            ? BWRBoardLayoutMetrics.slotDragSourceShadowYOffset
+            : BWRBoardLayoutMetrics.slotFocusShadowYOffset
         RoundedRectangle(cornerRadius: BWRBoardLayoutMetrics.slotEmphasisCorner, style: .continuous)
             .fill(shouldShow ? fillColor : .clear)
             .frame(width: slotEmphasisSize.width, height: slotEmphasisSize.height)
@@ -890,7 +1058,7 @@ private struct BWRSlotCellView: View {
                 color: shouldShow ? shadowColor : .clear,
                 radius: shouldShow ? shadowRadius : 0,
                 x: 0,
-                y: showsEmptyFocus ? 8 : shadowYOffset
+                y: showsEmptyFocus ? BWRBoardLayoutMetrics.slotFocusShadowYOffset : shadowYOffset
             )
     }
 
@@ -903,8 +1071,10 @@ private struct BWRSlotCellView: View {
                     ? Color.white.opacity(isHovered ? 0.92 : (isSelected ? 0.48 : 0.18))
                     : .clear,
                 style: StrokeStyle(
-                    lineWidth: isHovered ? 1.4 : 1,
-                    dash: [7, 8]
+                    lineWidth: isHovered
+                        ? BWRBoardLayoutMetrics.slotGuideHoverLineWidth
+                        : BWRBoardLayoutMetrics.slotGuideLineWidth,
+                    dash: BWRBoardLayoutMetrics.slotGuideDash
                 )
             )
     }
@@ -915,12 +1085,12 @@ private struct BWRSlotCellView: View {
             .fill(Color.white.opacity((isSelected || isKeyboardCursor) ? 0.18 : 0.001))
             .overlay {
                 if isSelected {
-                    VStack(spacing: 6) {
+                    VStack(spacing: BWRBoardLayoutMetrics.emptySlotPromptSpacing) {
                         Image(systemName: "plus")
-                            .font(.system(size: 14, weight: .semibold))
+                            .font(.system(size: BWRBoardLayoutMetrics.emptySlotPromptIconSize, weight: .semibold))
                             .foregroundStyle(.white.opacity(0.92))
                         Text("New card")
-                            .font(.custom("Avenir Next", size: 12))
+                            .font(.custom("Avenir Next", size: BWRBoardLayoutMetrics.emptySlotPromptTitleSize))
                             .foregroundStyle(.white.opacity(0.88))
                     }
                 }
@@ -955,7 +1125,12 @@ private struct BWRCardSurfaceView: View {
     var body: some View {
         RoundedRectangle(cornerRadius: BWRBoardLayoutMetrics.cardSurfaceCorner, style: .continuous)
             .fill(card.palette.fill)
-            .shadow(color: .black.opacity(0.08), radius: 10, x: 0, y: 6)
+            .shadow(
+                color: .black.opacity(0.08),
+                radius: BWRBoardLayoutMetrics.cardSurfaceShadowRadius,
+                x: 0,
+                y: BWRBoardLayoutMetrics.cardSurfaceShadowYOffset
+            )
             .overlay(alignment: .topLeading) {
                 if isEditing, let noteBinding {
                     BWRInlineMarkdownEditor(
@@ -965,7 +1140,7 @@ private struct BWRCardSurfaceView: View {
                         onAdvance: onAdvanceEditing,
                         onCancel: onCancelEditing
                     )
-                        .padding(10)
+                        .padding(BWRBoardLayoutMetrics.cardEditorPadding)
                 } else {
                     cardReadSurface
                 }
@@ -973,14 +1148,17 @@ private struct BWRCardSurfaceView: View {
             .overlay(alignment: .topTrailing) {
                 Circle()
                     .fill(card.palette.chip)
-                    .frame(width: 10, height: 10)
-                    .padding(10)
+                    .frame(
+                        width: BWRBoardLayoutMetrics.cardChipSize,
+                        height: BWRBoardLayoutMetrics.cardChipSize
+                    )
+                    .padding(BWRBoardLayoutMetrics.cardChipPadding)
             }
             .overlay {
                 RoundedRectangle(cornerRadius: BWRBoardLayoutMetrics.cardSurfaceCorner, style: .continuous)
                     .strokeBorder(
                         isSearchMatch ? Color(hex: 0xF0D76E).opacity(0.96) : .clear,
-                        lineWidth: isSearchMatch ? 1.6 : 0
+                        lineWidth: isSearchMatch ? BWRBoardLayoutMetrics.cardSearchStrokeWidth : 0
                     )
             }
             .contentShape(RoundedRectangle(cornerRadius: BWRBoardLayoutMetrics.cardSurfaceCorner, style: .continuous))
@@ -993,42 +1171,44 @@ private struct BWRCardSurfaceView: View {
     }
 
     private var cardReadSurface: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: BWRBoardLayoutMetrics.cardReadSpacing) {
             if let assetImage {
                 Image(nsImage: assetImage)
                     .resizable()
                     .scaledToFill()
                     .frame(maxWidth: .infinity)
-                    .frame(height: 72)
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .frame(height: BWRBoardLayoutMetrics.cardAssetHeight)
+                    .clipShape(
+                        RoundedRectangle(cornerRadius: BWRBoardLayoutMetrics.cardAssetCornerRadius, style: .continuous)
+                    )
                     .overlay(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .strokeBorder(Color.white.opacity(0.28), lineWidth: 1)
+                        RoundedRectangle(cornerRadius: BWRBoardLayoutMetrics.cardAssetCornerRadius, style: .continuous)
+                            .strokeBorder(Color.white.opacity(0.28), lineWidth: BWRBoardLayoutMetrics.cardAssetStrokeWidth)
                     )
             }
 
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: BWRBoardLayoutMetrics.cardReadTextSpacing) {
                 Text(card.digest.title)
-                    .font(.custom("Avenir Next Demi Bold", size: 13))
+                    .font(.custom("Avenir Next Demi Bold", size: BWRBoardLayoutMetrics.cardTitleFontSize))
                     .foregroundStyle(Color(hex: 0x121212))
                     .lineLimit(2)
 
                 if !card.digest.excerpt.isEmpty {
                     Text(card.digest.excerpt)
-                        .font(.custom("Avenir Next", size: 12))
+                        .font(.custom("Avenir Next", size: BWRBoardLayoutMetrics.cardBodyFontSize))
                         .foregroundStyle(Color(hex: 0x373737))
                         .lineLimit(assetImage == nil ? 5 : 3)
                 }
 
                 if let asset, assetImage == nil {
                     Label(asset.originalFilename ?? asset.storedFilename, systemImage: "paperclip")
-                        .font(.custom("Avenir Next Demi Bold", size: 11))
+                        .font(.custom("Avenir Next Demi Bold", size: BWRBoardLayoutMetrics.cardAttachmentFontSize))
                         .foregroundStyle(Color(hex: 0x5B534A))
                         .lineLimit(1)
                 }
             }
         }
-        .padding(12)
+        .padding(BWRBoardLayoutMetrics.cardContentPadding)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 }

@@ -100,6 +100,10 @@ enum BWRPhase4Harness {
         BoardKeyboardController.moveCursor(project: project, interaction: &originInteraction, rows: -1, columns: -1)
         let cursorClamped = originInteraction.keyboardCursorSlot == .origin
 
+        var farInteraction = BoardInteractionState(keyboardCursorSlot: .origin)
+        BoardKeyboardController.moveCursor(project: project, interaction: &farInteraction, rows: 12, columns: 12)
+        let trailingClamp = farInteraction.keyboardCursorSlot == BoardSlot(row: 5, column: 5)
+
         interaction.keyboardCursorSlot = .origin
         interaction.selectCard(secondCardID, at: .origin)
         project.setCardSlot(id: secondCardID, to: .origin)
@@ -113,13 +117,13 @@ enum BWRPhase4Harness {
             project.presentedCard(id: secondCardID)?.slot == .origin &&
             interaction.keyboardCursorSlot == .origin
 
-        let success = cursorSelectedCard && moveApplied && cursorClamped && selectedCardClamped
+        let success = cursorSelectedCard && moveApplied && cursorClamped && trailingClamp && selectedCardClamped
         return Phase4HarnessResult(
             title: "Arrow Navigation And Move",
             success: success,
             detail: success
-                ? "Arrow keys move within a fixed-origin board and keyboard move commands clamp at the top-left edge"
-                : "arrow flow mismatch cursor=\(String(describing: interaction.keyboardCursorSlot)) movedSlot=\(String(describing: movedCard?.slot)) selected=\(String(describing: interaction.selectedCardID))"
+                ? "Arrow keys move within a fixed-origin board, stop at card-plus-4 trailing bounds, and keyboard move commands clamp at the top-left edge"
+                : "arrow flow mismatch farCursor=\(String(describing: farInteraction.keyboardCursorSlot)) cursor=\(String(describing: interaction.keyboardCursorSlot)) movedSlot=\(String(describing: movedCard?.slot)) selected=\(String(describing: interaction.selectedCardID))"
         )
     }
 }

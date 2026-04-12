@@ -157,14 +157,22 @@ struct BoardInteractionState: Equatable {
 }
 
 enum BoardKeyboardController {
+    private static let trailingCursorPadding = 4
+
     static func moveCursor(
         project: BoardProject,
         interaction: inout BoardInteractionState,
         rows: Int,
-        columns: Int
+        columns: Int,
+        viewportBounds: BoardVisibleBounds? = nil
     ) {
         let current = cursorSlot(for: project, interaction: &interaction)
-        let destination = current.offsetBy(rows: rows, columns: columns).clampedToOrigin()
+        let proposed = current.offsetBy(rows: rows, columns: columns).clampedToOrigin()
+        let destination = clampedCursorSlot(
+            proposed,
+            project: project,
+            viewportBounds: viewportBounds
+        )
         selectSlot(destination, in: project, interaction: &interaction)
     }
 
@@ -257,6 +265,22 @@ enum BoardKeyboardController {
         } else {
             interaction.selectEmptySlot(slot)
         }
+    }
+
+    private static func clampedCursorSlot(
+        _ slot: BoardSlot,
+        project: BoardProject,
+        viewportBounds: BoardVisibleBounds?
+    ) -> BoardSlot {
+        let maxCardRow = project.liveCards.map(\.slot.row).max() ?? 0
+        let maxCardColumn = project.liveCards.map(\.slot.column).max() ?? 0
+        let maximumRow = max(maxCardRow + trailingCursorPadding, viewportBounds?.maxRow ?? 0)
+        let maximumColumn = max(maxCardColumn + trailingCursorPadding, viewportBounds?.maxColumn ?? 0)
+
+        return BoardSlot(
+            row: min(max(slot.row, 0), maximumRow),
+            column: min(max(slot.column, 0), maximumColumn)
+        )
     }
 }
 

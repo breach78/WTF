@@ -308,7 +308,28 @@ typedef unsigned int swift_uint4  __attribute__((__ext_vector_type__(4)));
 @class NSCoder;
 SWIFT_CLASS("_TtC3BWR27BWRBoardKeyboardMonitorView")
 @interface BWRBoardKeyboardMonitorView : NSView
+@property (nonatomic, readonly) BOOL acceptsFirstResponder;
 - (void)viewDidMoveToWindow;
+- (void)viewDidMoveToSuperview;
+- (void)removeFromSuperview;
+- (nonnull instancetype)initWithFrame:(NSRect)frameRect OBJC_DESIGNATED_INITIALIZER;
+- (nullable instancetype)initWithCoder:(NSCoder * _Nonnull)coder OBJC_DESIGNATED_INITIALIZER;
+@end
+
+SWIFT_CLASS("_TtC3BWR31BWRBoardNativeMagnificationView")
+@interface BWRBoardNativeMagnificationView : NSView
+- (void)viewDidMoveToWindow;
+- (void)viewDidMoveToSuperview;
+- (void)removeFromSuperview;
+- (nonnull instancetype)initWithFrame:(NSRect)frameRect OBJC_DESIGNATED_INITIALIZER;
+- (nullable instancetype)initWithCoder:(NSCoder * _Nonnull)coder OBJC_DESIGNATED_INITIALIZER;
+@end
+
+SWIFT_CLASS("_TtC3BWR26BWRBoardPointerMonitorView")
+@interface BWRBoardPointerMonitorView : NSView
+@property (nonatomic, readonly, getter=isFlipped) BOOL flipped;
+- (void)viewDidMoveToWindow;
+- (void)viewDidMoveToSuperview;
 - (void)removeFromSuperview;
 - (nonnull instancetype)initWithFrame:(NSRect)frameRect OBJC_DESIGNATED_INITIALIZER;
 - (nullable instancetype)initWithCoder:(NSCoder * _Nonnull)coder OBJC_DESIGNATED_INITIALIZER;

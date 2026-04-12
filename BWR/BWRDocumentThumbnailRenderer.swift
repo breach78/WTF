@@ -16,7 +16,10 @@ enum BWRDocumentThumbnailRendererError: LocalizedError {
 
 enum BWRDocumentThumbnailRenderer {
     private static let outputSize = CGSize(width: 960, height: 720)
-    private static let cardPadding = CGSize(width: 44, height: 42)
+    private static let cardPadding = CGSize(
+        width: BWRBoardLayoutMetrics.scaled(44),
+        height: BWRBoardLayoutMetrics.scaled(42)
+    )
     private static let maxScale: CGFloat = 1.3
     private static let minScale: CGFloat = 0.36
 
@@ -56,7 +59,12 @@ enum BWRDocumentThumbnailRenderer {
         NSColor(hex: BoardCanvasTone.sand.boardHex).setFill()
         boardPath.fill()
 
-        let glowRect = CGRect(x: 80, y: 50, width: 500, height: 220)
+        let glowRect = CGRect(
+            x: BWRBoardLayoutMetrics.scaled(80),
+            y: BWRBoardLayoutMetrics.scaled(50),
+            width: BWRBoardLayoutMetrics.scaled(500),
+            height: BWRBoardLayoutMetrics.scaled(220)
+        )
         let glowPath = NSBezierPath(ovalIn: glowRect)
         NSColor.white.withAlphaComponent(0.11).setFill()
         glowPath.fill()
@@ -119,8 +127,8 @@ enum BWRDocumentThumbnailRenderer {
     private static func drawCard(_ card: BoardPresentedCard, asset: BoardAsset?, in frame: CGRect) {
         let shadow = NSShadow()
         shadow.shadowColor = NSColor.black.withAlphaComponent(0.12)
-        shadow.shadowBlurRadius = 18 * max(frame.width / BWRBoardLayoutMetrics.cardSize.width, 0.55)
-        shadow.shadowOffset = NSSize(width: 0, height: 7)
+        shadow.shadowBlurRadius = BWRBoardLayoutMetrics.scaled(18) * max(frame.width / BWRBoardLayoutMetrics.cardSize.width, 0.55)
+        shadow.shadowOffset = NSSize(width: 0, height: BWRBoardLayoutMetrics.scaled(7))
         shadow.set()
 
         let cardPath = NSBezierPath(
@@ -158,9 +166,9 @@ enum BWRDocumentThumbnailRenderer {
 
             let fadeRect = CGRect(
                 x: frame.minX,
-                y: imageRect.maxY - 22,
+                y: imageRect.maxY - BWRBoardLayoutMetrics.scaled(22),
                 width: frame.width,
-                height: 34
+                height: BWRBoardLayoutMetrics.scaled(34)
             )
             let fade = NSGradient(
                 colors: [
@@ -172,10 +180,10 @@ enum BWRDocumentThumbnailRenderer {
         }
 
         let chipRect = CGRect(
-            x: frame.minX + 14,
-            y: frame.minY + 14,
-            width: max(frame.width * 0.23, 28),
-            height: max(frame.height * 0.075, 8)
+            x: frame.minX + BWRBoardLayoutMetrics.scaled(14),
+            y: frame.minY + BWRBoardLayoutMetrics.scaled(14),
+            width: max(frame.width * 0.23, BWRBoardLayoutMetrics.scaled(28)),
+            height: max(frame.height * 0.075, BWRBoardLayoutMetrics.scaled(8))
         )
         let chipPath = NSBezierPath(
             roundedRect: chipRect,
@@ -188,10 +196,12 @@ enum BWRDocumentThumbnailRenderer {
         let titleFontSize = max(12, min(22, frame.width * 0.1))
         let bodyFontSize = max(10, min(15, frame.width * 0.058))
         let textInsets = NSEdgeInsets(
-            top: asset == nil ? 32 : max(frame.height * 0.54, 66),
-            left: 16,
-            bottom: 14,
-            right: 16
+            top: asset == nil
+                ? BWRBoardLayoutMetrics.scaled(32)
+                : max(frame.height * 0.54, BWRBoardLayoutMetrics.scaled(66)),
+            left: BWRBoardLayoutMetrics.scaled(16),
+            bottom: BWRBoardLayoutMetrics.scaled(14),
+            right: BWRBoardLayoutMetrics.scaled(16)
         )
 
         let titleRect = CGRect(
@@ -202,9 +212,12 @@ enum BWRDocumentThumbnailRenderer {
         )
         let excerptRect = CGRect(
             x: frame.minX + textInsets.left,
-            y: titleRect.maxY + 8,
+            y: titleRect.maxY + BWRBoardLayoutMetrics.scaled(8),
             width: frame.width - textInsets.left - textInsets.right,
-            height: max(frame.maxY - (titleRect.maxY + 8) - textInsets.bottom, bodyFontSize * 2.5)
+            height: max(
+                frame.maxY - (titleRect.maxY + BWRBoardLayoutMetrics.scaled(8)) - textInsets.bottom,
+                bodyFontSize * 2.5
+            )
         )
 
         drawText(
